@@ -21,13 +21,20 @@ export async function POST(request: Request) {
       projectType: String(formData.get("projectType") || "Rehabilitering"),
       areaSqm: toNumber(formData.get("areaSqm"), 30),
       finishLevel: String(formData.get("finishLevel") || "Standard"),
-      budgetNok: toNumber(formData.get("budgetNok"), 350000),
       description: String(formData.get("description") || "").trim(),
     };
 
     const questions = await generateClarificationQuestionsFromAttachments(input, uploadedFiles);
 
-    return NextResponse.json({ questions });
+    const normalizedQuestions = questions.map((question) => ({
+      id: question.id,
+      title: question.title,
+      helpText: question.helpText,
+      placeholder: question.placeholder,
+      options: question.options ?? [],
+    }));
+
+    return NextResponse.json({ questions: normalizedQuestions });
   } catch {
     return NextResponse.json({ questions: [] });
   }

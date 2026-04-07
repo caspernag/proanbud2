@@ -1,3 +1,4 @@
+import "server-only";
 import { promises as fs } from "node:fs";
 import path from "node:path";
 
@@ -22,7 +23,7 @@ export type PriceListProduct = {
   lastUpdated: string;
 };
 
-const APP_PRICE_LIST_DIR = path.join(process.cwd(), "app", "prislister");
+const PRIVATE_PRICE_LIST_DIR = path.join(process.cwd(), ".private", "prislister");
 const LEGACY_PRICE_LIST_DIR = path.join(process.cwd(), "prislister");
 const PRICE_LIST_CACHE_TTL_MS = 5 * 60 * 1000;
 
@@ -101,10 +102,10 @@ export async function getPriceListProductByNobb(nobbNumber: string) {
 }
 
 async function resolvePriceListCsvPaths() {
-  const appPaths = await listCsvFilesInDir(APP_PRICE_LIST_DIR);
+  const privatePaths = await listCsvFilesInDir(PRIVATE_PRICE_LIST_DIR);
 
-  if (appPaths.length > 0) {
-    return appPaths;
+  if (privatePaths.length > 0) {
+    return privatePaths;
   }
 
   return listCsvFilesInDir(LEGACY_PRICE_LIST_DIR);

@@ -306,7 +306,6 @@ function calculateRealisticEstimateNok(project: ProjectView) {
   const type = normalizeText(project.projectType).toLowerCase();
   const finish = normalizeText(project.finishLevel).toLowerCase();
   const area = Math.max(8, Number(project.areaSqm) || 8);
-  const budget = Number(project.budgetNok) || 0;
 
   let unitPricePerSqm = 8500;
   if (type.includes("terrasse")) {
@@ -329,14 +328,8 @@ function calculateRealisticEstimateNok(project: ProjectView) {
   }
 
   const computed = area * unitPricePerSqm * finishFactor;
-  let estimate = computed;
 
-  if (budget >= 50000) {
-    // Blend known budget with computed model to avoid unrealistic low/high outliers.
-    estimate = computed * 0.65 + budget * 0.35;
-  }
-
-  return Math.max(10000, Math.round(estimate / 1000) * 1000);
+  return Math.max(10000, Math.round(computed / 1000) * 1000);
 }
 
 function drawPageFooters(doc: PDFKit.PDFDocument, layout: Layout) {

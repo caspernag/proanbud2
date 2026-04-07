@@ -16,7 +16,9 @@ const MAX_TEXT_CHARS_PER_FILE = 12_000;
 const MAX_TEXT_CHARS_TOTAL = 48_000;
 const MAX_IMAGE_BYTES = 4_000_000;
 const OPENAI_WORKFLOW_TIMEOUT_MS = resolveWorkflowTimeoutMs();
-const MAX_PRICE_LIST_PROMPT_ROWS = 120;
+const OPENAI_PROMPT_MAX_ATTEMPTS = 2;
+const OPENAI_RETRY_DELAY_DEFAULT_MS = 2_000;
+const OPENAI_RETRY_DELAY_MAX_MS = 12_000;
 const AI_AGENT_LOG_PREFIX = "[ai-agent]";
 type AiAgentContext = "material-list" | "clarifications";
 
@@ -45,10 +47,6 @@ type PromptInputPart =
   | {
     type: "text";
     text: string;
-  }
-  | {
-    type: "image_url";
-    image_url: { url: string };
   };
 
 type PreparedAttachmentContext = {
@@ -67,6 +65,7 @@ const modelResponseSchema = z.object({
           quantity: z.string().min(1).max(80),
           quantityReason: z.string().min(1).max(280).optional(),
           note: z.string().min(1).max(280),
+          nobb: z.string().min(6).max(24).optional(),
         }),
       ).min(1).max(14),
     }),
@@ -82,7 +81,7 @@ const clarificationResponseSchema = z.object({
       placeholder: z.string().min(1).max(220),
       options: z.array(z.string().min(1).max(80)).max(6).optional(),
     }),
-  ).max(6),
+  ),
 });
 
 export type MaterialListClarificationQuestion = z.infer<typeof clarificationResponseSchema>["questions"][number];
@@ -105,7 +104,7 @@ export async function generateMaterialSectionsFromAttachments(input: ProjectInpu
 
   const priceListProducts = await getPriceListProducts();
   const attachmentContext = await buildAttachmentContext(files);
-  const modelOutput = await requestMaterialListFromOpenAi(input, attachmentContext, priceListProducts);
+  const modelOutput = await requestMaterialListFromOpenAi(input, attachmentContext);
 
   if (!modelOutput) {
     return null;
@@ -159,10 +158,9 @@ async function buildAttachmentContext(files: File[]): Promise<PreparedAttachment
 
   for (const file of result.files) {
     if (imageAttachments < MAX_IMAGE_ATTACHMENTS && isImageFile(file) && file.size <= MAX_IMAGE_BYTES) {
-      const imageDataUrl = await fileToDataUrl(file);
       result.userContentParts.push({
-        type: "image_url",
-        image_url: { url: imageDataUrl },
+        type: "text",
+        text: `Bildevedlegg: ${file.name} (${Math.max(1, Math.round(file.size / 1024))} KB). Beskriv materialbehov ut fra prosjektdata og vedleggsnavn.`,
       });
       imageAttachments += 1;
       continue;
@@ -198,7 +196,6 @@ async function buildAttachmentContext(files: File[]): Promise<PreparedAttachment
 async function requestMaterialListFromOpenAi(
   input: ProjectInput,
   attachmentContext: PreparedAttachmentContext,
-  priceListProducts: PriceListProduct[],
 ) {
   const openai = new OpenAI({ apiKey: env.openAiApiKey });
   const promptId = getConfiguredPromptIdForContext("material-list");
@@ -214,7 +211,7 @@ async function requestMaterialListFromOpenAi(
   try {
     const workflowContent = await requestFromPromptTemplate(
       openai,
-      buildMaterialListPromptInput(input, attachmentContext, priceListProducts),
+      buildMaterialListPromptInput(input, attachmentContext),
       workflowAbortController.signal,
       "material-list",
       promptId,
@@ -227,7 +224,7 @@ async function requestMaterialListFromOpenAi(
     const parsedFromWorkflow = parseModelResponse(workflowContent);
 
     if (!parsedFromWorkflow) {
-      logAiAgentStatus("material-list", "prompt_output_invalid_json=true");
+      logAiAgentStatus("material-list", `prompt_output_invalid_json=true shape=${describePromptResponseShape(workflowContent)}`);
       return null;
     }
 
@@ -268,7 +265,7 @@ async function requestClarificationsFromOpenAi(input: ProjectInput, attachmentCo
     const parsedFromWorkflow = parseClarificationResponse(workflowContent);
 
     if (!parsedFromWorkflow) {
-      logAiAgentStatus("clarifications", "prompt_output_invalid_json=true");
+      logAiAgentStatus("clarifications", `prompt_output_invalid_json=true shape=${describePromptResponseShape(workflowContent)}`);
       return null;
     }
 
@@ -282,44 +279,292 @@ async function requestClarificationsFromOpenAi(input: ProjectInput, attachmentCo
 }
 
 function parseModelResponse(content: string) {
-  const normalized = content.trim();
-  const jsonText = stripCodeFence(normalized);
+  const parsed = parsePromptJson(content);
 
+  if (!parsed) {
+    return null;
+  }
+
+  const candidate = normalizeMaterialListResponseShape(parsed);
+  const validated = modelResponseSchema.safeParse(candidate);
+
+  if (validated.success) {
+    return validated.data;
+  }
+
+  const fallbackSections = coerceMaterialSections(candidate);
+
+  if (fallbackSections.length === 0) {
+    return null;
+  }
+
+  return {
+    materialSections: fallbackSections,
+  };
+}
+
+function parseClarificationResponse(content: string) {
+  const parsed = parsePromptJson(content);
+
+  if (!parsed) {
+    return null;
+  }
+
+  const candidate = normalizeClarificationResponseShape(parsed);
+  const validated = clarificationResponseSchema.safeParse(candidate);
+
+  if (validated.success) {
+    return validated.data;
+  }
+
+  const fallbackQuestions = coerceClarificationQuestions(candidate);
+
+  return {
+    questions: fallbackQuestions,
+  };
+}
+
+function parsePromptJson(content: string) {
+  const normalized = content.trim();
+
+  if (!normalized) {
+    return null;
+  }
+
+  const direct = parseJsonWithNestedStringFallback(normalized);
+
+  if (direct !== null) {
+    return direct;
+  }
+
+  const jsonText = extractJsonObjectText(normalized);
+
+  if (!jsonText) {
+    return null;
+  }
+
+  const extracted = parseJsonWithNestedStringFallback(jsonText);
+
+  if (extracted === null) {
+    return null;
+  }
+
+  return extracted;
+}
+
+function parseJsonWithNestedStringFallback(value: string) {
   try {
-    const parsed = JSON.parse(jsonText) as unknown;
-    const validated = modelResponseSchema.safeParse(parsed);
-    return validated.success ? validated.data : null;
+    const parsed = JSON.parse(value) as unknown;
+
+    if (typeof parsed === "string") {
+      const nested = parsed.trim();
+
+      if (nested.startsWith("{") || nested.startsWith("[")) {
+        try {
+          return JSON.parse(nested) as unknown;
+        } catch {
+          return null;
+        }
+      }
+    }
+
+    return parsed;
   } catch {
     return null;
   }
 }
 
-function parseClarificationResponse(content: string) {
-  const normalized = content.trim();
-  const jsonText = stripCodeFence(normalized);
-
-  try {
-    const parsed = JSON.parse(jsonText) as unknown;
-    const validated = clarificationResponseSchema.safeParse(parsed);
-    return validated.success ? validated.data : null;
-  } catch {
-    return null;
+function normalizeMaterialListResponseShape(parsed: unknown) {
+  if (Array.isArray(parsed)) {
+    return {
+      materialSections: parsed,
+    };
   }
+
+  if (!parsed || typeof parsed !== "object") {
+    return parsed;
+  }
+
+  const source = parsed as Record<string, unknown>;
+
+  if (Array.isArray(source.materialSections)) {
+    return source;
+  }
+
+  if (Array.isArray(source.sections)) {
+    return {
+      materialSections: source.sections,
+    };
+  }
+
+  const wrapped = pickWrappedObject(source);
+
+  if (wrapped && Array.isArray((wrapped as Record<string, unknown>).materialSections)) {
+    return wrapped;
+  }
+
+  if (wrapped && Array.isArray((wrapped as Record<string, unknown>).sections)) {
+    return {
+      materialSections: (wrapped as Record<string, unknown>).sections,
+    };
+  }
+
+  return source;
+}
+
+function normalizeClarificationResponseShape(parsed: unknown) {
+  if (Array.isArray(parsed)) {
+    return {
+      questions: parsed,
+    };
+  }
+
+  if (!parsed || typeof parsed !== "object") {
+    return parsed;
+  }
+
+  const source = parsed as Record<string, unknown>;
+
+  if (Array.isArray(source.questions)) {
+    return source;
+  }
+
+  if (Array.isArray(source.clarifications)) {
+    return {
+      questions: source.clarifications,
+    };
+  }
+
+  const wrapped = pickWrappedObject(source);
+
+  if (wrapped && Array.isArray((wrapped as Record<string, unknown>).questions)) {
+    return wrapped;
+  }
+
+  if (wrapped && Array.isArray((wrapped as Record<string, unknown>).clarifications)) {
+    return {
+      questions: (wrapped as Record<string, unknown>).clarifications,
+    };
+  }
+
+  return source;
+}
+
+function coerceClarificationQuestions(candidate: unknown): MaterialListClarificationQuestion[] {
+  if (!candidate || typeof candidate !== "object") {
+    return [];
+  }
+
+  const source = candidate as Record<string, unknown>;
+  const rawQuestions = Array.isArray(source.questions) ? source.questions : [];
+  const normalized: MaterialListClarificationQuestion[] = [];
+
+  for (const [index, rawQuestion] of rawQuestions.entries()) {
+    if (!rawQuestion || typeof rawQuestion !== "object") {
+      continue;
+    }
+
+    const question = rawQuestion as Record<string, unknown>;
+    const id = toNormalizedQuestionId(question.id, index);
+    const title = toNonEmptyText(question.title, 160, "Avklaring");
+    const helpText = toNonEmptyText(
+      question.helpText ?? question.help_text ?? question.help ?? question.description,
+      280,
+      "Presiser dette punktet.",
+    );
+    const placeholder = toNonEmptyText(
+      question.placeholder ?? question.inputPlaceholder ?? question.input_placeholder,
+      220,
+      "Skriv svar...",
+    );
+    const options = toQuestionOptions(question.options);
+
+    normalized.push({
+      id,
+      title,
+      helpText,
+      placeholder,
+      ...(options.length > 0 ? { options } : {}),
+    });
+  }
+
+  return normalized;
+}
+
+function toNormalizedQuestionId(value: unknown, index: number) {
+  const base = typeof value === "string" ? value : `question_${index + 1}`;
+  const normalized = base
+    .trim()
+    .toLowerCase()
+    .replace(/[^a-z0-9_]+/g, "_")
+    .replace(/^_+|_+$/g, "");
+
+  return (normalized.length > 0 ? normalized : `question_${index + 1}`).slice(0, 80);
+}
+
+function toNonEmptyText(value: unknown, maxLength: number, fallback: string) {
+  const raw = typeof value === "string" ? value.trim() : "";
+
+  if (raw.length === 0) {
+    return fallback;
+  }
+
+  return raw.slice(0, maxLength);
+}
+
+function toQuestionOptions(value: unknown) {
+  if (!Array.isArray(value)) {
+    return [] as string[];
+  }
+
+  return value
+    .map((entry) => (typeof entry === "string" ? entry.trim().slice(0, 80) : ""))
+    .filter((entry) => entry.length > 0)
+    .slice(0, 6);
+}
+
+function pickWrappedObject(source: Record<string, unknown>) {
+  const wrapperKeys = ["output", "result", "data", "payload"];
+
+  for (const key of wrapperKeys) {
+    const candidate = source[key];
+
+    if (candidate && typeof candidate === "object" && !Array.isArray(candidate)) {
+      return candidate;
+    }
+  }
+
+  return null;
 }
 
 function buildMaterialListPromptInput(
   input: ProjectInput,
   attachmentContext: PreparedAttachmentContext,
-  priceListProducts: PriceListProduct[],
 ) {
   return JSON.stringify(
     {
       request_type: "material_list",
       required_response_format: "json_object",
+      required_output_schema: {
+        materialSections: [
+          {
+            title: "string",
+            description: "string",
+            items: [
+              {
+                item: "string",
+                quantity: "string",
+                quantityReason: "string",
+                note: "string",
+                nobb: "string",
+              },
+            ],
+          },
+        ],
+      },
       project: input,
       attachments: summarizeAttachments(attachmentContext.files),
       attachment_content: flattenUserContentForResponses(attachmentContext.userContentParts),
-      price_list_selection: buildPriceListPromptContext(input, priceListProducts),
     },
     null,
     2,
@@ -331,6 +576,17 @@ function buildClarificationPromptInput(input: ProjectInput, attachmentContext: P
     {
       request_type: "clarifications",
       required_response_format: "json_object",
+      required_output_schema: {
+        questions: [
+          {
+            id: "string",
+            title: "string",
+            helpText: "string",
+            placeholder: "string",
+            options: ["string"],
+          },
+        ],
+      },
       project: input,
       attachments: summarizeAttachments(attachmentContext.files),
       attachment_content: flattenUserContentForResponses(attachmentContext.userContentParts),
@@ -373,33 +629,7 @@ function sanitizeClarificationQuestions(questions: MaterialListClarificationQues
     });
   }
 
-  return Array.from(uniqueById.values()).slice(0, 5);
-}
-
-function buildPriceListPromptContext(input: ProjectInput, products: PriceListProduct[]) {
-  if (products.length === 0) {
-    return "- Ingen prislister funnet.";
-  }
-
-  const projectTokens = tokenizeForMatch(
-    `${input.projectType} ${input.title} ${input.description} ${input.finishLevel}`,
-  );
-  const ranked = products
-    .map((product) => ({
-      product,
-      score: scorePriceListProduct(product, projectTokens),
-    }))
-    .sort((left, right) => right.score - left.score || left.product.productName.localeCompare(right.product.productName));
-  const selected = ranked
-    .slice(0, MAX_PRICE_LIST_PROMPT_ROWS)
-    .map(({ product }) => product);
-
-  return selected
-    .map(
-      (product) =>
-        `- NOBB ${product.nobbNumber} | ${product.productName} | Enhet: ${product.unit} | Seksjon: ${product.sectionTitle}`,
-    )
-    .join("\n");
+  return Array.from(uniqueById.values());
 }
 
 function sanitizeMaterialSections(sections: Array<z.infer<typeof modelResponseSchema>["materialSections"][number]>) {
@@ -413,6 +643,7 @@ function sanitizeMaterialSections(sections: Array<z.infer<typeof modelResponseSc
           quantity: ensureQuantityHasUnit(item.quantity),
           quantityReason: normalizeQuantityReason(item.quantityReason, item.note, item.quantity),
           note: item.note.trim().slice(0, 280),
+          nobb: normalizeNobb(item.nobb),
         }))
         .filter((item) => item.item.length > 0),
     }))
@@ -439,7 +670,7 @@ function enforcePriceListItemsWithNobb(sections: MaterialSection[], products: Pr
         ...item,
         item: match.productName,
         quantityReason: normalizeQuantityReason(item.quantityReason, item.note, item.quantity, match.quantityReason),
-        note: mergeNoteWithNobb(item.note, match),
+        nobb: item.nobb ?? match.nobbNumber,
       };
     }),
   }));
@@ -543,21 +774,48 @@ function decodeTextBuffer(bytes: Buffer) {
   return utf8;
 }
 
-async function fileToDataUrl(file: File) {
-  const bytes = Buffer.from(await file.arrayBuffer());
-  const mimeType = file.type || "application/octet-stream";
-  return `data:${mimeType};base64,${bytes.toString("base64")}`;
-}
-
 function stripCodeFence(content: string) {
   const fenced = content.match(/^```(?:json)?\s*([\s\S]+?)\s*```$/i);
   return fenced ? fenced[1] : content;
 }
 
-function findBestPriceListMatch(item: { item: string; note: string }, sectionTitle: string, products: PriceListProduct[]) {
+function extractJsonObjectText(content: string) {
+  const normalized = stripCodeFence(content.trim());
+
+  if (!normalized) {
+    return "";
+  }
+
+  const directParse = tryParseJsonObject(normalized);
+
+  if (directParse) {
+    return normalized;
+  }
+
+  const firstBrace = normalized.indexOf("{");
+  const lastBrace = normalized.lastIndexOf("}");
+
+  if (firstBrace === -1 || lastBrace === -1 || lastBrace <= firstBrace) {
+    return "";
+  }
+
+  const sliced = normalized.slice(firstBrace, lastBrace + 1).trim();
+  return tryParseJsonObject(sliced) ? sliced : "";
+}
+
+function tryParseJsonObject(value: string) {
+  try {
+    const parsed = JSON.parse(value) as unknown;
+    return typeof parsed === "object" && parsed !== null;
+  } catch {
+    return false;
+  }
+}
+
+function findBestPriceListMatch(item: { item: string; note: string; nobb?: string }, sectionTitle: string, products: PriceListProduct[]) {
   const nobbFromItem = extractNobb(item.item);
   const nobbFromNote = extractNobb(item.note);
-  const directNobb = nobbFromItem || nobbFromNote;
+  const directNobb = normalizeNobb(item.nobb) || nobbFromItem || nobbFromNote;
 
   if (directNobb) {
     const direct = products.find((product) => product.nobbNumber === directNobb);
@@ -617,22 +875,23 @@ function pickFallbackProduct(sectionTitle: string, products: PriceListProduct[])
   return products[0] ?? null;
 }
 
-function mergeNoteWithNobb(note: string, product: PriceListProduct) {
-  const base = note.trim();
-  const source = `${product.supplierName}`;
-  const targetSuffix = `NOBB: ${product.nobbNumber} · Kilde: ${source}`;
-
-  if (base.toLowerCase().includes("nobb:")) {
-    return base.slice(0, 280);
-  }
-
-  const merged = base.length > 0 ? `${base} · ${targetSuffix}` : targetSuffix;
-  return merged.slice(0, 280);
-}
-
 function extractNobb(value: string) {
   const match = value.match(/\b(\d{6,10})\b/);
   return match ? match[1] : "";
+}
+
+function normalizeNobb(value?: string) {
+  if (!value) {
+    return undefined;
+  }
+
+  const normalized = value.replace(/\D/g, "");
+
+  if (normalized.length < 6 || normalized.length > 10) {
+    return undefined;
+  }
+
+  return normalized;
 }
 
 function tokenizeForMatch(value: string) {
@@ -644,15 +903,105 @@ function tokenizeForMatch(value: string) {
     .filter((token) => token.length > 1);
 }
 
-function scorePriceListProduct(product: PriceListProduct, projectTokens: string[]) {
-  if (projectTokens.length === 0) {
-    return 0;
+function coerceMaterialSections(candidate: unknown): z.infer<typeof modelResponseSchema>["materialSections"] {
+  if (!candidate || typeof candidate !== "object") {
+    return [];
   }
 
-  const haystack = tokenizeForMatch(`${product.productName} ${product.sectionTitle} ${product.category}`);
-  const overlap = projectTokens.filter((token) => haystack.includes(token)).length;
+  const source = candidate as Record<string, unknown>;
+  const rawSections = Array.isArray(source.materialSections)
+    ? source.materialSections
+    : Array.isArray(source.sections)
+      ? source.sections
+      : [];
+  const normalized: z.infer<typeof modelResponseSchema>["materialSections"] = [];
 
-  return overlap / Math.max(projectTokens.length, haystack.length || 1);
+  for (const [sectionIndex, rawSection] of rawSections.entries()) {
+    if (!rawSection || typeof rawSection !== "object") {
+      continue;
+    }
+
+    const section = rawSection as Record<string, unknown>;
+    const sectionTitle = toNonEmptyText(
+      section.title ?? section.name ?? section.heading,
+      120,
+      `Seksjon ${sectionIndex + 1}`,
+    );
+    const sectionDescription = toNonEmptyText(
+      section.description ?? section.summary ?? section.note,
+      240,
+      "Materialbehov fra prosjektgrunnlag.",
+    );
+    const rawItems = Array.isArray(section.items)
+      ? section.items
+      : Array.isArray(section.lines)
+        ? section.lines
+        : Array.isArray(section.products)
+          ? section.products
+          : [];
+    const normalizedItems: z.infer<typeof modelResponseSchema>["materialSections"][number]["items"] = [];
+
+    for (const [itemIndex, rawItem] of rawItems.entries()) {
+      if (!rawItem || typeof rawItem !== "object") {
+        continue;
+      }
+
+      const item = rawItem as Record<string, unknown>;
+      const itemLabel = toNonEmptyText(
+        item.item ?? item.name ?? item.title ?? item.product,
+        200,
+        `Produkt ${itemIndex + 1}`,
+      );
+      const quantityValue = toNonEmptyText(
+        item.quantity ?? item.qty ?? item.amount,
+        80,
+        "1 stk",
+      );
+      const noteValue = toNonEmptyText(
+        item.note ?? item.description ?? item.comment,
+        280,
+        "Basert pa prosjektbeskrivelse og vedlegg.",
+      );
+      const quantityReason = toOptionalText(item.quantityReason ?? item.quantity_reason ?? item.reason, 280);
+      const nobb = toOptionalText(item.nobb ?? item.nobbNumber ?? item.nobb_number, 24);
+
+      normalizedItems.push({
+        item: itemLabel,
+        quantity: quantityValue,
+        note: noteValue,
+        ...(quantityReason ? { quantityReason } : {}),
+        ...(nobb ? { nobb } : {}),
+      });
+    }
+
+    if (normalizedItems.length === 0) {
+      continue;
+    }
+
+    normalized.push({
+      title: sectionTitle,
+      description: sectionDescription,
+      items: normalizedItems,
+    });
+  }
+
+  return normalized;
+}
+
+function toOptionalText(value: unknown, maxLength: number) {
+  if (typeof value === "string") {
+    const normalized = value.trim();
+
+    if (normalized.length > 0) {
+      return normalized.slice(0, maxLength);
+    }
+  }
+
+  if (typeof value === "number" && Number.isFinite(value)) {
+    return String(value).slice(0, maxLength);
+  }
+
+  return "";
 }
 
 async function requestFromPromptTemplate(
@@ -672,63 +1021,149 @@ async function requestFromPromptTemplate(
     return null;
   }
 
-  try {
-    logAiAgentStatus(
-      context,
-      `prompt_attempt=true model=prompt_default attempt=1 prompt_id=${promptId} prompt_version=latest`,
-    );
+  for (let attempt = 1; attempt <= OPENAI_PROMPT_MAX_ATTEMPTS; attempt += 1) {
+    try {
+      logAiAgentStatus(
+        context,
+        `prompt_attempt=true model=prompt_default attempt=${attempt} prompt_id=${promptId} prompt_version=latest`,
+      );
+      logAiAgentStatus(context, `prompt_input_chars=${promptInput.length} attempt=${attempt}`);
 
-    const response = await openai.responses.create(
-      {
-        // Intentionally omit prompt.version so OpenAI resolves to latest published prompt version.
-        prompt: {
-          id: promptId,
-        },
-        input: promptInput,
-        text: {
-          format: {
-            type: "json_object",
+      const response = await openai.responses.create(
+        {
+          // Intentionally omit prompt.version so OpenAI resolves to latest published prompt version.
+          prompt: {
+            id: promptId,
+          },
+          input: promptInput,
+          text: {
+            format: {
+              type: "json_object",
+            },
           },
         },
-      },
-      { signal },
-    );
-
-    const content = response.output_text?.trim();
-
-    if (!content) {
-      logAiAgentStatus(context, "prompt_output_empty=true model=prompt_default attempt=1");
-    }
-
-    return content && content.length > 0 ? content : null;
-  } catch (error) {
-    if (signal.aborted || isAbortLikeError(error)) {
-      logAiAgentStatus(
-        context,
-        `prompt_request_aborted=true timeout_ms=${OPENAI_WORKFLOW_TIMEOUT_MS}`,
+        { signal },
       );
+
+      const content = extractTextFromPromptResponse(response);
+
+      if (!content) {
+        logAiAgentStatus(context, `prompt_output_empty=true model=prompt_default attempt=${attempt}`);
+      }
+
+      return content && content.length > 0 ? content : null;
+    } catch (error) {
+      if (signal.aborted || isAbortLikeError(error)) {
+        logAiAgentStatus(
+          context,
+          `prompt_request_aborted=true timeout_ms=${OPENAI_WORKFLOW_TIMEOUT_MS}`,
+        );
+        return null;
+      }
+
+      if (error instanceof OpenAI.APIError) {
+        const isRateLimited = error.status === 429 || error.code === "rate_limit_exceeded";
+        const canRetry = isRateLimited && attempt < OPENAI_PROMPT_MAX_ATTEMPTS;
+
+        logAiAgentStatus(
+          context,
+          `prompt_api_error=true status=${error.status ?? "unknown"} code=${error.code ?? "unknown"} param=${error.param ?? "unknown"} attempt=${attempt} message=${sanitizeLogMessage(error.message)}`,
+        );
+
+        if (canRetry) {
+          const delayMs = resolveRateLimitDelayMs(error.message);
+          logAiAgentStatus(context, `prompt_retry_scheduled=true reason=rate_limit attempt=${attempt + 1} delay_ms=${delayMs}`);
+          await sleepWithSignal(delayMs, signal);
+          continue;
+        }
+
+        return null;
+      }
+
+      if (error instanceof Error) {
+        logAiAgentStatus(
+          context,
+          `prompt_unexpected_error=true name=${error.name} message=${sanitizeLogMessage(error.message)}`,
+        );
+        return null;
+      }
+
+      logAiAgentStatus(context, "prompt_unknown_error=true");
       return null;
     }
-
-    if (error instanceof OpenAI.APIError) {
-      logAiAgentStatus(
-        context,
-        `prompt_api_error=true status=${error.status ?? "unknown"} code=${error.code ?? "unknown"} param=${error.param ?? "unknown"} message=${sanitizeLogMessage(error.message)}`,
-      );
-      return null;
-    }
-
-    if (error instanceof Error) {
-      logAiAgentStatus(
-        context,
-        `prompt_unexpected_error=true name=${error.name} message=${sanitizeLogMessage(error.message)}`,
-      );
-      return null;
-    }
-
-    logAiAgentStatus(context, "prompt_unknown_error=true");
-    return null;
   }
+
+  return null;
+}
+
+function extractTextFromPromptResponse(response: { output_text?: string; output?: unknown }) {
+  const direct = response.output_text?.trim();
+
+  if (direct) {
+    return direct;
+  }
+
+  if (!Array.isArray(response.output)) {
+    return "";
+  }
+
+  for (const item of response.output as Array<Record<string, unknown>>) {
+    const content = item.content;
+
+    if (!Array.isArray(content)) {
+      continue;
+    }
+
+    for (const part of content as Array<Record<string, unknown>>) {
+      const textValue = part.text;
+
+      if (typeof textValue === "string" && textValue.trim().length > 0) {
+        return textValue.trim();
+      }
+
+      if (textValue && typeof textValue === "object") {
+        const serialized = JSON.stringify(textValue);
+
+        if (serialized.trim().length > 0) {
+          return serialized;
+        }
+      }
+    }
+  }
+
+  return "";
+}
+
+function resolveRateLimitDelayMs(message: string) {
+  const match = message.match(/try again in\s+([0-9]+(?:\.[0-9]+)?)s/i);
+  const seconds = match ? Number.parseFloat(match[1]) : Number.NaN;
+
+  if (!Number.isFinite(seconds) || seconds <= 0) {
+    return OPENAI_RETRY_DELAY_DEFAULT_MS;
+  }
+
+  return Math.min(OPENAI_RETRY_DELAY_MAX_MS, Math.max(500, Math.ceil(seconds * 1000) + 300));
+}
+
+function sleepWithSignal(delayMs: number, signal: AbortSignal) {
+  return new Promise<void>((resolve, reject) => {
+    if (signal.aborted) {
+      reject(new Error("Aborted"));
+      return;
+    }
+
+    const timeout = setTimeout(() => {
+      signal.removeEventListener("abort", onAbort);
+      resolve();
+    }, delayMs);
+
+    const onAbort = () => {
+      clearTimeout(timeout);
+      reject(new Error("Aborted"));
+    };
+
+    signal.addEventListener("abort", onAbort, { once: true });
+  });
 }
 
 function resolveWorkflowTimeoutMs() {
@@ -779,26 +1214,33 @@ function logAiAgentStatus(context: AiAgentContext, message: string) {
   console.info(`${AI_AGENT_LOG_PREFIX}[${context}] ${message}`);
 }
 
+function describePromptResponseShape(content: string) {
+  const parsed = parsePromptJson(content);
+
+  if (parsed === null) {
+    return "unparseable";
+  }
+
+  if (Array.isArray(parsed)) {
+    return `array(len=${parsed.length})`;
+  }
+
+  if (typeof parsed === "object") {
+    const keys = Object.keys(parsed as Record<string, unknown>).slice(0, 8);
+    return `object(keys=${keys.join(",") || "none"})`;
+  }
+
+  return typeof parsed;
+}
+
 function flattenUserContentForResponses(userContent: PromptInputPart[]) {
   const lines: string[] = [];
 
   for (const part of userContent) {
-    if (part.type === "text") {
-      const text = part.text.trim();
+    const text = part.text.trim();
 
-      if (text.length > 0) {
-        lines.push(text);
-      }
-
-      continue;
-    }
-
-    if (part.type === "image_url") {
-      const url = part.image_url.url?.trim();
-
-      if (url) {
-        lines.push(`Bildevedlegg URL: ${url}`);
-      }
+    if (text.length > 0) {
+      lines.push(text);
     }
   }
 

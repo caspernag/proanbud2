@@ -8,6 +8,7 @@ export type MaterialItem = {
   quantity: string;
   note: string;
   quantityReason?: string;
+  nobb?: string;
 };
 
 export type MaterialSection = {
@@ -22,7 +23,6 @@ export type ProjectInput = {
   projectType: string;
   areaSqm: number;
   finishLevel: string;
-  budgetNok: number;
   description: string;
 };
 
@@ -51,7 +51,6 @@ export type ProjectRow = {
   project_type: string | null;
   area_sqm: number | null;
   finish_level: string | null;
-  budget_nok: number | null;
   description: string | null;
   preview_summary:
     | {
@@ -73,7 +72,7 @@ export type ProjectRow = {
 };
 
 export const PROJECT_ROW_SELECT =
-  "id, slug, title, location, project_type, area_sqm, finish_level, budget_nok, description, preview_summary, material_list, price_nok, payment_status, pdf_file_name, pdf_generated_at, created_at" as const;
+  "id, slug, title, location, project_type, area_sqm, finish_level, description, preview_summary, material_list, price_nok, payment_status, pdf_file_name, pdf_generated_at, created_at" as const;
 
 function inferScenario(input: ProjectInput) {
   const text = `${input.projectType} ${input.title} ${input.description}`.toLowerCase();
@@ -496,7 +495,6 @@ export function projectFromRow(row: ProjectRow): ProjectView {
     projectType: row.project_type ?? "Rehabilitering",
     areaSqm: row.area_sqm ?? 30,
     finishLevel: row.finish_level ?? "Standard",
-    budgetNok: row.budget_nok ?? 350000,
     description: row.description ?? "Prosjektbeskrivelse mangler",
     teaser:
       row.preview_summary?.teaser ??
@@ -509,7 +507,6 @@ export function projectFromRow(row: ProjectRow): ProjectView {
         projectType: row.project_type ?? "Rehabilitering",
         areaSqm: row.area_sqm ?? 30,
         finishLevel: row.finish_level ?? "Standard",
-        budgetNok: row.budget_nok ?? 350000,
         description: row.description ?? "",
       }).previewBullets,
     riskBullets:
@@ -520,7 +517,6 @@ export function projectFromRow(row: ProjectRow): ProjectView {
         projectType: row.project_type ?? "Rehabilitering",
         areaSqm: row.area_sqm ?? 30,
         finishLevel: row.finish_level ?? "Standard",
-        budgetNok: row.budget_nok ?? 350000,
         description: row.description ?? "",
       }).riskBullets,
     materialSections:
@@ -564,8 +560,6 @@ export function buildProjectFromSearchParams(
         typeof searchParams.areaSqm === "string" ? Number(searchParams.areaSqm) || 30 : 30,
       finishLevel:
         typeof searchParams.finishLevel === "string" ? searchParams.finishLevel : "Standard",
-      budgetNok:
-        typeof searchParams.budgetNok === "string" ? Number(searchParams.budgetNok) || 350000 : 350000,
       description:
         typeof searchParams.description === "string"
           ? searchParams.description
@@ -634,6 +628,7 @@ function parseMaterialSectionsFromUnknown(parsed: unknown) {
         quantity?: unknown;
         note?: unknown;
         quantityReason?: unknown;
+        nobb?: unknown;
       };
 
       const parsedItem: MaterialItem = {
@@ -647,6 +642,14 @@ function parseMaterialSectionsFromUnknown(parsed: unknown) {
 
       if (typeof maybeItem.quantityReason === "string" && maybeItem.quantityReason.trim().length > 0) {
         parsedItem.quantityReason = maybeItem.quantityReason;
+      }
+
+      if (typeof maybeItem.nobb === "string") {
+        const normalizedNobb = maybeItem.nobb.replace(/\D/g, "");
+
+        if (normalizedNobb.length >= 6 && normalizedNobb.length <= 10) {
+          parsedItem.nobb = normalizedNobb;
+        }
       }
 
       items.push(parsedItem);

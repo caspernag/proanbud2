@@ -304,7 +304,7 @@ export async function buildSuggestedOrderItems(sections: MaterialSection[]) {
 
   return sections.flatMap((section, sectionIndex) => {
     return section.items.map((item, itemIndex) => {
-      const match = findBestPriceMatch(item.item, item.note, priceProducts);
+      const match = findBestPriceMatch(item.item, item.note, item.nobb, priceProducts);
       const defaultSupplierKey = inferSupplierKey(match?.supplierName) ?? availableSupplierKeys[0] ?? "byggmakker";
       const quantityValue = parseQuantityValue(item.quantity);
       const quantityUnit = parseQuantityUnit(item.quantity);
@@ -336,10 +336,10 @@ export async function buildSuggestedOrderItems(sections: MaterialSection[]) {
           quantityValue,
           quantityUnit,
           unitPriceNok,
-            listPriceNok,
+          listPriceNok,
           supplierKey: defaultSupplierKey,
           supplierLabel: MATERIAL_ORDER_SUPPLIERS[defaultSupplierKey].label,
-          supplierSku: match?.nobbNumber ?? null,
+          supplierSku: match?.nobbNumber ?? (normalizeNobb(item.nobb) || null),
           estimatedDeliveryDays,
           estimatedDeliveryDate,
           note: item.note,
@@ -480,8 +480,8 @@ export function toOrderItemRowsInput(orderId: string, userId: string, items: Mat
   }));
 }
 
-function findBestPriceMatch(itemName: string, itemNote: string, products: PriceListProduct[]) {
-  const directNobb = extractNobb(itemName) || extractNobb(itemNote);
+function findBestPriceMatch(itemName: string, itemNote: string, itemNobb: string | undefined, products: PriceListProduct[]) {
+  const directNobb = normalizeNobb(itemNobb) || extractNobb(itemName) || extractNobb(itemNote);
 
   if (directNobb) {
     const direct = products.find((product) => product.nobbNumber === directNobb);
@@ -527,6 +527,15 @@ function findBestPriceMatch(itemName: string, itemNote: string, products: PriceL
 function extractNobb(value: string) {
   const match = value.match(/\b(\d{6,10})\b/);
   return match ? match[1] : "";
+}
+
+function normalizeNobb(value?: string) {
+  if (!value) {
+    return "";
+  }
+
+  const normalized = value.replace(/\D/g, "");
+  return normalized.length >= 6 && normalized.length <= 10 ? normalized : "";
 }
 
 function tokenize(value: string) {

@@ -53,7 +53,6 @@ export async function createProjectAction(formData: FormData) {
     projectType: String(formData.get("projectType") || "Rehabilitering"),
     areaSqm: toNumber(formData.get("areaSqm"), 30),
     finishLevel: String(formData.get("finishLevel") || "Standard"),
-    budgetNok: toNumber(formData.get("budgetNok"), 350000),
     description,
   };
 
@@ -79,7 +78,6 @@ export async function createProjectAction(formData: FormData) {
         project_type: generatedProject.projectType,
         area_sqm: generatedProject.areaSqm,
         finish_level: generatedProject.finishLevel,
-        budget_nok: generatedProject.budgetNok,
         description: generatedProject.description,
         preview_summary: {
           teaser: generatedProject.teaser,
@@ -103,7 +101,6 @@ export async function createProjectAction(formData: FormData) {
     projectType: input.projectType,
     areaSqm: String(input.areaSqm),
     finishLevel: input.finishLevel,
-    budgetNok: String(input.budgetNok),
     description: input.description,
   });
 

@@ -68,7 +68,6 @@ export default async function ProjectPage({ params, searchParams }: ProjectPageP
     "projectType",
     "areaSqm",
     "finishLevel",
-    "budgetNok",
     "description",
     "materialList",
     "materialListCompressed",
@@ -89,7 +88,6 @@ export default async function ProjectPage({ params, searchParams }: ProjectPageP
     draftParams.set("projectType", project.projectType);
     draftParams.set("areaSqm", String(project.areaSqm));
     draftParams.set("finishLevel", project.finishLevel);
-    draftParams.set("budgetNok", String(project.budgetNok));
     draftParams.set("description", project.description);
   }
 

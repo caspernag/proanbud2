@@ -46,11 +46,6 @@ export async function GET(_request: Request, context: RouteContext) {
     return NextResponse.json({ error: "Ugyldig NOBB-nummer." }, { status: 400 });
   }
 
-  const localProduct = await getPriceListProductByNobb(nobbNumber);
-  const localDetails = localProduct
-    ? toResponseFromLocal(localProduct)
-    : null;
-
   if (hasNobbApiEnv()) {
     const cachedExternal = getCachedExternalNobbDetails(nobbNumber);
 
@@ -65,6 +60,11 @@ export async function GET(_request: Request, context: RouteContext) {
       return NextResponse.json(external);
     }
   }
+
+  const localProduct = await getPriceListProductByNobb(nobbNumber);
+  const localDetails = localProduct
+    ? toResponseFromLocal(localProduct)
+    : null;
 
   if (localDetails) {
     return NextResponse.json(localDetails);

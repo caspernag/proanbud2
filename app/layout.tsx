@@ -18,11 +18,11 @@ const sora = Sora({
 
 export const metadata: Metadata = {
   title: {
-    default: "proanbud",
-    template: "%s | proanbud",
+    default: "Proanbud",
+    template: "%s | Proanbud",
   },
   description:
-    "proanbud gir privatkunder materiallister og prisduell mellom byggevareleverandører, slik at flere leverandører konkurrerer om samme prosjekt.",
+    "Proanbud gir privatkunder materiallister og prisduell mellom byggevareleverandører, slik at flere leverandører konkurrerer om samme prosjekt.",
 };
 
 export default function RootLayout({

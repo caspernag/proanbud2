@@ -108,7 +108,7 @@ function parseClarificationQuestions(payload: unknown) {
     });
   }
 
-  return parsed.slice(0, 5);
+  return parsed;
 }
 
 function buildClarificationNotes(session: ClarificationSession) {
@@ -139,10 +139,16 @@ export function NewProjectDialog({ action, initialOpen = false }: NewProjectDial
   const [clarificationNotes, setClarificationNotes] = useState("");
   const [allowSubmitOnce, setAllowSubmitOnce] = useState(false);
   const [clarificationFetchPending, setClarificationFetchPending] = useState(false);
+  const [calculationPending, setCalculationPending] = useState(false);
+  const [displayedStage, setDisplayedStage] = useState<"clarification" | null>(null);
+  const [stageVisible, setStageVisible] = useState(false);
+  const [stageCardHeight, setStageCardHeight] = useState<number | null>(null);
   const formRef = useRef<HTMLFormElement>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const clarificationAbortRef = useRef<AbortController | null>(null);
   const submitFrameRef = useRef<number | null>(null);
+  const stageTransitionTimeoutRef = useRef<number | null>(null);
+  const stageInnerRef = useRef<HTMLDivElement>(null);
   const openRef = useRef(initialOpen);
 
   function handleFormKeyDown(event: ReactKeyboardEvent<HTMLFormElement>) {
@@ -177,6 +183,15 @@ export function NewProjectDialog({ action, initialOpen = false }: NewProjectDial
     setClarificationNotes("");
     setAllowSubmitOnce(false);
     setClarificationFetchPending(false);
+    setCalculationPending(false);
+    setDisplayedStage(null);
+    setStageVisible(false);
+    setStageCardHeight(null);
+
+    if (stageTransitionTimeoutRef.current !== null) {
+      window.clearTimeout(stageTransitionTimeoutRef.current);
+      stageTransitionTimeoutRef.current = null;
+    }
   }, [stopInFlightClarification]);
 
   const requestCloseDialog = useCallback(() => {
@@ -196,8 +211,89 @@ export function NewProjectDialog({ action, initialOpen = false }: NewProjectDial
   useEffect(() => {
     return () => {
       stopInFlightClarification();
+
+      if (stageTransitionTimeoutRef.current !== null) {
+        window.clearTimeout(stageTransitionTimeoutRef.current);
+        stageTransitionTimeoutRef.current = null;
+      }
     };
   }, [stopInFlightClarification]);
+
+  const desiredStage: "clarification" | null =
+    clarificationFetchPending || Boolean(clarificationSession)
+      ? "clarification"
+      : null;
+
+  useEffect(() => {
+    if (stageTransitionTimeoutRef.current !== null) {
+      window.clearTimeout(stageTransitionTimeoutRef.current);
+      stageTransitionTimeoutRef.current = null;
+    }
+
+    if (!desiredStage) {
+      setStageVisible(false);
+
+      if (displayedStage !== null) {
+        stageTransitionTimeoutRef.current = window.setTimeout(() => {
+          setDisplayedStage(null);
+          setStageCardHeight(null);
+          stageTransitionTimeoutRef.current = null;
+        }, 180);
+      }
+
+      return;
+    }
+
+    if (displayedStage === null) {
+      setDisplayedStage(desiredStage);
+
+      stageTransitionTimeoutRef.current = window.setTimeout(() => {
+        setStageVisible(true);
+        stageTransitionTimeoutRef.current = null;
+      }, 20);
+
+      return;
+    }
+
+    if (displayedStage === desiredStage) {
+      setStageVisible(true);
+      return;
+    }
+
+    setStageVisible(false);
+
+    stageTransitionTimeoutRef.current = window.setTimeout(() => {
+      setDisplayedStage(desiredStage);
+
+      stageTransitionTimeoutRef.current = window.setTimeout(() => {
+        setStageVisible(true);
+        stageTransitionTimeoutRef.current = null;
+      }, 20);
+    }, 140);
+  }, [desiredStage, displayedStage]);
+
+  useEffect(() => {
+    if (!displayedStage || !stageInnerRef.current) {
+      return;
+    }
+
+    const element = stageInnerRef.current;
+    const updateHeight = () => {
+      setStageCardHeight(element.getBoundingClientRect().height);
+    };
+
+    updateHeight();
+
+    const observer = new ResizeObserver(() => {
+      updateHeight();
+    });
+
+    observer.observe(element);
+
+    return () => {
+      observer.disconnect();
+    };
+  }, [displayedStage, clarificationSession?.index, clarificationFetchPending]);
 
   useEffect(() => {
     if (!open) {
@@ -261,10 +357,12 @@ export function NewProjectDialog({ action, initialOpen = false }: NewProjectDial
   async function handleStartClarification(event: FormEvent<HTMLFormElement>) {
     if (allowSubmitOnce) {
       setAllowSubmitOnce(false);
+      setCalculationPending(true);
       return;
     }
 
     event.preventDefault();
+    setCalculationPending(false);
 
     const formData = new FormData(event.currentTarget);
     const abortController = new AbortController();
@@ -291,6 +389,7 @@ export function NewProjectDialog({ action, initialOpen = false }: NewProjectDial
         return;
       }
 
+      setCalculationPending(false);
       setClarificationSession({
         questions,
         index: 0,
@@ -321,6 +420,8 @@ export function NewProjectDialog({ action, initialOpen = false }: NewProjectDial
 
     setClarificationNotes(notes);
     setClarificationSession(null);
+    setClarificationFetchPending(false);
+    setCalculationPending(true);
     setAllowSubmitOnce(true);
     submitFrameRef.current = window.requestAnimationFrame(() => {
       formRef.current?.requestSubmit();
@@ -348,14 +449,16 @@ export function NewProjectDialog({ action, initialOpen = false }: NewProjectDial
 
       {open ? (
         <div
-          className="fixed inset-0 z-50 flex items-end justify-center bg-stone-900/40 p-3 sm:items-center sm:p-6"
+          className={`fixed inset-0 z-50 flex items-end justify-center bg-stone-900/40 p-3 transition-opacity duration-150 sm:items-center sm:p-6 ${
+            displayedStage || calculationPending ? "pointer-events-none opacity-0" : "opacity-100"
+          }`}
           onMouseDown={(event) => {
             if (event.target === event.currentTarget) {
               requestCloseDialog();
             }
           }}
         >
-          <div className="w-full max-w-3xl overflow-hidden rounded-[1.2rem] border border-stone-200 bg-white shadow-2xl sm:rounded-[1.8rem]">
+          <div className="relative w-full max-w-3xl overflow-hidden rounded-[1.2rem] border border-stone-200 bg-white shadow-2xl sm:rounded-[1.8rem]">
             <div className="flex items-start justify-between border-b border-stone-200 bg-[var(--card-strong)] px-4 py-3 sm:px-6 sm:py-4">
               <div>
                 <p className="eyebrow">Ny materialliste</p>
@@ -549,27 +652,26 @@ export function NewProjectDialog({ action, initialOpen = false }: NewProjectDial
 
               <DialogFormActions onCancel={requestCloseDialog} />
 
-              {clarificationFetchPending ? (
-                <div className="absolute inset-0 z-20 rounded-[1.2rem] bg-white/95 p-4 backdrop-blur-sm sm:p-5">
-                  <div className="mx-auto flex h-full max-w-xl flex-col justify-center rounded-[1rem] border border-stone-200 bg-white p-4 shadow-xl sm:p-5">
-                    <p className="eyebrow">AI analyserer grunnlaget</p>
-                    <h3 className="mt-2 text-lg font-semibold text-stone-900 sm:text-xl">
-                      Finner uklare punkter som trenger avklaring
-                    </h3>
-                    <p className="mt-1 text-sm text-stone-600">
-                      Genererer dynamiske oppfølgingsspørsmål basert på beskrivelse og vedlegg.
-                    </p>
-                    <div className="mt-4 inline-flex items-center gap-2 rounded-full border border-stone-300 bg-stone-50 px-3 py-1.5 text-xs font-semibold text-stone-700">
-                      <span className="h-3 w-3 animate-spin rounded-full border-2 border-stone-300 border-t-stone-900" />
-                      Jobber...
-                    </div>
-                  </div>
-                </div>
-              ) : null}
+            </form>
+          </div>
+        </div>
+      ) : null}
 
-              {clarificationSession && currentQuestion ? (
-                <div className="absolute inset-0 z-20 rounded-[1.2rem] bg-white/95 p-4 backdrop-blur-sm sm:p-5">
-                  <div className="mx-auto flex h-full max-w-xl flex-col rounded-[1rem] border border-stone-200 bg-white p-4 shadow-xl sm:p-5">
+      {open && displayedStage ? (
+        <div className="fixed inset-0 z-[60] flex items-end justify-center bg-stone-900/45 sm:items-center p-0">
+          <div className="w-full max-w-xl overflow-hidden rounded-[1.2rem] border border-stone-200 bg-white p-0 shadow-2xl sm:rounded-[1.6rem]">
+            <div
+              className="w-full overflow-hidden transition-[height] duration-200 ease-in-out"
+              style={{ height: stageCardHeight ? `${stageCardHeight}px` : "auto" }}
+            >
+              <div
+                ref={stageInnerRef}
+                className={`rounded-[1rem] border border-stone-200 bg-white p-4 shadow-xl transition-all duration-200 ease-in-out ${
+                  stageVisible ? "translate-y-0 opacity-100" : "translate-y-1 opacity-0"
+                }`}
+              >
+                {clarificationSession && currentQuestion ? (
+                  <>
                     <p className="eyebrow">AI avklarer usikkerheter</p>
                     <h3 className="mt-2 text-lg font-semibold text-stone-900 sm:text-xl">
                       Trenger noen raske svar for mer presis materialliste
@@ -665,7 +767,7 @@ export function NewProjectDialog({ action, initialOpen = false }: NewProjectDial
                       />
                     </div>
 
-                    <div className="mt-auto flex flex-col gap-2 pt-4 sm:flex-row sm:items-center sm:justify-between">
+                    <div className="mt-4 flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
                       <div className="flex gap-2">
                         <button
                           type="button"
@@ -725,12 +827,32 @@ export function NewProjectDialog({ action, initialOpen = false }: NewProjectDial
                           : "Neste spørsmål"}
                       </button>
                     </div>
-                  </div>
-                </div>
-              ) : null}
+                  </>
+                ) : (
+                  <>
+                    <p className="eyebrow">AI avklarer usikkerheter</p>
+                    <h3 className="mt-2 text-lg font-semibold text-stone-900 sm:text-xl">
+                      Finner uklare punkter som trenger avklaring
+                    </h3>
+                    <p className="mt-1 text-sm text-stone-600">
+                      Genererer dynamiske oppfølgingsspørsmål basert på beskrivelse og vedlegg.
+                    </p>
+                    <div className="mt-4 inline-flex items-center gap-2 rounded-full border border-stone-300 bg-stone-50 px-3 py-1.5 text-xs font-semibold text-stone-700">
+                      <span className="h-3 w-3 animate-spin rounded-full border-2 border-stone-300 border-t-stone-900" />
+                      Jobber...
+                    </div>
+                  </>
+                )}
+              </div>
+            </div>
+          </div>
+        </div>
+      ) : null}
 
-              <CreateProjectAiLoader fileCount={selectedFiles.length} />
-            </form>
+      {open && calculationPending ? (
+        <div className="fixed inset-0 z-[60] flex items-end justify-center bg-stone-900/45 p-3 sm:items-center sm:p-6">
+          <div className="w-full max-w-xl overflow-hidden rounded-[1.2rem] border border-stone-200 bg-white p-4 shadow-2xl sm:rounded-[1.6rem] sm:p-5">
+            <CalculationProcessingCard fileCount={selectedFiles.length} />
           </div>
         </div>
       ) : null}
@@ -769,17 +891,7 @@ function DialogFormActions({ onCancel }: { onCancel: () => void }) {
   );
 }
 
-function CreateProjectAiLoader({ fileCount }: { fileCount: number }) {
-  const { pending } = useFormStatus();
-
-  if (!pending) {
-    return null;
-  }
-
-  return <CreateProjectAiLoaderActive fileCount={fileCount} />;
-}
-
-function CreateProjectAiLoaderActive({ fileCount }: { fileCount: number }) {
+function CalculationProcessingCard({ fileCount }: { fileCount: number }) {
   const [stepIndex, setStepIndex] = useState(0);
   const [elapsedSeconds, setElapsedSeconds] = useState(0);
   const [activityIndex, setActivityIndex] = useState(0);
@@ -805,71 +917,67 @@ function CreateProjectAiLoaderActive({ fileCount }: { fileCount: number }) {
   }, []);
 
   return (
-    <div className="absolute inset-0 z-20 rounded-[1.2rem] bg-white/94 p-4 backdrop-blur-sm sm:p-5">
-      <div className="pointer-events-none absolute -top-10 left-1/2 h-36 w-[80%] -translate-x-1/2 rounded-full bg-[radial-gradient(circle,_rgba(129,225,167,0.35)_0%,rgba(129,225,167,0)_70%)]" />
+    <>
+      <p className="eyebrow">AI kalkulerer materiallisten</p>
+      <h3 className="mt-2 text-lg font-semibold text-stone-900 sm:text-xl">
+        Genererer materialliste
+      </h3>
+      <p className="mt-1 text-sm text-stone-600">
+        {fileCount > 0
+          ? `Jobber med ${fileCount} vedlegg og materiallistedata. Dette kan ta noen minutter.`
+          : "Jobber med materiallistedata. Dette kan ta noen minutter."}
+      </p>
 
-      <div className="mx-auto flex h-full max-w-xl flex-col justify-center rounded-[1rem] border border-stone-200 bg-white p-4 shadow-xl sm:p-5">
-        <p className="eyebrow">AI-prosessering</p>
-        <h3 className="mt-2 text-lg font-semibold text-stone-900 sm:text-xl">
-          Genererer materialliste fra materiallistegrunnlag
-        </h3>
-        <p className="mt-1 text-sm text-stone-600">
-          {fileCount > 0
-            ? `Jobber med ${fileCount} vedlegg og materiallistedata. Dette kan ta noen sekunder.`
-            : "Jobber med materiallistedata. Dette kan ta noen sekunder."}
-        </p>
-
-        <div className="mt-3 grid grid-cols-2 gap-2 text-xs text-stone-600 sm:grid-cols-3">
-          <div className="rounded-lg border border-stone-200 bg-stone-50 px-2.5 py-1.5">
-            Tid: {elapsedSeconds}s
-          </div>
-          <div className="rounded-lg border border-stone-200 bg-stone-50 px-2.5 py-1.5">
-            Fase: {stepIndex + 1}/{AI_STATUS_STEPS.length}
-          </div>
-          <div className="rounded-lg border border-stone-200 bg-stone-50 px-2.5 py-1.5 sm:col-span-1 col-span-2">
-            Status: aktiv
-          </div>
+      <div className="mt-3 grid grid-cols-2 gap-2 text-xs text-stone-600 sm:grid-cols-3">
+        <div className="rounded-lg border border-stone-200 bg-stone-50 px-2.5 py-1.5">
+          Tid: {elapsedSeconds}s
         </div>
-
-        <div className="mt-4 h-2 overflow-hidden rounded-full bg-stone-100">
-          <div
-            className="h-full rounded-full bg-[var(--accent)] transition-all duration-700"
-            style={{ width: `${Math.max(18, ((stepIndex + 1) / AI_STATUS_STEPS.length) * 100)}%` }}
-          />
+        <div className="rounded-lg border border-stone-200 bg-stone-50 px-2.5 py-1.5">
+          Fase: {stepIndex + 1}/{AI_STATUS_STEPS.length}
         </div>
-
-        <div className="mt-2 rounded-lg border border-stone-200 bg-stone-50 px-3 py-2 text-xs text-stone-700">
-          <span className="inline-flex h-2 w-2 animate-pulse rounded-full bg-[var(--accent)]" />
-          <span className="ml-2">{AI_ACTIVITY_TICKERS[activityIndex]}</span>
+        <div className="col-span-2 rounded-lg border border-stone-200 bg-stone-50 px-2.5 py-1.5 sm:col-span-1">
+          Status: aktiv
         </div>
-
-        <ul className="mt-4 space-y-2.5">
-          {AI_STATUS_STEPS.map((step, index) => {
-            const done = index < stepIndex;
-            const active = index === stepIndex;
-
-            return (
-              <li
-                key={step}
-                className={`flex items-center gap-2.5 rounded-lg border px-3 py-2 text-sm ${
-                  active
-                    ? "border-stone-900 bg-stone-50 text-stone-900"
-                    : done
-                      ? "border-stone-200 bg-white text-stone-700"
-                      : "border-stone-100 bg-white text-stone-500"
-                }`}
-              >
-                <span
-                  className={`h-2.5 w-2.5 rounded-full ${
-                    done ? "bg-[var(--success)]" : active ? "animate-pulse bg-stone-900" : "bg-stone-300"
-                  }`}
-                />
-                <span>{step}</span>
-              </li>
-            );
-          })}
-        </ul>
       </div>
-    </div>
+
+      <div className="mt-4 h-2 overflow-hidden rounded-full bg-stone-100">
+        <div
+          className="h-full rounded-full bg-[var(--accent)] transition-all duration-700"
+          style={{ width: `${Math.max(18, ((stepIndex + 1) / AI_STATUS_STEPS.length) * 100)}%` }}
+        />
+      </div>
+
+      <div className="mt-2 rounded-lg border border-stone-200 bg-stone-50 px-3 py-2 text-xs text-stone-700">
+        <span className="inline-flex h-2 w-2 animate-pulse rounded-full bg-[var(--accent)]" />
+        <span className="ml-2">{AI_ACTIVITY_TICKERS[activityIndex]}</span>
+      </div>
+
+      <ul className="mt-4 space-y-2.5">
+        {AI_STATUS_STEPS.map((step, index) => {
+          const done = index < stepIndex;
+          const active = index === stepIndex;
+
+          return (
+            <li
+              key={step}
+              className={`flex items-center gap-2.5 rounded-lg border px-3 py-2 text-sm ${
+                active
+                  ? "border-stone-900 bg-stone-50 text-stone-900"
+                  : done
+                    ? "border-stone-200 bg-white text-stone-700"
+                    : "border-stone-100 bg-white text-stone-500"
+              }`}
+            >
+              <span
+                className={`h-2.5 w-2.5 rounded-full ${
+                  done ? "bg-[var(--success)]" : active ? "animate-pulse bg-stone-900" : "bg-stone-300"
+                }`}
+              />
+              <span>{step}</span>
+            </li>
+          );
+        })}
+      </ul>
+    </>
   );
 }

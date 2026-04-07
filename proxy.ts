@@ -9,6 +9,13 @@ function isAdminHostname(hostname: string) {
   return hostname.startsWith("admin.");
 }
 
+function isBlockedPath(pathname: string) {
+  return pathname === "/prislister" ||
+    pathname.startsWith("/prislister/") ||
+    pathname === "/.private" ||
+    pathname.startsWith("/.private/");
+}
+
 function getAdminRewrittenPath(pathname: string) {
   if (pathname === "/admin" || pathname.startsWith("/admin/")) {
     return pathname;
@@ -37,6 +44,10 @@ export async function proxy(request: NextRequest) {
   const pathname = request.nextUrl.pathname;
   const hostname = request.headers.get("host") || "";
   const shouldRewriteToAdmin = isAdminHostname(hostname);
+
+  if (isBlockedPath(pathname)) {
+    return new NextResponse("Not Found", { status: 404 });
+  }
 
   if (isPublicPath(pathname, hostname)) {
     return NextResponse.next();

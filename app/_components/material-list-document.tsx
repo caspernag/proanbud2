@@ -1286,10 +1286,14 @@ function mapSectionsToDocument(
     title: section.title,
     description: section.description,
     items: section.items.map((item, itemIndex) => {
-      const catalogMatch = findCatalogMatch(item.item, catalogEntries);
+      const catalogMatch = findCatalogMatch(item.item, item.nobb, catalogEntries);
       const storedQuantityReason = normalizeOptionalText(item.quantityReason ?? "");
       const inferredNobbNumber =
-        catalogMatch?.nobbNumber ?? extractNobbNumber(item.note) ?? extractNobbNumber(item.item) ?? undefined;
+        normalizeNobbNumber(item.nobb) ??
+        catalogMatch?.nobbNumber ??
+        extractNobbNumber(item.note) ??
+        extractNobbNumber(item.item) ??
+        undefined;
 
       return {
         id: `${slugLike(section.title)}-${sectionIndex}-${itemIndex}`,
@@ -1328,7 +1332,17 @@ function slugLike(value: string) {
     .replace(/^-+|-+$/g, "");
 }
 
-function findCatalogMatch(itemName: string, catalogEntries: MaterialCatalogEntry[]) {
+function findCatalogMatch(itemName: string, itemNobb: string | undefined, catalogEntries: MaterialCatalogEntry[]) {
+  const normalizedNobb = normalizeNobbNumber(itemNobb);
+
+  if (normalizedNobb) {
+    const directByNobb = catalogEntries.find((entry) => entry.nobbNumber === normalizedNobb);
+
+    if (directByNobb) {
+      return directByNobb;
+    }
+  }
+
   const needle = itemName.trim().toLowerCase();
 
   if (!needle) {
@@ -1352,12 +1366,14 @@ function toMaterialSections(sections: DocumentSection[]): MaterialSection[] {
     description: normalizeText(section.description, "Automatisk kategori"),
     items: section.items.map((row): MaterialItem => {
       const normalizedQuantityReason = normalizeOptionalText(row.quantityReason);
+      const normalizedNobb = normalizeNobbNumber(row.nobbNumber);
 
       return {
         item: normalizeText(row.productName, "Produkt"),
         quantity: normalizeText(row.quantity, "1 stk"),
         note: normalizeText(row.comment, ""),
         ...(normalizedQuantityReason ? { quantityReason: normalizedQuantityReason } : {}),
+        ...(normalizedNobb ? { nobb: normalizedNobb } : {}),
       };
     }),
   }));
@@ -1366,6 +1382,15 @@ function toMaterialSections(sections: DocumentSection[]): MaterialSection[] {
 function extractNobbNumber(value: string) {
   const match = value.match(/\b(\d{6,10})\b/);
   return match ? match[1] : null;
+}
+
+function normalizeNobbNumber(value: string | undefined) {
+  if (!value) {
+    return null;
+  }
+
+  const normalized = value.replace(/\D/g, "");
+  return normalized.length >= 6 && normalized.length <= 10 ? normalized : null;
 }
 
 function normalizeText(value: string, fallback: string) {

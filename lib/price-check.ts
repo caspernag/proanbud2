@@ -28,7 +28,7 @@ export type PriceCheckResult = {
 };
 
 export async function calculatePriceCheck(
-  project: Pick<ProjectView, "materialSections" | "budgetNok">,
+  project: Pick<ProjectView, "materialSections">,
   preloadedProducts?: PriceListProduct[],
 ): Promise<PriceCheckResult> {
   const products = preloadedProducts ?? (await getPriceListProducts());
@@ -56,7 +56,7 @@ export async function calculatePriceCheck(
     const linePrices = new Map<string, { unitPriceNok: number; listPriceNok: number }>();
 
     for (const line of materialLines) {
-      const matchedProduct = findProductMatch(line.itemName, line.note, rows);
+      const matchedProduct = findProductMatch(line.itemName, line.note, line.nobb, rows);
 
       if (!matchedProduct || matchedProduct.priceNok <= 0) {
         continue;
@@ -159,6 +159,7 @@ function flattenMaterialLines(materialSections: MaterialSection[]) {
     section.items.map((item, itemIndex) => ({
       id: `${sectionIndex}:${itemIndex}`,
       itemName: item.item,
+      nobb: item.nobb,
       note: item.note,
       quantity: parseQuantity(item.quantity),
     })),
@@ -205,8 +206,8 @@ function supplierKeyFromName(value: string): SupplierKey | null {
   return null;
 }
 
-function findProductMatch(itemName: string, note: string, products: PriceListProduct[]) {
-  const nobb = extractNobb(itemName) || extractNobb(note);
+function findProductMatch(itemName: string, note: string, itemNobb: string | undefined, products: PriceListProduct[]) {
+  const nobb = normalizeNobb(itemNobb) || extractNobb(itemName) || extractNobb(note);
 
   if (nobb) {
     const direct = products.find((product) => product.nobbNumber === nobb);
@@ -251,6 +252,15 @@ function findProductMatch(itemName: string, note: string, products: PriceListPro
 function extractNobb(value: string) {
   const match = value.match(/\b(\d{6,10})\b/);
   return match ? match[1] : "";
+}
+
+function normalizeNobb(value?: string) {
+  if (!value) {
+    return "";
+  }
+
+  const normalized = value.replace(/\D/g, "");
+  return normalized.length >= 6 && normalized.length <= 10 ? normalized : "";
 }
 
 function tokenize(value: string) {
