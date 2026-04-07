@@ -1,0 +1,16 @@
+alter table public.material_orders
+add column if not exists customer_type text not null default 'private' check (customer_type in ('private', 'business')),
+add column if not exists company_name text,
+add column if not exists organization_number text,
+add column if not exists shipping_contact_name text,
+add column if not exists shipping_phone text,
+add column if not exists shipping_address_line1 text,
+add column if not exists shipping_postal_code text,
+add column if not exists shipping_city text,
+add column if not exists delivery_instructions text not null default '',
+add column if not exists express_delivery boolean not null default false,
+add column if not exists carry_in_service boolean not null default false,
+add column if not exists checkout_flow text not null default 'pay_now' check (checkout_flow in ('pay_now', 'business_invoice', 'financing')),
+add column if not exists financing_plan_months integer,
+add column if not exists contract_terms_version text,
+add column if not exists contract_accepted_at timestamptz;
