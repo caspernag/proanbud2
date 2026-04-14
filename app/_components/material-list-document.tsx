@@ -23,9 +23,11 @@ type MaterialRow = {
   comment: string;
   quantityReason: string;
   nobbNumber?: string;
+  productUrl?: string;
+  imageUrl?: string;
   supplierName?: string;
   unitPriceNok?: number;
-  source: "generated" | "catalog" | "custom";
+  source: "generated" | "catalog" | "custom" | "web";
   customEditable: boolean;
 };
 
@@ -59,8 +61,28 @@ type CommentDialogState = {
 };
 
 type ImagePreviewDialogState = {
-  nobbNumber: string;
   productName: string;
+  imageUrl: string;
+  nobbNumber?: string;
+};
+
+type ImportedWebProduct = {
+  productName: string;
+  quantity: string;
+  comment: string;
+  quantityReason: string;
+  supplierName?: string;
+  nobbNumber?: string;
+  imageUrl?: string;
+  productUrl: string;
+  unitPriceNok?: number;
+};
+
+type WebImportDialogState = {
+  url: string;
+  status: "analyzing" | "success" | "not_found" | "error";
+  message?: string;
+  product?: ImportedWebProduct;
 };
 
 type NobbDetails = {
@@ -97,14 +119,13 @@ export function MaterialListDocument({
   );
   const [openSections, setOpenSections] = useState<boolean[]>(() => sections.map(() => true));
   const [addMenuOpen, setAddMenuOpen] = useState(false);
-  const [addMode, setAddMode] = useState<"catalog" | "custom">("catalog");
+  const [addMode, setAddMode] = useState<"catalog" | "web">("catalog");
   const [selectedCatalogEntryId, setSelectedCatalogEntryId] = useState<string | null>(null);
   const [catalogSearchTerm, setCatalogSearchTerm] = useState("");
   const [catalogCategoryFilter, setCatalogCategoryFilter] = useState(CATALOG_FILTER_ALL);
-  const [customProductDraft, setCustomProductDraft] = useState({
-    productName: "",
-    quantity: "1 stk",
-    comment: "",
+  const [webProductDraft, setWebProductDraft] = useState({
+    url: "",
+    error: "",
   });
   const [dragSource, setDragSource] = useState<DragSource | null>(null);
   const [dragOverSectionIndex, setDragOverSectionIndex] = useState<number | null>(null);
@@ -112,6 +133,7 @@ export function MaterialListDocument({
   const [productDialog, setProductDialog] = useState<ProductDialogState | null>(null);
   const [commentDialog, setCommentDialog] = useState<CommentDialogState | null>(null);
   const [imagePreviewDialog, setImagePreviewDialog] = useState<ImagePreviewDialogState | null>(null);
+  const [webImportDialog, setWebImportDialog] = useState<WebImportDialogState | null>(null);
   const [nobbDetails, setNobbDetails] = useState<NobbDetails | null>(null);
   const [nobbLoading, setNobbLoading] = useState(false);
   const [nobbError, setNobbError] = useState<string | null>(null);
@@ -495,11 +517,68 @@ export function MaterialListDocument({
     setAddMenuOpen(false);
   }
 
-  function addCustomProduct() {
+  async function analyzeWebProduct() {
     if (readOnly) {
       return;
     }
 
+    const url = webProductDraft.url.trim();
+
+    if (!url) {
+      setWebProductDraft((current) => ({
+        ...current,
+        error: "Legg inn en gyldig produktlenke.",
+      }));
+      return;
+    }
+
+    setAddMenuOpen(false);
+    setWebImportDialog({
+      url,
+      status: "analyzing",
+    });
+
+    try {
+      const response = await fetch("/api/material-list/from-web", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({ url }),
+      });
+      const payload = (await response.json()) as {
+        ok?: boolean;
+        reason?: "not_found" | "error";
+        message?: string;
+        product?: ImportedWebProduct;
+      };
+
+      if (!response.ok || !payload.ok || !payload.product) {
+        setWebImportDialog({
+          url,
+          status: payload.reason === "not_found" ? "not_found" : "error",
+          message: payload.message || "Fant ikke gyldig produkt på denne nettsiden.",
+        });
+        return;
+      }
+
+      applyImportedWebProduct(payload.product);
+      setWebProductDraft({ url: "", error: "" });
+      setWebImportDialog({
+        url,
+        status: "success",
+        product: payload.product,
+      });
+    } catch {
+      setWebImportDialog({
+        url,
+        status: "error",
+        message: "Kunne ikke analysere lenken akkurat nå. Prøv igjen.",
+      });
+    }
+  }
+
+  function applyImportedWebProduct(product: ImportedWebProduct) {
     startTransition(() => {
       setDraftSections((current) => {
         const next = cloneSections(current);
@@ -511,7 +590,7 @@ export function MaterialListDocument({
         if (targetSectionIndex < 0) {
           next.push({
             title: CUSTOM_SECTION_TITLE,
-            description: "Manuelle produkter lagt inn av kunde.",
+            description: "Produkter lagt inn fra nettkilder.",
             items: [],
           });
           targetSectionIndex = next.length - 1;
@@ -519,12 +598,17 @@ export function MaterialListDocument({
         }
 
         next[targetSectionIndex].items.push({
-          id: createRowId("custom"),
-          productName: customProductDraft.productName.trim(),
-          quantity: customProductDraft.quantity.trim() || "1 stk",
-          comment: customProductDraft.comment.trim(),
-          quantityReason: "Manuelt produkt opprettet av bruker.",
-          source: "custom",
+          id: createRowId("web"),
+          productName: product.productName,
+          quantity: product.quantity || "1 stk",
+          comment: product.comment,
+          quantityReason: product.quantityReason || "Importert fra nettsideanalyse.",
+          ...(product.nobbNumber ? { nobbNumber: product.nobbNumber } : {}),
+          ...(product.supplierName ? { supplierName: product.supplierName } : {}),
+          ...(product.unitPriceNok !== undefined ? { unitPriceNok: product.unitPriceNok } : {}),
+          ...(product.productUrl ? { productUrl: product.productUrl } : {}),
+          ...(product.imageUrl ? { imageUrl: product.imageUrl } : {}),
+          source: "web",
           customEditable: true,
         });
 
@@ -535,13 +619,6 @@ export function MaterialListDocument({
         return next;
       });
     });
-
-    setCustomProductDraft({
-      productName: "",
-      quantity: "1 stk",
-      comment: "",
-    });
-    setAddMenuOpen(false);
   }
 
   function onDropToSection(targetSectionIndex: number) {
@@ -609,7 +686,14 @@ export function MaterialListDocument({
         </p>
 
         {!readOnly && addMenuOpen ? (
-          <div className="absolute inset-x-2 top-[calc(100%+0.35rem)] z-20 border border-stone-300 bg-white p-3 shadow-xl sm:left-auto sm:right-3 sm:w-full sm:max-w-xl">
+          <>
+            <div
+              className="fixed inset-0 z-[2147483000]"
+              onClick={() => setAddMenuOpen(false)}
+              aria-hidden="true"
+            />
+
+            <div className="absolute inset-x-2 top-[calc(100%+0.35rem)] z-[2147483001] border border-stone-300 bg-white p-3 shadow-xl sm:left-auto sm:right-3 sm:w-full sm:max-w-xl">
             <div className="mb-2 inline-flex border border-stone-300">
               <button
                 type="button"
@@ -622,12 +706,12 @@ export function MaterialListDocument({
               </button>
               <button
                 type="button"
-                onClick={() => setAddMode("custom")}
+                onClick={() => setAddMode("web")}
                 className={`px-3 py-1.5 text-sm font-semibold ${
-                  addMode === "custom" ? "bg-stone-900 text-white" : "bg-white text-stone-700"
+                  addMode === "web" ? "bg-stone-900 text-white" : "bg-white text-stone-700"
                 }`}
               >
-                Tomt produkt
+                Fra nett
               </button>
             </div>
 
@@ -723,44 +807,38 @@ export function MaterialListDocument({
             ) : (
               <div className="space-y-2">
                 <p className="text-xs text-stone-600">
-                  Tomt produkt blir lagt i automatisk kategori og er fullt redigerbart.
+                  Lim inn produktlenke. Deretter analyseres nettsiden i egen dialog med AI.
                 </p>
                 <input
-                  value={customProductDraft.productName}
+                  value={webProductDraft.url}
                   onChange={(event) =>
-                    setCustomProductDraft((current) => ({ ...current, productName: event.target.value }))
+                    setWebProductDraft((current) => ({
+                      ...current,
+                      url: event.target.value,
+                      error: "",
+                    }))
                   }
-                  placeholder="Produktnavn"
+                  placeholder="https://..."
                   className="h-9 w-full border border-stone-300 bg-white px-2 text-sm text-stone-900 outline-none focus:border-stone-900"
                 />
-                <div className="grid gap-2 sm:grid-cols-2">
-                  <input
-                    value={customProductDraft.quantity}
-                    onChange={(event) =>
-                      setCustomProductDraft((current) => ({ ...current, quantity: event.target.value }))
-                    }
-                    placeholder="Mengde (f.eks. 1 stk)"
-                    className="h-9 w-full border border-stone-300 bg-white px-2 text-sm text-stone-900 outline-none focus:border-stone-900"
-                  />
-                  <input
-                    value={customProductDraft.comment}
-                    onChange={(event) =>
-                      setCustomProductDraft((current) => ({ ...current, comment: event.target.value }))
-                    }
-                    placeholder="Kommentar"
-                    className="h-9 w-full border border-stone-300 bg-white px-2 text-sm text-stone-900 outline-none focus:border-stone-900"
-                  />
-                </div>
+
+                {webProductDraft.error ? (
+                  <p className="rounded-sm border border-rose-200 bg-rose-50 px-2.5 py-2 text-xs text-rose-700">
+                    {webProductDraft.error}
+                  </p>
+                ) : null}
+
                 <button
                   type="button"
-                  onClick={addCustomProduct}
+                  onClick={() => void analyzeWebProduct()}
                   className="h-9 border border-stone-900 bg-stone-900 px-3 text-sm font-semibold text-white transition hover:bg-stone-800"
                 >
-                  Legg til tomt produkt
+                  Analyser produktlenke
                 </button>
               </div>
             )}
-          </div>
+            </div>
+          </>
         ) : null}
       </div>
 
@@ -838,9 +916,10 @@ export function MaterialListDocument({
                                 <div className="flex min-w-0 flex-1 items-start gap-2.5">
                                   <NobbProductThumbnail
                                     nobbNumber={row.nobbNumber}
+                                    imageUrl={row.imageUrl}
                                     productName={row.productName}
-                                    onPreview={(nobbNumber, productName) =>
-                                      setImagePreviewDialog({ nobbNumber, productName })
+                                    onPreview={(preview) =>
+                                      setImagePreviewDialog(preview)
                                     }
                                   />
                                   <div className="min-w-0 flex-1">
@@ -857,6 +936,16 @@ export function MaterialListDocument({
                                         {row.nobbNumber ? (
                                           <a
                                             href={`https://nobb.no/item/${encodeURIComponent(row.nobbNumber)}`}
+                                            target="_blank"
+                                            rel="noreferrer"
+                                            title={row.productName}
+                                            className="block w-full truncate text-left text-[13px] text-stone-900 underline underline-offset-2 hover:text-[var(--danger)]"
+                                          >
+                                            {row.productName}
+                                          </a>
+                                        ) : row.productUrl ? (
+                                          <a
+                                            href={row.productUrl}
                                             target="_blank"
                                             rel="noreferrer"
                                             title={row.productName}
@@ -1152,10 +1241,99 @@ export function MaterialListDocument({
         </div>
       ) : null}
 
+      {webImportDialog ? (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-stone-900/50 p-4 backdrop-blur-[1px]">
+          <div className="w-full max-w-xl overflow-hidden rounded-md border border-stone-300 bg-white shadow-xl">
+            <div className="flex items-start justify-between gap-3 border-b border-stone-200 bg-stone-50 px-4 py-3">
+              <div>
+                <p className="text-sm font-semibold text-stone-900">Import fra nett</p>
+                <p className="line-clamp-1 text-xs text-stone-500">{webImportDialog.url}</p>
+              </div>
+              <button
+                type="button"
+                onClick={() => setWebImportDialog(null)}
+                className="h-8 rounded-sm border border-stone-300 bg-white px-2.5 text-xs font-semibold text-stone-700 transition hover:border-stone-900 hover:text-stone-900"
+              >
+                Lukk
+              </button>
+            </div>
+
+            <div className="space-y-2 p-4 text-sm text-stone-700">
+              {webImportDialog.status === "analyzing" ? (
+                <>
+                  <p className="text-sm text-stone-700">Analyserer nettsiden med AI og henter produktdata...</p>
+                  <p className="text-xs text-stone-500">
+                    Legg til-dialogen er lukket. Produkt legges automatisk til hvis analysen er gyldig.
+                  </p>
+                </>
+              ) : null}
+
+              {webImportDialog.status === "success" && webImportDialog.product ? (
+                <>
+                  <p className="rounded-sm border border-emerald-200 bg-emerald-50 px-3 py-2 text-xs text-emerald-800">
+                    Gyldig produkt funnet og lagt til i materiallisten.
+                  </p>
+                  <div className="rounded-sm border border-stone-200 bg-stone-50 px-3 py-2 text-xs text-stone-700">
+                    <p>
+                      <span className="font-semibold text-stone-900">Produkt:</span> {webImportDialog.product.productName}
+                    </p>
+                    <p>
+                      <span className="font-semibold text-stone-900">Mengde:</span> {webImportDialog.product.quantity}
+                    </p>
+                    {webImportDialog.product.nobbNumber ? (
+                      <p>
+                        <span className="font-semibold text-stone-900">NOBB:</span> {webImportDialog.product.nobbNumber}
+                      </p>
+                    ) : null}
+                  </div>
+                </>
+              ) : null}
+
+              {webImportDialog.status === "not_found" ? (
+                <p className="rounded-sm border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-800">
+                  {webImportDialog.message || "Fant ikke gyldig produkt fra nettsiden."}
+                </p>
+              ) : null}
+
+              {webImportDialog.status === "error" ? (
+                <p className="rounded-sm border border-rose-200 bg-rose-50 px-3 py-2 text-xs text-rose-800">
+                  {webImportDialog.message || "Noe gikk galt under analyse av lenken."}
+                </p>
+              ) : null}
+
+              {webImportDialog.status !== "analyzing" ? (
+                <div className="flex justify-end gap-2">
+                  <button
+                    type="button"
+                    onClick={() => setWebImportDialog(null)}
+                    className="h-8 rounded-sm border border-stone-300 bg-white px-2.5 text-xs font-semibold text-stone-700 transition hover:border-stone-900 hover:text-stone-900"
+                  >
+                    Lukk
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setWebImportDialog(null);
+                      setAddMode("web");
+                      setAddMenuOpen(true);
+                    }}
+                    className="h-8 rounded-sm border border-stone-900 bg-stone-900 px-2.5 text-xs font-semibold text-white transition hover:bg-stone-800"
+                  >
+                    Prøv ny lenke
+                  </button>
+                </div>
+              ) : null}
+            </div>
+          </div>
+        </div>
+      ) : null}
+
       {imagePreviewDialog ? (
         <NobbImagePreviewDialog
-          nobbNumber={imagePreviewDialog.nobbNumber}
+          key={imagePreviewDialog.imageUrl}
           productName={imagePreviewDialog.productName}
+          imageUrl={imagePreviewDialog.imageUrl}
+          nobbNumber={imagePreviewDialog.nobbNumber}
           onClose={() => setImagePreviewDialog(null)}
         />
       ) : null}
@@ -1165,20 +1343,21 @@ export function MaterialListDocument({
 
 function NobbProductThumbnail({
   nobbNumber,
+  imageUrl,
   productName,
   onPreview,
 }: {
   nobbNumber?: string;
+  imageUrl?: string;
   productName: string;
-  onPreview?: (nobbNumber: string, productName: string) => void;
+  onPreview?: (preview: ImagePreviewDialogState) => void;
 }) {
-  const [hasError, setHasError] = useState(false);
+  const [brokenImageSrc, setBrokenImageSrc] = useState("");
 
-  useEffect(() => {
-    setHasError(false);
-  }, [nobbNumber]);
+  const resolvedImageUrl = nobbNumber ? buildNobbImageUrl(nobbNumber, "SQUARE") : imageUrl || "";
+  const canRenderImage = resolvedImageUrl.length > 0 && brokenImageSrc !== resolvedImageUrl;
 
-  if (!nobbNumber) {
+  if (!canRenderImage) {
     return (
       <div className="mt-0.5 h-10 w-10 shrink-0 overflow-hidden rounded-sm border border-stone-300 bg-stone-50">
         <div className="flex h-full w-full items-center justify-center text-[9px] font-semibold uppercase tracking-[0.06em] text-stone-500">
@@ -1188,50 +1367,45 @@ function NobbProductThumbnail({
     );
   }
 
-  const imageUrl = buildNobbImageUrl(nobbNumber, "SQUARE");
-
   return (
     <button
       type="button"
-      onClick={() => onPreview?.(nobbNumber, productName)}
+      onClick={() =>
+        onPreview?.({
+          productName,
+          imageUrl: nobbNumber ? buildNobbImageUrl(nobbNumber, "ORIGINAL") : resolvedImageUrl,
+          ...(nobbNumber ? { nobbNumber } : {}),
+        })
+      }
       className="mt-0.5 h-10 w-10 shrink-0 overflow-hidden rounded-sm border border-stone-300 bg-stone-50 transition hover:border-stone-900"
       title="Vis bilde"
       aria-label="Vis produktbilde"
     >
-      {!hasError ? (
-        <img
-          src={imageUrl}
-          alt={productName}
-          loading="lazy"
-          draggable={false}
-          onError={() => setHasError(true)}
-          className="h-full w-full object-contain object-center"
-        />
-      ) : (
-        <div className="flex h-full w-full items-center justify-center text-[9px] font-semibold uppercase tracking-[0.06em] text-stone-500">
-          IMG
-        </div>
-      )}
+      <img
+        src={resolvedImageUrl}
+        alt={productName}
+        loading="lazy"
+        draggable={false}
+        onError={() => setBrokenImageSrc(resolvedImageUrl)}
+        className="h-full w-full object-contain object-center"
+      />
     </button>
   );
 }
 
 function NobbImagePreviewDialog({
-  nobbNumber,
+  imageUrl,
   productName,
+  nobbNumber,
   onClose,
 }: {
-  nobbNumber: string;
+  imageUrl: string;
   productName: string;
+  nobbNumber?: string;
   onClose: () => void;
 }) {
-  const [imageSrc, setImageSrc] = useState(() => buildNobbImageUrl(nobbNumber, "ORIGINAL"));
+  const [imageSrc, setImageSrc] = useState(() => imageUrl);
   const [usedFallback, setUsedFallback] = useState(false);
-
-  useEffect(() => {
-    setImageSrc(buildNobbImageUrl(nobbNumber, "ORIGINAL"));
-    setUsedFallback(false);
-  }, [nobbNumber]);
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-stone-900/60 p-4">
@@ -1239,7 +1413,10 @@ function NobbImagePreviewDialog({
         <div className="flex items-center justify-between gap-3 border-b border-stone-200 bg-stone-50 px-4 py-3">
           <div>
             <p className="text-sm font-semibold text-stone-900">Produktbilde</p>
-            <p className="text-xs text-stone-500">{productName} · NOBB {nobbNumber}</p>
+            <p className="text-xs text-stone-500">
+              {productName}
+              {nobbNumber ? ` · NOBB ${nobbNumber}` : ""}
+            </p>
           </div>
           <button
             type="button"
@@ -1255,7 +1432,7 @@ function NobbImagePreviewDialog({
               src={imageSrc}
               alt={productName}
               onError={() => {
-                if (!usedFallback) {
+                if (nobbNumber && !usedFallback) {
                   setImageSrc(buildNobbImageUrl(nobbNumber, "SQUARE"));
                   setUsedFallback(true);
                   return;
@@ -1294,6 +1471,8 @@ function mapSectionsToDocument(
         extractNobbNumber(item.note) ??
         extractNobbNumber(item.item) ??
         undefined;
+      const hasWebMetadata = Boolean(item.sourceUrl || item.imageUrl);
+      const hasCustomSection = section.title.toLowerCase() === CUSTOM_SECTION_TITLE.toLowerCase();
 
       return {
         id: `${slugLike(section.title)}-${sectionIndex}-${itemIndex}`,
@@ -1305,10 +1484,12 @@ function mapSectionsToDocument(
           catalogMatch?.quantityReason ||
           `Automatisk beregning fra prosjektdata for kategori "${section.title}".`,
         nobbNumber: inferredNobbNumber,
-        supplierName: catalogMatch?.supplierName,
-        unitPriceNok: catalogMatch?.unitPriceNok,
-        source: "generated",
-        customEditable: false,
+        ...(item.sourceUrl ? { productUrl: item.sourceUrl } : {}),
+        ...(item.imageUrl ? { imageUrl: item.imageUrl } : {}),
+        supplierName: item.supplierName || catalogMatch?.supplierName,
+        unitPriceNok: item.unitPriceNok ?? catalogMatch?.unitPriceNok,
+        source: hasWebMetadata ? "web" : "generated",
+        customEditable: hasWebMetadata || hasCustomSection,
       };
     }),
   }));
@@ -1374,6 +1555,12 @@ function toMaterialSections(sections: DocumentSection[]): MaterialSection[] {
         note: normalizeText(row.comment, ""),
         ...(normalizedQuantityReason ? { quantityReason: normalizedQuantityReason } : {}),
         ...(normalizedNobb ? { nobb: normalizedNobb } : {}),
+        ...(normalizeOptionalText(row.productUrl ?? "") ? { sourceUrl: normalizeOptionalText(row.productUrl ?? "") } : {}),
+        ...(normalizeOptionalText(row.imageUrl ?? "") ? { imageUrl: normalizeOptionalText(row.imageUrl ?? "") } : {}),
+        ...(normalizeOptionalText(row.supplierName ?? "") ? { supplierName: normalizeOptionalText(row.supplierName ?? "") } : {}),
+        ...(typeof row.unitPriceNok === "number" && Number.isFinite(row.unitPriceNok)
+          ? { unitPriceNok: Math.max(0, Math.round(row.unitPriceNok)) }
+          : {}),
       };
     }),
   }));

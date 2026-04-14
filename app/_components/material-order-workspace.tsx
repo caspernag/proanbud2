@@ -3,6 +3,7 @@
 import { startTransition, useEffect, useMemo, useState } from "react";
 
 import { DatePicker } from "@/components/ui/date-picker";
+import { getSupplierReturnTerms } from "@/lib/material-return";
 import { formatCurrency } from "@/lib/utils";
 
 type SupplierKey = "byggmakker" | "monter_optimera" | "byggmax" | "xl_bygg";
@@ -243,6 +244,11 @@ export function MaterialOrderWorkspace({
   }, [items, suppliers]);
 
   const includedLineCount = useMemo(() => items.filter((item) => item.isIncluded).length, [items]);
+
+  const returnTermsBySupplier = useMemo(() => {
+    const supplierKeys = Array.from(new Set(items.filter((item) => item.isIncluded).map((item) => item.supplierKey)));
+    return supplierKeys.map((supplierKey) => getSupplierReturnTerms(supplierKey));
+  }, [items]);
 
   const orderChecklist = useMemo(
     () => [
@@ -955,11 +961,15 @@ export function MaterialOrderWorkspace({
                   </tr>
                 </thead>
                 <tbody>
-                  {items.map((item) => (
+                  {items.map((item) => {
+                    const returnTerms = getSupplierReturnTerms(item.supplierKey);
+
+                    return (
                     <tr key={item.id} className={`align-top ${item.isIncluded ? "bg-white" : "bg-stone-50/70"}`}>
                       <td className="border border-stone-200 px-2 py-1.5 break-words">
                         <div className="flex min-w-0 items-start gap-2.5">
                           <OrderLineThumbnail
+                            key={`${item.id}:${item.supplierSku ?? "none"}`}
                             nobbNumber={item.supplierSku}
                             productName={item.productName}
                             onPreview={(nobbNumber, productName) =>
@@ -983,6 +993,9 @@ export function MaterialOrderWorkspace({
                               </p>
                             )}
                             <p className="mt-1 text-[11px] text-stone-500">{item.sectionTitle}</p>
+                            <p className="text-[10px] text-stone-500">
+                              Angrerett {returnTerms.angerrettDays} dager · Reklamasjon {returnTerms.complaintYears} år · {returnTerms.returnShipping === "gratis" ? "Returfrakt inkludert" : "Returfrakt kan belastes"}
+                            </p>
                           </div>
                         </div>
                       </td>
@@ -1120,7 +1133,8 @@ export function MaterialOrderWorkspace({
                         </button>
                       </td>
                     </tr>
-                  ))}
+                    );
+                  })}
                 </tbody>
               </table>
             </div>
@@ -1179,6 +1193,33 @@ export function MaterialOrderWorkspace({
           </section>
 
           <section className="panel rounded-2xl p-4">
+            <p className="text-sm font-semibold text-stone-900">Returvilkår før kjøp</p>
+            <p className="mt-1 text-xs text-stone-600">
+              Leverandørspesifikk angrerett og reklamasjonsinformasjon synlig før innsending.
+            </p>
+            <div className="mt-3 space-y-2">
+              {returnTermsBySupplier.map((terms) => (
+                <div key={terms.supplierKey} className="rounded-md border border-stone-200 bg-white px-3 py-2">
+                  <p className="text-xs font-semibold text-stone-900">{terms.supplierLabel}</p>
+                  <p className="mt-1 text-[11px] text-stone-600">
+                    Angrerett: {terms.angerrettDays} dager · Reklamasjon: {terms.complaintYears} år
+                  </p>
+                  <p className="text-[11px] text-stone-600">
+                    Returfrakt: {terms.returnShipping === "gratis" ? "Gratis" : "Kundebetalt"}
+                    {terms.handlingFeeNok > 0 ? ` · Behandlingsgebyr ${formatCurrency(terms.handlingFeeNok)}` : ""}
+                  </p>
+                  <p className="mt-1 text-[11px] text-stone-500">{terms.notes[0]}</p>
+                </div>
+              ))}
+              {returnTermsBySupplier.length === 0 ? (
+                <div className="rounded-md border border-stone-200 bg-white px-3 py-2 text-xs text-stone-500">
+                  Ingen aktive leverandørlinjer i bestillingen ennå.
+                </div>
+              ) : null}
+            </div>
+          </section>
+
+          <section className="panel rounded-2xl p-4">
             <p className="text-sm font-semibold text-stone-900">Betaling og innsending</p>
             <p className="mt-1 text-xs text-stone-600">
               Oppgjørsform: {checkoutFlow === "pay_now" ? "Kortbetaling via Stripe" : "Klarna via Stripe"}
@@ -1217,12 +1258,22 @@ export function MaterialOrderWorkspace({
             </div>
 
             <p className="mt-3 min-h-6 text-sm text-stone-600">{message}</p>
+
+            {(orderStatus === "paid" || orderStatus === "submitted") ? (
+              <a
+                href={`/min-side/retur?order=${encodeURIComponent(orderId)}`}
+                className="inline-flex h-8 items-center justify-center rounded-sm border border-stone-300 bg-white px-3 text-xs font-semibold text-stone-700 transition hover:border-stone-900 hover:text-stone-900"
+              >
+                Start retur/reklamasjon
+              </a>
+            ) : null}
           </section>
         </aside>
       </div>
 
       {imagePreviewDialog ? (
         <OrderLineImagePreviewDialog
+          key={imagePreviewDialog.nobbNumber}
           nobbNumber={imagePreviewDialog.nobbNumber}
           productName={imagePreviewDialog.productName}
           onClose={() => setImagePreviewDialog(null)}
@@ -1242,10 +1293,6 @@ function OrderLineThumbnail({
   onPreview: (nobbNumber: string, productName: string) => void;
 }) {
   const [hasError, setHasError] = useState(false);
-
-  useEffect(() => {
-    setHasError(false);
-  }, [nobbNumber]);
 
   if (!nobbNumber) {
     return (
@@ -1296,11 +1343,6 @@ function OrderLineImagePreviewDialog({
 }) {
   const [imageSrc, setImageSrc] = useState(() => buildNobbImageUrl(nobbNumber, "ORIGINAL"));
   const [usedFallback, setUsedFallback] = useState(false);
-
-  useEffect(() => {
-    setImageSrc(buildNobbImageUrl(nobbNumber, "ORIGINAL"));
-    setUsedFallback(false);
-  }, [nobbNumber]);
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-stone-900/60 p-4">

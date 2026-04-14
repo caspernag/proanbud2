@@ -386,6 +386,7 @@ export default async function ProjectPage({ params, searchParams }: ProjectPageP
               {hasComparedBefore ? "Sammenlign igjen" : "Sammenlign priser"}
             </Link>
           </div>
+
         </div>
       </section>
     </main>

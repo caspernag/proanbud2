@@ -9,6 +9,10 @@ export type MaterialItem = {
   note: string;
   quantityReason?: string;
   nobb?: string;
+  sourceUrl?: string;
+  imageUrl?: string;
+  supplierName?: string;
+  unitPriceNok?: number;
 };
 
 export type MaterialSection = {
@@ -629,6 +633,10 @@ function parseMaterialSectionsFromUnknown(parsed: unknown) {
         note?: unknown;
         quantityReason?: unknown;
         nobb?: unknown;
+        sourceUrl?: unknown;
+        imageUrl?: unknown;
+        supplierName?: unknown;
+        unitPriceNok?: unknown;
       };
 
       const parsedItem: MaterialItem = {
@@ -652,6 +660,30 @@ function parseMaterialSectionsFromUnknown(parsed: unknown) {
         }
       }
 
+      if (typeof maybeItem.sourceUrl === "string") {
+        const normalizedSourceUrl = parseHttpUrl(maybeItem.sourceUrl);
+
+        if (normalizedSourceUrl) {
+          parsedItem.sourceUrl = normalizedSourceUrl;
+        }
+      }
+
+      if (typeof maybeItem.imageUrl === "string") {
+        const normalizedImageUrl = parseHttpUrl(maybeItem.imageUrl);
+
+        if (normalizedImageUrl) {
+          parsedItem.imageUrl = normalizedImageUrl;
+        }
+      }
+
+      if (typeof maybeItem.supplierName === "string" && maybeItem.supplierName.trim().length > 0) {
+        parsedItem.supplierName = maybeItem.supplierName.trim().slice(0, 120);
+      }
+
+      if (typeof maybeItem.unitPriceNok === "number" && Number.isFinite(maybeItem.unitPriceNok)) {
+        parsedItem.unitPriceNok = Math.max(0, Math.round(maybeItem.unitPriceNok));
+      }
+
       items.push(parsedItem);
     }
 
@@ -670,4 +702,18 @@ function parseMaterialSectionsFromUnknown(parsed: unknown) {
   }
 
   return normalized.length > 0 ? normalized : null;
+}
+
+function parseHttpUrl(value: string) {
+  try {
+    const parsed = new URL(value.trim());
+
+    if (parsed.protocol !== "http:" && parsed.protocol !== "https:") {
+      return "";
+    }
+
+    return parsed.toString();
+  } catch {
+    return "";
+  }
 }

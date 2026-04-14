@@ -1,6 +1,6 @@
 "use client";
 
-import { type FormEvent, type KeyboardEvent as ReactKeyboardEvent, useCallback, useEffect, useRef, useState } from "react";
+import { type FormEvent, type KeyboardEvent as ReactKeyboardEvent, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useFormStatus } from "react-dom";
 import { CirclePlus } from 'lucide-react';
 
@@ -58,6 +58,45 @@ type ClarificationSession = {
   questions: ClarificationQuestion[];
   answers: Record<string, string>;
   index: number;
+};
+
+type CatalogSearchEntry = {
+  id: string;
+  productName: string;
+  quantity: string;
+  comment: string;
+  quantityReason: string;
+  nobbNumber: string;
+  supplierName: string;
+  unitPriceNok: number;
+  sectionTitle: string;
+  category: string;
+};
+
+type DesiredProductDraft = {
+  id: string;
+  source: "catalog" | "web";
+  productName: string;
+  quantity: string;
+  comment: string;
+  quantityReason: string;
+  nobbNumber?: string;
+  supplierName?: string;
+  unitPriceNok?: number;
+  productUrl?: string;
+  imageUrl?: string;
+};
+
+type FromWebProductResponse = {
+  productName: string;
+  quantity: string;
+  comment: string;
+  quantityReason: string;
+  supplierName?: string;
+  nobbNumber?: string;
+  imageUrl?: string;
+  productUrl: string;
+  unitPriceNok?: number;
 };
 
 function parseClarificationQuestions(payload: unknown) {
@@ -553,14 +592,16 @@ export function NewProjectDialog({ action, initialOpen = false }: NewProjectDial
                 </label>
 
                 <label className="block space-y-1.5 text-sm text-stone-700 sm:col-span-2">
-                  <span className="font-medium">Kort beskrivelse</span>
+                  <span className="font-medium">God beskrivelse</span>
                   <textarea
                     name="description"
                     rows={4}
-                    placeholder="Privat materialliste med behov for presis mengdegrunnlag og leverandørprissjekk."
+                    placeholder="Beskriv prosjektet godt: hva som skal bygges/oppgraderes, mål/areal, materialvalg, ønsket kvalitet og eventuelle spesifikke kundekrav."
                     className="w-full rounded-xl border border-stone-300 bg-white px-3 py-2 text-sm text-stone-900 outline-none transition focus:border-stone-900"
                   />
                 </label>
+
+                <DesiredProductsField />
 
                 <div className="space-y-2.5 text-sm text-stone-700 sm:col-span-2">
                   <div className="flex items-center justify-between gap-2">
@@ -979,5 +1020,304 @@ function CalculationProcessingCard({ fileCount }: { fileCount: number }) {
         })}
       </ul>
     </>
+  );
+}
+
+function DesiredProductsField() {
+  const [activeTab, setActiveTab] = useState<"catalog" | "web">("catalog");
+  const [desiredProducts, setDesiredProducts] = useState<DesiredProductDraft[]>([]);
+  const [catalogQuery, setCatalogQuery] = useState("");
+  const [catalogResults, setCatalogResults] = useState<CatalogSearchEntry[]>([]);
+  const [catalogPending, setCatalogPending] = useState(false);
+  const [catalogError, setCatalogError] = useState("");
+  const [webUrl, setWebUrl] = useState("");
+  const [webPending, setWebPending] = useState(false);
+  const [webMessage, setWebMessage] = useState("");
+  const [webMessageTone, setWebMessageTone] = useState<"idle" | "success" | "error">("idle");
+
+  const serializedDesiredProducts = useMemo(() => JSON.stringify(desiredProducts), [desiredProducts]);
+
+  useEffect(() => {
+    const needle = catalogQuery.trim();
+
+    if (needle.length < 2) {
+      setCatalogResults([]);
+      setCatalogPending(false);
+      setCatalogError("");
+      return;
+    }
+
+    const controller = new AbortController();
+    const timeout = window.setTimeout(async () => {
+      setCatalogPending(true);
+      setCatalogError("");
+
+      try {
+        const response = await fetch(`/api/material-list/catalog?q=${encodeURIComponent(needle)}&limit=12`, {
+          signal: controller.signal,
+        });
+
+        if (!response.ok) {
+          setCatalogResults([]);
+          setCatalogError("Kunne ikke hente katalogtreff akkurat nå.");
+          return;
+        }
+
+        const payload = (await response.json()) as { items?: CatalogSearchEntry[] };
+        setCatalogResults(Array.isArray(payload.items) ? payload.items : []);
+      } catch {
+        if (!controller.signal.aborted) {
+          setCatalogResults([]);
+          setCatalogError("Kunne ikke hente katalogtreff akkurat nå.");
+        }
+      } finally {
+        if (!controller.signal.aborted) {
+          setCatalogPending(false);
+        }
+      }
+    }, 200);
+
+    return () => {
+      controller.abort();
+      window.clearTimeout(timeout);
+    };
+  }, [catalogQuery]);
+
+  function addDesiredProduct(product: DesiredProductDraft) {
+    setDesiredProducts((current) => {
+      const duplicate = current.some((entry) => {
+        if (product.nobbNumber && entry.nobbNumber && entry.nobbNumber === product.nobbNumber) {
+          return true;
+        }
+
+        if (product.productUrl && entry.productUrl && entry.productUrl === product.productUrl) {
+          return true;
+        }
+
+        return (
+          entry.productName.toLowerCase() === product.productName.toLowerCase() &&
+          entry.source === product.source
+        );
+      });
+
+      if (duplicate) {
+        return current;
+      }
+
+      return [product, ...current];
+    });
+  }
+
+  async function addFromWeb() {
+    const url = webUrl.trim();
+
+    if (!url) {
+      setWebMessageTone("error");
+      setWebMessage("Legg inn en gyldig produktlenke.");
+      return;
+    }
+
+    setWebPending(true);
+    setWebMessage("");
+    setWebMessageTone("idle");
+
+    try {
+      const response = await fetch("/api/material-list/from-web", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({ url }),
+      });
+
+      const payload = (await response.json()) as {
+        ok?: boolean;
+        message?: string;
+        product?: FromWebProductResponse;
+      };
+
+      if (!response.ok || !payload.ok || !payload.product) {
+        setWebMessageTone("error");
+        setWebMessage(payload.message || "Fant ikke gyldig produkt fra nettsiden.");
+        return;
+      }
+
+      addDesiredProduct({
+        id: `web-${crypto.randomUUID()}`,
+        source: "web",
+        productName: payload.product.productName,
+        quantity: payload.product.quantity || "1 stk",
+        comment: payload.product.comment,
+        quantityReason: payload.product.quantityReason,
+        ...(payload.product.nobbNumber ? { nobbNumber: payload.product.nobbNumber } : {}),
+        ...(payload.product.supplierName ? { supplierName: payload.product.supplierName } : {}),
+        ...(typeof payload.product.unitPriceNok === "number" ? { unitPriceNok: Math.round(payload.product.unitPriceNok) } : {}),
+        ...(payload.product.productUrl ? { productUrl: payload.product.productUrl } : {}),
+        ...(payload.product.imageUrl ? { imageUrl: payload.product.imageUrl } : {}),
+      });
+
+      setWebMessageTone("success");
+      setWebMessage(`La til: ${payload.product.productName}`);
+      setWebUrl("");
+    } catch {
+      setWebMessageTone("error");
+      setWebMessage("Kunne ikke analysere lenken akkurat nå.");
+    } finally {
+      setWebPending(false);
+    }
+  }
+
+  return (
+    <div className="space-y-2.5 rounded-xl border border-stone-200 bg-stone-50 p-3.5 sm:col-span-2">
+      <input type="hidden" name="desiredProductsJson" value={serializedDesiredProducts} readOnly />
+
+      <div className="flex flex-wrap items-start justify-between gap-2">
+        <div>
+          <p className="text-sm font-semibold text-stone-900">Spesifikke produkter (valgfritt)</p>
+          <p className="mt-0.5 text-xs text-stone-600">
+            Legg til konkrete produkter kunden ønsker, via katalogsøk eller fra nett.
+          </p>
+        </div>
+        <span className="inline-flex rounded-full border border-stone-300 bg-white px-2.5 py-1 text-[11px] font-semibold text-stone-700">
+          {desiredProducts.length} valgt
+        </span>
+      </div>
+
+      <div className="inline-flex rounded-full border border-stone-300 bg-white p-0.5">
+        <button
+          type="button"
+          onClick={() => setActiveTab("catalog")}
+          className={`rounded-full px-3 py-1.5 text-xs font-semibold transition ${
+            activeTab === "catalog" ? "bg-stone-900 text-white" : "text-stone-700 hover:text-stone-900"
+          }`}
+        >
+          Fra katalog
+        </button>
+        <button
+          type="button"
+          onClick={() => setActiveTab("web")}
+          className={`rounded-full px-3 py-1.5 text-xs font-semibold transition ${
+            activeTab === "web" ? "bg-stone-900 text-white" : "text-stone-700 hover:text-stone-900"
+          }`}
+        >
+          Fra nett
+        </button>
+      </div>
+
+      {activeTab === "catalog" ? (
+        <div className="space-y-2">
+          <input
+            value={catalogQuery}
+            onChange={(event) => setCatalogQuery(event.currentTarget.value)}
+            placeholder="Søk på produktnavn, NOBB eller leverandør"
+            className="h-10 w-full rounded-xl border border-stone-300 bg-white px-3 text-sm text-stone-900 outline-none transition focus:border-stone-900"
+          />
+          <p className="text-xs text-stone-500">
+            {catalogPending
+              ? "Søker i katalog..."
+              : catalogQuery.trim().length < 2
+                ? "Skriv minst 2 tegn for å søke."
+                : `Fant ${catalogResults.length} treff.`}
+          </p>
+          {catalogError ? (
+            <p className="rounded-lg border border-rose-200 bg-rose-50 px-2.5 py-2 text-xs text-rose-700">
+              {catalogError}
+            </p>
+          ) : null}
+          {catalogResults.length > 0 ? (
+            <div className="max-h-52 space-y-1 overflow-y-auto rounded-xl border border-stone-200 bg-white p-2">
+              {catalogResults.map((entry) => (
+                <div key={entry.id} className="flex items-start justify-between gap-2 rounded-lg border border-stone-200 bg-stone-50 px-2.5 py-2">
+                  <div className="min-w-0">
+                    <p className="truncate text-xs font-semibold text-stone-900">{entry.productName}</p>
+                    <p className="truncate text-[11px] text-stone-600">
+                      NOBB {entry.nobbNumber} · {entry.supplierName}
+                    </p>
+                  </div>
+                  <button
+                    type="button"
+                    onClick={() =>
+                      addDesiredProduct({
+                        id: `catalog-${entry.id}`,
+                        source: "catalog",
+                        productName: entry.productName,
+                        quantity: entry.quantity,
+                        comment: entry.comment,
+                        quantityReason: entry.quantityReason,
+                        nobbNumber: entry.nobbNumber,
+                        supplierName: entry.supplierName,
+                        unitPriceNok: entry.unitPriceNok,
+                      })
+                    }
+                    className="shrink-0 rounded-full border border-stone-300 bg-white px-2.5 py-1 text-[11px] font-semibold text-stone-700 transition hover:border-stone-900 hover:text-stone-900"
+                  >
+                    Legg til
+                  </button>
+                </div>
+              ))}
+            </div>
+          ) : null}
+        </div>
+      ) : (
+        <div className="space-y-2">
+          <div className="flex flex-col gap-2 sm:flex-row">
+            <input
+              value={webUrl}
+              onChange={(event) => setWebUrl(event.currentTarget.value)}
+              placeholder="https://..."
+              className="h-10 flex-1 rounded-xl border border-stone-300 bg-white px-3 text-sm text-stone-900 outline-none transition focus:border-stone-900"
+            />
+            <button
+              type="button"
+              onClick={() => void addFromWeb()}
+              disabled={webPending}
+              className="inline-flex h-10 items-center justify-center rounded-full bg-stone-900 px-4 text-xs font-semibold text-white transition hover:bg-stone-800 disabled:cursor-not-allowed disabled:bg-stone-400"
+            >
+              {webPending ? "Analyserer..." : "Legg til fra nett"}
+            </button>
+          </div>
+
+          {webMessage ? (
+            <p
+              className={`rounded-lg border px-2.5 py-2 text-xs ${
+                webMessageTone === "success"
+                  ? "border-emerald-200 bg-emerald-50 text-emerald-800"
+                  : "border-rose-200 bg-rose-50 text-rose-700"
+              }`}
+            >
+              {webMessage}
+            </p>
+          ) : (
+            <p className="text-xs text-stone-500">Lim inn en produktside, så henter AI strukturert produktdata.</p>
+          )}
+        </div>
+      )}
+
+      {desiredProducts.length > 0 ? (
+        <div className="space-y-1.5 rounded-xl border border-stone-200 bg-white p-2.5">
+          {desiredProducts.map((product) => (
+            <div key={product.id} className="flex items-start justify-between gap-2 rounded-lg border border-stone-200 bg-stone-50 px-2.5 py-2">
+              <div className="min-w-0">
+                <p className="truncate text-xs font-semibold text-stone-900">{product.productName}</p>
+                <p className="truncate text-[11px] text-stone-600">
+                  {product.source === "catalog" ? "Katalog" : "Nett"}
+                  {product.nobbNumber ? ` · NOBB ${product.nobbNumber}` : ""}
+                  {product.supplierName ? ` · ${product.supplierName}` : ""}
+                </p>
+              </div>
+              <button
+                type="button"
+                onClick={() =>
+                  setDesiredProducts((current) => current.filter((entry) => entry.id !== product.id))
+                }
+                className="shrink-0 rounded-full border border-stone-300 bg-white px-2.5 py-1 text-[11px] font-semibold text-stone-700 transition hover:border-stone-900 hover:text-stone-900"
+              >
+                Fjern
+              </button>
+            </div>
+          ))}
+        </div>
+      ) : null}
+    </div>
   );
 }

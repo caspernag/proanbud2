@@ -35,6 +35,11 @@ const NAV_ITEMS: NavItem[] = [
     isActive: (pathname) => pathname.startsWith("/min-side/bestillinger"),
   },
   {
+    href: "/min-side/retur",
+    label: "Retur/Reklamasjon",
+    isActive: (pathname) => pathname.startsWith("/min-side/retur"),
+  },
+  {
     href: "/min-side/innstillinger",
     label: "Innstillinger",
     isActive: (pathname) => pathname.startsWith("/min-side/innstillinger"),

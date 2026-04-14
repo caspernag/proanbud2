@@ -17,10 +17,23 @@ import {
 } from "@/lib/material-order";
 import { applyMarkupForSupplierKey, getSupplierMarkups, type SupplierMarkup } from "@/lib/price-markup";
 import { getPriceListProducts, type PriceListProduct } from "@/lib/price-lists";
-import { buildProjectView } from "@/lib/project-data";
+import { buildProjectView, type MaterialSection } from "@/lib/project-data";
 import { isStripeBypassed } from "@/lib/env";
 import { createSupabaseServerClient } from "@/lib/supabase/server";
 import { normalizeProjectTitle, slugify, toNumber } from "@/lib/utils";
+
+type DesiredProductInput = {
+  source: "catalog" | "web";
+  productName: string;
+  quantity: string;
+  comment: string;
+  quantityReason: string;
+  nobbNumber?: string;
+  supplierName?: string;
+  unitPriceNok?: number;
+  productUrl?: string;
+  imageUrl?: string;
+};
 
 export async function createProjectAction(formData: FormData) {
   const startDate = String(formData.get("startDate") || "").trim();
@@ -28,6 +41,7 @@ export async function createProjectAction(formData: FormData) {
   const uploadedFiles = formData.getAll("attachments").filter(isUploadedFile);
   const attachmentSummaries = summarizeAttachments(uploadedFiles);
   const baseDescription = String(formData.get("description") || "Prosjektbeskrivelse mangler.").trim();
+  const desiredProducts = parseDesiredProducts(formData.get("desiredProductsJson"));
   const metadataLines: string[] = [];
 
   if (startDate) {
@@ -41,6 +55,23 @@ export async function createProjectAction(formData: FormData) {
   }
   if (clarificationNotes) {
     metadataLines.push(clarificationNotes.slice(0, 2000));
+  }
+  if (desiredProducts.length > 0) {
+    const desiredLines = desiredProducts
+      .map((product, index) => {
+        const details = [
+          product.quantity,
+          product.source === "catalog" ? "katalog" : "nett",
+          product.nobbNumber ? `NOBB ${product.nobbNumber}` : null,
+          product.supplierName ?? null,
+          product.unitPriceNok !== undefined ? `${product.unitPriceNok} NOK` : null,
+        ].filter((entry): entry is string => Boolean(entry));
+
+        return `- ${index + 1}. ${product.productName} (${details.join(" · ")})`;
+      })
+      .slice(0, 40);
+
+    metadataLines.push(["Kundens spesifikke produktønsker:", ...desiredLines].join("\n"));
   }
 
   const description = metadataLines.length > 0
@@ -58,9 +89,17 @@ export async function createProjectAction(formData: FormData) {
 
   const slug = `${slugify(input.title)}-${crypto.randomUUID().slice(0, 8)}`;
   const aiMaterialSections = await generateMaterialSectionsFromAttachments(input, uploadedFiles);
+  const desiredProductSection = buildDesiredProductsSection(desiredProducts);
+  const mergedMaterialSections = aiMaterialSections
+    ? desiredProductSection
+      ? [...aiMaterialSections, desiredProductSection]
+      : aiMaterialSections
+    : desiredProductSection
+      ? [desiredProductSection]
+      : null;
   const generatedProject = buildProjectView(input, {
     slug,
-    ...(aiMaterialSections ? { materialSections: aiMaterialSections } : {}),
+    ...(mergedMaterialSections ? { materialSections: mergedMaterialSections } : {}),
   });
   const supabase = await createSupabaseServerClient();
 
@@ -104,8 +143,8 @@ export async function createProjectAction(formData: FormData) {
     description: input.description,
   });
 
-  if (aiMaterialSections) {
-    const materialListCompressed = encodeMaterialSectionsForUrl(aiMaterialSections);
+  if (mergedMaterialSections) {
+    const materialListCompressed = encodeMaterialSectionsForUrl(mergedMaterialSections);
 
     if (materialListCompressed) {
       params.set("materialListCompressed", materialListCompressed);
@@ -445,6 +484,144 @@ export async function startOrderFromSupplierAction(formData: FormData) {
 
 function isUploadedFile(value: FormDataEntryValue): value is File {
   return value instanceof File && value.size > 0;
+}
+
+function parseDesiredProducts(value: FormDataEntryValue | null) {
+  if (typeof value !== "string" || value.trim().length === 0) {
+    return [] as DesiredProductInput[];
+  }
+
+  try {
+    const parsed = JSON.parse(value) as unknown;
+
+    if (!Array.isArray(parsed)) {
+      return [] as DesiredProductInput[];
+    }
+
+    const normalized: DesiredProductInput[] = [];
+
+    for (const rawEntry of parsed) {
+      if (!rawEntry || typeof rawEntry !== "object") {
+        continue;
+      }
+
+      const entry = rawEntry as Record<string, unknown>;
+      const source = entry.source === "web" ? "web" : "catalog";
+      const productName = toTrimmedString(entry.productName, 220);
+
+      if (!productName) {
+        continue;
+      }
+
+      const quantity = toTrimmedString(entry.quantity, 80) || "1 stk";
+      const comment = toTrimmedString(entry.comment, 1200) || "Kundevalgt produkt.";
+      const quantityReason =
+        toTrimmedString(entry.quantityReason, 320) ||
+        (source === "web" ? "Importert fra nettsideanalyse." : "Valgt fra katalogsøk.");
+      const nobbNumber = normalizeNobb(toTrimmedString(entry.nobbNumber, 24));
+      const supplierName = toTrimmedString(entry.supplierName, 120);
+      const productUrl = toHttpUrl(entry.productUrl);
+      const imageUrl = toHttpUrl(entry.imageUrl);
+      const unitPriceNok = toNonNegativeInteger(entry.unitPriceNok);
+
+      normalized.push({
+        source,
+        productName,
+        quantity,
+        comment,
+        quantityReason,
+        ...(nobbNumber ? { nobbNumber } : {}),
+        ...(supplierName ? { supplierName } : {}),
+        ...(unitPriceNok !== undefined ? { unitPriceNok } : {}),
+        ...(productUrl ? { productUrl } : {}),
+        ...(imageUrl ? { imageUrl } : {}),
+      });
+    }
+
+    return normalized.slice(0, 40);
+  } catch {
+    return [] as DesiredProductInput[];
+  }
+}
+
+function buildDesiredProductsSection(products: DesiredProductInput[]) {
+  if (products.length === 0) {
+    return null;
+  }
+
+  const section: MaterialSection = {
+    title: "Kundevalgte produkter",
+    description: "Produkter spesifikt valgt av kunden fra katalog eller nett.",
+    items: products.map((product) => ({
+      item: product.productName,
+      quantity: product.quantity,
+      note: [
+        product.comment,
+        product.supplierName ? `Leverandør: ${product.supplierName}` : null,
+        product.unitPriceNok !== undefined ? `Veil. pris: ${product.unitPriceNok} NOK` : null,
+        product.productUrl ? `Kilde: ${product.productUrl}` : null,
+      ]
+        .filter((entry): entry is string => Boolean(entry))
+        .join(" | ")
+        .slice(0, 1200),
+      quantityReason: product.quantityReason,
+      ...(product.nobbNumber ? { nobb: product.nobbNumber } : {}),
+      ...(product.productUrl ? { sourceUrl: product.productUrl } : {}),
+      ...(product.imageUrl ? { imageUrl: product.imageUrl } : {}),
+      ...(product.supplierName ? { supplierName: product.supplierName } : {}),
+      ...(product.unitPriceNok !== undefined ? { unitPriceNok: product.unitPriceNok } : {}),
+    })),
+  };
+
+  return section;
+}
+
+function toTrimmedString(value: unknown, maxLength: number) {
+  if (typeof value !== "string") {
+    return "";
+  }
+
+  const normalized = value.trim();
+  return normalized.length > 0 ? normalized.slice(0, maxLength) : "";
+}
+
+function normalizeNobb(value: string) {
+  const normalized = value.replace(/\D/g, "");
+  return normalized.length >= 6 && normalized.length <= 10 ? normalized : "";
+}
+
+function toHttpUrl(value: unknown) {
+  if (typeof value !== "string" || value.trim().length === 0) {
+    return "";
+  }
+
+  try {
+    const parsed = new URL(value.trim());
+
+    if (parsed.protocol !== "http:" && parsed.protocol !== "https:") {
+      return "";
+    }
+
+    return parsed.toString();
+  } catch {
+    return "";
+  }
+}
+
+function toNonNegativeInteger(value: unknown) {
+  if (typeof value === "number" && Number.isFinite(value) && value >= 0) {
+    return Math.round(value);
+  }
+
+  if (typeof value === "string") {
+    const parsed = Number.parseInt(value, 10);
+
+    if (Number.isFinite(parsed) && parsed >= 0) {
+      return parsed;
+    }
+  }
+
+  return undefined;
 }
 
 async function applySupplierToItems<T extends { supplierKey: SupplierKey; unitPriceNok: number }>(

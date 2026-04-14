@@ -91,6 +91,10 @@ function parseMaterialSections(value: unknown): MaterialSection[] | null {
       const quantity = parseString(rawItem.quantity, 80);
       const note = parseString(rawItem.note, 220) ?? "";
       const quantityReason = parseString(rawItem.quantityReason, 280);
+      const sourceUrl = parseHttpUrl(rawItem.sourceUrl);
+      const imageUrl = parseHttpUrl(rawItem.imageUrl);
+      const supplierName = parseString(rawItem.supplierName, 120);
+      const unitPriceNok = parseNonNegativeInteger(rawItem.unitPriceNok);
 
       if (!item || !quantity) {
         return null;
@@ -101,6 +105,10 @@ function parseMaterialSections(value: unknown): MaterialSection[] | null {
         quantity,
         note,
         ...(quantityReason ? { quantityReason } : {}),
+        ...(sourceUrl ? { sourceUrl } : {}),
+        ...(imageUrl ? { imageUrl } : {}),
+        ...(supplierName ? { supplierName } : {}),
+        ...(unitPriceNok !== null ? { unitPriceNok } : {}),
       });
     }
 
@@ -130,4 +138,38 @@ function parseString(value: unknown, maxLength: number) {
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null;
+}
+
+function parseHttpUrl(value: unknown) {
+  if (typeof value !== "string") {
+    return "";
+  }
+
+  try {
+    const parsed = new URL(value.trim());
+
+    if (parsed.protocol !== "http:" && parsed.protocol !== "https:") {
+      return "";
+    }
+
+    return parsed.toString();
+  } catch {
+    return "";
+  }
+}
+
+function parseNonNegativeInteger(value: unknown) {
+  if (typeof value === "number" && Number.isFinite(value) && value >= 0) {
+    return Math.round(value);
+  }
+
+  if (typeof value === "string") {
+    const parsed = Number.parseInt(value, 10);
+
+    if (Number.isFinite(parsed) && parsed >= 0) {
+      return parsed;
+    }
+  }
+
+  return null;
 }
