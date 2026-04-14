@@ -110,8 +110,6 @@ export function ReturnClaimsPortal({
     [selectedOrder],
   );
 
-  const orderById = useMemo(() => new Map(orders.map((order) => [order.id, order])), [orders]);
-
   const selectedSupplierTerms = useMemo(() => {
     const keys = Array.from(new Set(selectedOrderItems.map((item) => item.supplierKey)));
     return keys.map((key) => SUPPLIER_RETURN_TERMS[key]);
@@ -479,7 +477,6 @@ export function ReturnClaimsPortal({
             <div className="mt-3 space-y-2">
               {cases.map((returnCase) => {
                 const statusLabel = MATERIAL_RETURN_STATUS_LABELS[returnCase.status] ?? returnCase.status;
-                const caseOrder = orderById.get(returnCase.orderId);
 
                 return (
                   <div key={returnCase.id} className="rounded-md border border-stone-200 bg-white px-3 py-2.5">
@@ -510,14 +507,12 @@ export function ReturnClaimsPortal({
                           Last ned returlapp
                         </a>
                       ) : null}
-                      {caseOrder?.projectSlug ? (
-                        <Link
-                          href={`/min-side/materiallister/${caseOrder.projectSlug}/bestilling?order=${returnCase.orderId}`}
-                          className="inline-flex h-7 items-center rounded-sm border border-stone-300 px-2.5 text-[11px] font-semibold text-stone-700 transition hover:border-stone-900 hover:text-stone-900"
-                        >
-                          Åpne ordre
-                        </Link>
-                      ) : null}
+                      <Link
+                        href={`/min-side/bestillinger/${returnCase.orderId}`}
+                        className="inline-flex h-7 items-center rounded-sm border border-stone-300 px-2.5 text-[11px] font-semibold text-stone-700 transition hover:border-stone-900 hover:text-stone-900"
+                      >
+                        Åpne ordre
+                      </Link>
                     </div>
                   </div>
                 );

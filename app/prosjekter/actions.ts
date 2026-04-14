@@ -777,9 +777,9 @@ function extractNobb(value: string) {
 
 function tokenize(value: string) {
   return value
-    .toLowerCase()
+    .toLocaleLowerCase("nb-NO")
     .normalize("NFKD")
     .replace(/[\u0300-\u036f]/g, "")
-    .split(/[^a-z0-9]+/)
+    .split(/[^a-z0-9æøå]+/)
     .filter((token) => token.length > 1);
 }

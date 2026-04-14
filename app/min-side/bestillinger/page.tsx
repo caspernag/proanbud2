@@ -203,7 +203,6 @@ export default async function BestillingerPage() {
                   <th className="px-3 py-2.5">Status</th>
                   <th className="px-3 py-2.5">Levering</th>
                   <th className="px-3 py-2.5 text-right">Verdi</th>
-                  <th className="px-3 py-2.5 text-right">Etterkjøp</th>
                 </tr>
               </thead>
               <tbody>
@@ -212,9 +211,7 @@ export default async function BestillingerPage() {
                   const rows = itemRowsByOrderId.get(order.id) ?? [];
                   const includedRows = rows.filter((row) => row.is_included).length;
                   const supplierCount = new Set(rows.map((row) => row.supplier_label)).size;
-                  const orderHref = project?.slug ? `/min-side/materiallister/${project.slug}/bestilling?order=${order.id}` : null;
-                  const returnHref = `/min-side/retur?order=${order.id}`;
-                  const canOpenReturnPortal = order.status === "paid" || order.status === "submitted";
+                  const orderHref = order.id ? `/min-side/bestillinger/${order.id}` : null;
                   const windowLabel = order.earliest_delivery_date && order.latest_delivery_date
                     ? `${new Date(order.earliest_delivery_date).toLocaleDateString("nb-NO")} - ${new Date(order.latest_delivery_date).toLocaleDateString("nb-NO")}`
                     : "Ikke satt";
@@ -282,24 +279,12 @@ export default async function BestillingerPage() {
                           </div>
                         )}
                       </td>
-                      <td className="px-3 py-2.5 text-right align-middle">
-                        {canOpenReturnPortal ? (
-                          <Link
-                            href={returnHref}
-                            className="inline-flex h-8 items-center justify-center rounded-[3px] border border-[#1d4f35]/25 bg-white px-2.5 text-[11px] font-semibold text-[#0f5e3a] transition hover:border-[#0f5e3a] hover:text-[#0a4229]"
-                          >
-                            Retur/reklamasjon
-                          </Link>
-                        ) : (
-                          <span className="text-[11px] text-stone-400">Aktiveres etter betaling</span>
-                        )}
-                      </td>
                     </tr>
                   );
                 })}
                 {orders.length === 0 ? (
                   <tr>
-                    <td colSpan={5} className="px-3 py-10 text-center text-sm text-stone-500">
+                    <td colSpan={4} className="px-3 py-10 text-center text-sm text-stone-500">
                       Ingen bestillinger ennå.
                     </td>
                   </tr>

@@ -1508,8 +1508,8 @@ function createRowId(prefix: string) {
 
 function slugLike(value: string) {
   return value
-    .toLowerCase()
-    .replace(/[^a-z0-9]+/g, "-")
+    .toLocaleLowerCase("nb-NO")
+    .replace(/[^a-z0-9æøå]+/g, "-")
     .replace(/^-+|-+$/g, "");
 }
 

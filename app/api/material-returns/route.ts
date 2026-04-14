@@ -457,6 +457,9 @@ async function uploadAttachments({
 }
 
 function sanitizeFileName(value: string) {
-  const normalized = value.toLowerCase().replace(/[^a-z0-9._-]+/g, "-").replace(/-+/g, "-");
+  const normalized = value
+    .toLocaleLowerCase("nb-NO")
+    .replace(/[^a-z0-9æøå._-]+/g, "-")
+    .replace(/-+/g, "-");
   return normalized.slice(0, 120) || "vedlegg";
 }

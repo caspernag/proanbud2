@@ -9,10 +9,10 @@ export function formatCurrency(value: number) {
 export function slugify(value: string) {
   return (
     value
-      .toLowerCase()
+      .toLocaleLowerCase("nb-NO")
       .normalize("NFKD")
       .replace(/[\u0300-\u036f]/g, "")
-      .replace(/[^a-z0-9]+/g, "-")
+      .replace(/[^a-z0-9æøå]+/g, "-")
       .replace(/(^-|-$)/g, "")
       .slice(0, 60) || "prosjekt"
   );

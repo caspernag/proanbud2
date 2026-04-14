@@ -1261,10 +1261,10 @@ export function MaterialOrderWorkspace({
 
             {(orderStatus === "paid" || orderStatus === "submitted") ? (
               <a
-                href={`/min-side/retur?order=${encodeURIComponent(orderId)}`}
+                href={`/min-side/bestillinger/${encodeURIComponent(orderId)}`}
                 className="inline-flex h-8 items-center justify-center rounded-sm border border-stone-300 bg-white px-3 text-xs font-semibold text-stone-700 transition hover:border-stone-900 hover:text-stone-900"
               >
-                Start retur/reklamasjon
+                Retur/reklamasjon
               </a>
             ) : null}
           </section>
