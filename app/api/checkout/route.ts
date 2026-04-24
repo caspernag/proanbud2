@@ -10,7 +10,7 @@ export async function POST(request: Request) {
   const slug = String(formData.get("slug") || "").trim();
   const requestedProjectName = String(formData.get("projectName") || "Materialliste").trim();
   const priceNok = MATERIAL_LIST_PRICE_NOK;
-  const origin = new URL(request.url).origin;
+  const origin = resolveCheckoutOrigin(request.url);
   const supabase = await createSupabaseServerClient();
   const {
     data: { user },
@@ -87,7 +87,7 @@ export async function POST(request: Request) {
               currency: "nok",
               product_data: {
                 name: `Materialliste: ${resolvedProjectName}`,
-                description: "AI-generert materialliste med leverandørbasert prisduell.",
+                description: "AI-generert materialliste klargjort for partnerpris og bestilling.",
               },
               unit_amount: priceNok * 100,
             },
@@ -109,4 +109,9 @@ export async function POST(request: Request) {
   }
 
   return NextResponse.json({ url: session.url });
+}
+
+function resolveCheckoutOrigin(requestUrl: string) {
+  const url = new URL(requestUrl);
+  return url.origin;
 }

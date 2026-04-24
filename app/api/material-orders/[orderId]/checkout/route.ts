@@ -63,6 +63,21 @@ export async function POST(request: Request, { params }: RouteContext) {
     return NextResponse.json({ error: "Leveringsadresse må fylles ut før innsending." }, { status: 400 });
   }
 
+  if (order.delivery_target !== "door" && order.delivery_target !== "construction_site") {
+    return NextResponse.json({ error: "Leveringsmål må velges før innsending." }, { status: 400 });
+  }
+
+  if (order.unloading_method !== "standard" && order.unloading_method !== "crane_needed" && order.unloading_method !== "customer_machine") {
+    return NextResponse.json({ error: "Lossingstype må velges før innsending." }, { status: 400 });
+  }
+
+  if (
+    (order.delivery_target === "construction_site" || order.unloading_method === "crane_needed") &&
+    String(order.delivery_instructions ?? "").trim().length < 8
+  ) {
+    return NextResponse.json({ error: "Legg inn fraktinstruksjon for byggeplass/kran før innsending." }, { status: 400 });
+  }
+
   if ((order.subtotal_nok ?? 0) < MINIMUM_ORDER_VALUE_NOK) {
     return NextResponse.json(
       { error: `Minste bestillingsverdi for ProAnbud er ${MINIMUM_ORDER_VALUE_NOK} kr.` },
@@ -143,6 +158,8 @@ export async function POST(request: Request, { params }: RouteContext) {
         projectSlug: project.slug,
         checkoutFlow: order.checkout_flow,
         customerType: order.customer_type,
+        deliveryTarget: order.delivery_target,
+        unloadingMethod: order.unloading_method,
       },
       payment_method_types: [...paymentMethodTypes],
       billing_address_collection: order.checkout_flow === "klarna" ? "required" : "auto",

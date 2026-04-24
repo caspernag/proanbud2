@@ -9,9 +9,12 @@
     "lint": "eslint"
   },
   "dependencies": {
+    "@ai-sdk/openai": "^3.0.53",
+    "@ai-sdk/react": "^3.0.170",
     "@radix-ui/react-popover": "^1.1.15",
     "@supabase/ssr": "^0.10.0",
     "@supabase/supabase-js": "^2.101.1",
+    "ai": "^6.0.168",
     "clsx": "^2.1.1",
     "date-fns": "^4.1.0",
     "lucide-react": "^1.7.0",
@@ -24,6 +27,7 @@
     "react": "19.2.4",
     "react-day-picker": "^9.14.0",
     "react-dom": "19.2.4",
+    "resend": "^6.12.2",
     "stripe": "^22.0.0",
     "svg-to-pdfkit": "^0.1.8",
     "zod": "^4.3.6"

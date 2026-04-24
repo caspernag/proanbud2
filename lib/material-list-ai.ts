@@ -134,7 +134,7 @@ export async function generateClarificationQuestionsFromAttachments(input: Proje
   return sanitizeClarificationQuestions(modelOutput.questions);
 }
 
-async function buildAttachmentContext(files: File[]): Promise<PreparedAttachmentContext> {
+export async function buildAttachmentContext(files: File[]): Promise<PreparedAttachmentContext> {
   const selected = files.filter((file) => file.size > 0).slice(0, MAX_ATTACHMENTS);
 
   const result: PreparedAttachmentContext = {
@@ -1245,6 +1245,22 @@ function flattenUserContentForResponses(userContent: PromptInputPart[]) {
   }
 
   return lines.join("\n\n");
+}
+
+export function buildProjectDocumentContext(input: ProjectInput, attachmentContext: PreparedAttachmentContext) {
+  const attachmentText = flattenUserContentForResponses(attachmentContext.userContentParts).trim();
+
+  return `
+Prosjekttittel: ${input.title}
+Sted: ${input.location}
+Type: ${input.projectType}
+Areal: ${input.areaSqm} kvm
+Standard: ${input.finishLevel}
+Beskrivelse: ${input.description || "Ingen beskrivelse lagt ved."}
+
+Vedleggsdata:
+${attachmentText || "Ingen vedleggsinnhold tilgjengelig."}
+`.trim();
 }
 
 async function extractPdfTextSafely(bytes: Buffer) {

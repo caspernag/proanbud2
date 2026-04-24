@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server";
 
-import { generateClarificationQuestionsFromAttachments } from "@/lib/material-list-ai";
+import { buildAttachmentContext } from "@/lib/material-list-ai";
 import type { ProjectInput } from "@/lib/project-data";
 import { normalizeProjectTitle, toNumber } from "@/lib/utils";
 
@@ -24,18 +24,23 @@ export async function POST(request: Request) {
       description: String(formData.get("description") || "").trim(),
     };
 
-    const questions = await generateClarificationQuestionsFromAttachments(input, uploadedFiles);
+    const attachmentContext = await buildAttachmentContext(uploadedFiles);
 
-    const normalizedQuestions = questions.map((question) => ({
-      id: question.id,
-      title: question.title,
-      helpText: question.helpText,
-      placeholder: question.placeholder,
-      options: question.options ?? [],
-    }));
+    const documentContext = `
+Prosjekttittel: ${input.title}
+Sted: ${input.location}
+Type: ${input.projectType}
+Areal: ${input.areaSqm} kvm
+Standard: ${input.finishLevel}
+Beskrivelse: ${input.description || "Ingen beskrivelse lagt ved."}
 
-    return NextResponse.json({ questions: normalizedQuestions });
-  } catch {
-    return NextResponse.json({ questions: [] });
+Vedleggsdata:
+${attachmentContext.userContentParts.map(p => p.type === 'text' ? p.text : '').join("\n\n")}
+`.trim();
+
+    return NextResponse.json({ documentContext });
+  } catch (error) {
+    console.error(error);
+    return NextResponse.json({ documentContext: "" });
   }
 }

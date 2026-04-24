@@ -5,12 +5,10 @@ import { env, hasSupabaseEnv } from "@/lib/env";
 
 const PUBLIC_PATHS = new Set(["/login", "/auth/callback"]);
 
+const PROTECTED_PREFIXES = ["/min-side", "/prosjekter", "/betaling", "/admin"];
+
 function isAdminHostname(hostname: string) {
   return hostname.startsWith("admin.");
-}
-
-function isAppHostname(hostname: string) {
-  return hostname.startsWith("app.");
 }
 
 function isBlockedPath(pathname: string) {
@@ -27,21 +25,10 @@ function getAdminRewrittenPath(pathname: string) {
   return `/admin${pathname}`;
 }
 
-function getLandingRewrittenPath(pathname: string) {
-  if (pathname === "/landing" || pathname.startsWith("/landing/")) {
-    return pathname;
-  }
-  return `/landing${pathname}`;
-}
-
-function isPublicPath(pathname: string, hostname: string) {
-  if (PUBLIC_PATHS.has(pathname)) {
-    return true;
-  }
-  if (!isAdminHostname(hostname) && !isAppHostname(hostname)) {
-    return true; 
-  }
-  return false;
+function isProtectedPath(pathname: string): boolean {
+  return PROTECTED_PREFIXES.some(
+    (prefix) => pathname === prefix || pathname.startsWith(prefix + "/")
+  );
 }
 
 function toLoginRedirect(request: NextRequest) {
@@ -54,31 +41,43 @@ function toLoginRedirect(request: NextRequest) {
 export async function proxy(request: NextRequest) {
   const pathname = request.nextUrl.pathname;
   const hostname = request.headers.get("host") || "";
-  
+
+  if (
+    pathname.startsWith("/min-side/materiallister/") &&
+    pathname.endsWith("/bestilling") &&
+    (request.nextUrl.searchParams.has("supplier") || request.nextUrl.searchParams.has("selectedSupplier"))
+  ) {
+    const canonicalUrl = request.nextUrl.clone();
+    const hadSupplierParam =
+      canonicalUrl.searchParams.has("supplier") || canonicalUrl.searchParams.has("selectedSupplier");
+
+    if (hadSupplierParam) {
+      canonicalUrl.searchParams.delete("supplier");
+      canonicalUrl.searchParams.delete("selectedSupplier");
+      return NextResponse.redirect(canonicalUrl);
+    }
+  }
+
   if (isBlockedPath(pathname)) {
     return new NextResponse("Not Found", { status: 404 });
   }
 
-  const isBase = !isAdminHostname(hostname) && !isAppHostname(hostname);
-
   let response: NextResponse;
 
-  // Offentlige stier som /login og /auth/callback skal håndteres rot-nivå, uten rewrite
+  // Offentlige stier som /login og /auth/callback håndteres uten rewrite
   if (PUBLIC_PATHS.has(pathname)) {
     response = NextResponse.next({ request });
   } else if (isAdminHostname(hostname)) {
+    // admin.localhost → rewrite to /admin/...
     response = NextResponse.rewrite(
       new URL(`${getAdminRewrittenPath(pathname)}${request.nextUrl.search}`, request.url)
-    );
-  } else if (isBase) {
-    response = NextResponse.rewrite(
-      new URL(`${getLandingRewrittenPath(pathname)}${request.nextUrl.search}`, request.url)
     );
   } else {
     response = NextResponse.next({ request });
   }
 
-  if (isPublicPath(pathname, hostname) || isBase) {
+  // Only require auth for protected paths
+  if (!isProtectedPath(pathname)) {
     return response;
   }
 

@@ -8,9 +8,14 @@ export const env = {
   bypassStripeCheckout: process.env.BYPASS_STRIPE_CHECKOUT === "true",
   nobbApiBaseUrl: process.env.NOBB_API_BASE_URL ?? "",
   nobbApiKey: process.env.NOBB_API_KEY ?? "",
+  nobbExportUsername: process.env.NOBB_EXPORT_USERNAME ?? "",
+  nobbExportPassword: process.env.NOBB_EXPORT_PASSWORD ?? "",
   openAiApiKey: process.env.OPENAI_API_KEY ?? "",
   openAiPromptIdMaterialList: process.env.OPENAI_PROMPT_ID_MATERIAL_LIST ?? "",
   openAiPromptIdClarifications: process.env.OPENAI_PROMPT_ID_CLARIFICATIONS ?? "",
+  openAiVectorStoreIdStorefront:
+    process.env.OPENAI_VECTOR_STORE_ID_STOREFRONT ?? "vs_69e881362da8819196c25789a50dee3d",
+  resendApiKey: process.env.RESEND_API_KEY ?? "",
 };
 
 export function hasSupabaseEnv() {
@@ -35,6 +40,10 @@ export function isStripeBypassed() {
 
 export function hasNobbApiEnv() {
   return Boolean(env.nobbApiBaseUrl && env.nobbApiKey);
+}
+
+export function hasNobbExportEnv() {
+  return Boolean(env.nobbExportUsername && env.nobbExportPassword);
 }
 
 export function hasOpenAiEnv() {

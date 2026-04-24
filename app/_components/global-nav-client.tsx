@@ -14,12 +14,16 @@ type GlobalNavClientProps = {
 export function GlobalNavClient({ isLoggedIn, userEmail }: GlobalNavClientProps) {
   const pathname = usePathname();
 
-  if (pathname === "/" || pathname.startsWith("/min-side") || pathname === "/login") {
-    return null;
-  }
+  // Only show GlobalNav on explicit app paths; all other paths are storefront routes
+  const APP_NAV_PATHS = ["/betaling", "/prosjekter"];
+  const shouldShow = APP_NAV_PATHS.some(
+    (p) => pathname === p || pathname.startsWith(p + "/")
+  );
+  if (!shouldShow) return null;
 
   const isDashboardRoute = pathname === "/min-side" || pathname.startsWith("/min-side/");
   const isLoginRoute = pathname === "/login";
+  const isStoreRoute = pathname === "/" || pathname.startsWith("/checkout") || pathname.startsWith("/ordre/");
 
   return (
     <header className="border-b border-stone-200 bg-white/95 backdrop-blur">
@@ -28,6 +32,16 @@ export function GlobalNavClient({ isLoggedIn, userEmail }: GlobalNavClientProps)
           <Image src="/logo/light/logo-primary.svg" alt="proanbud" width={146} height={32} className="h-6 w-auto sm:h-7" />
         </Link>
         <nav className="flex w-full items-center justify-end gap-1.5 sm:w-auto sm:gap-2">
+          <Link
+            href="/"
+            className={`rounded-full px-2.5 py-1.5 text-xs font-medium transition sm:px-3 sm:text-sm ${
+              isStoreRoute
+                ? "bg-stone-900 text-white"
+                : "text-stone-700 hover:bg-stone-100 hover:text-stone-900"
+            }`}
+          >
+            Nettbutikk
+          </Link>
           <Link
             href="/min-side"
             className={`rounded-full px-2.5 py-1.5 text-xs font-medium transition sm:px-3 sm:text-sm ${

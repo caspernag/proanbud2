@@ -8,6 +8,8 @@ import { formatCurrency } from "@/lib/utils";
 
 type SupplierKey = "byggmakker" | "monter_optimera" | "byggmax" | "xl_bygg";
 type DeliveryMode = "delivery" | "pickup";
+type DeliveryTarget = "door" | "construction_site";
+type UnloadingMethod = "standard" | "crane_needed" | "customer_machine";
 type CustomerType = "private" | "business";
 type CheckoutFlow = "pay_now" | "klarna";
 type StoredCheckoutFlow = CheckoutFlow | "business_invoice" | "financing";
@@ -25,6 +27,22 @@ type AddressHit = {
   postalCode: string;
   city: string;
   municipality: string | null;
+};
+
+type SupplierAvailabilityResponse = {
+  ok: boolean;
+  rawLabel?: string;
+  netAvailable?: boolean;
+  netQuantity?: number | null;
+  stores?: { id: string; name: string; quantity: number }[];
+  message?: string;
+};
+
+type StoreOption = {
+  id: string;
+  name: string;
+  productCount: number;
+  totalProducts: number;
 };
 
 type SupplierOption = {
@@ -78,6 +96,8 @@ type MaterialOrderWorkspaceProps = {
   initialCompanyName: string | null;
   initialOrganizationNumber: string | null;
   initialDeliveryMode: DeliveryMode;
+  initialDeliveryTarget: DeliveryTarget;
+  initialUnloadingMethod: UnloadingMethod;
   initialDesiredDeliveryDate: string | null;
   initialShippingContactName: string | null;
   initialShippingPhone: string | null;
@@ -144,7 +164,6 @@ const SUPPLIER_BY_KEY: Record<SupplierKey, SupplierOption> = {
   xl_bygg: SUPPLIERS[3],
 };
 
-const MINIMUM_ORDER_VALUE_NOK = 5000;
 const COMPANY_SEARCH_MIN_QUERY = 2;
 const ADDRESS_SEARCH_MIN_QUERY = 3;
 const SEARCH_DEBOUNCE_MS = 250;
@@ -157,6 +176,9 @@ export function MaterialOrderWorkspace({
   initialCustomerType,
   initialCompanyName,
   initialOrganizationNumber,
+  initialDeliveryMode,
+  initialDeliveryTarget,
+  initialUnloadingMethod,
   initialDesiredDeliveryDate,
   initialShippingContactName,
   initialShippingPhone,
@@ -180,7 +202,9 @@ export function MaterialOrderWorkspace({
   const [customerType, setCustomerType] = useState<CustomerType>(initialCustomerType);
   const [companyName, setCompanyName] = useState(initialCompanyName ?? "");
   const [organizationNumber, setOrganizationNumber] = useState(initialOrganizationNumber ?? "");
-  const deliveryMode: DeliveryMode = "delivery";
+  const [deliveryMode, setDeliveryMode] = useState<DeliveryMode>(initialDeliveryMode ?? "delivery");
+  const [deliveryTarget, setDeliveryTarget] = useState<DeliveryTarget>(initialDeliveryTarget ?? "door");
+  const [unloadingMethod, setUnloadingMethod] = useState<UnloadingMethod>(initialUnloadingMethod ?? "standard");
   const [desiredDeliveryDate, setDesiredDeliveryDate] = useState(initialDesiredDeliveryDate ?? "");
   const [shippingContactName, setShippingContactName] = useState(initialShippingContactName ?? "");
   const [shippingPhone, setShippingPhone] = useState(initialShippingPhone ?? "");
@@ -211,6 +235,10 @@ export function MaterialOrderWorkspace({
   const [message, setMessage] = useState("");
   const [quantityDraftById, setQuantityDraftById] = useState<Record<string, string>>({});
   const [imagePreviewDialog, setImagePreviewDialog] = useState<ImagePreviewDialogState | null>(null);
+  const [pickupStoreId, setPickupStoreId] = useState<string | null>(null);
+  const [pickupStoreName, setPickupStoreName] = useState<string | null>(null);
+  const [storeOptions, setStoreOptions] = useState<StoreOption[]>([]);
+  const [storeLoadState, setStoreLoadState] = useState<"idle" | "loading" | "ready" | "error">("idle");
 
   const suppliers = useMemo(() => {
     const keys = availableSupplierKeys.length > 0 ? availableSupplierKeys : (["byggmakker"] as SupplierKey[]);
@@ -227,8 +255,8 @@ export function MaterialOrderWorkspace({
   );
   const desiredDeliveryDateValue = useMemo(() => parseIsoDateInput(desiredDeliveryDate), [desiredDeliveryDate]);
   const displaySummary = isDirty ? localSummary : serverSummary;
-  const meetsMinimumOrderValue = displaySummary.subtotalNok >= MINIMUM_ORDER_VALUE_NOK;
   const isLocked = ["paid", "submitted", "cancelled"].includes(orderStatus);
+  const needsDetailedDeliveryNotes = deliveryTarget === "construction_site" || unloadingMethod === "crane_needed";
 
   const supplierRollup = useMemo(() => {
     return suppliers.map((supplier) => {
@@ -263,28 +291,36 @@ export function MaterialOrderWorkspace({
       {
         label: "Leveringsdata",
         complete:
-          shippingAddressLine1.trim().length > 0 &&
-          shippingPostalCode.trim().length > 0 &&
-          shippingCity.trim().length > 0,
+          deliveryMode === "pickup"
+            ? Boolean(pickupStoreId)
+            : (shippingAddressLine1.trim().length > 0 &&
+               shippingPostalCode.trim().length > 0 &&
+               shippingCity.trim().length > 0),
+      },
+      {
+        label: "Leveringsprofil (sted + lossing)",
+        complete:
+          deliveryMode === "pickup" ||
+          ((deliveryTarget === "door" || deliveryTarget === "construction_site") &&
+          (unloadingMethod === "standard" || unloadingMethod === "crane_needed" || unloadingMethod === "customer_machine")),
       },
       {
         label: "Minst én aktiv varelinje",
         complete: includedLineCount > 0,
       },
-      {
-        label: `Minste bestillingsverdi (${formatCurrency(MINIMUM_ORDER_VALUE_NOK)})`,
-        complete: meetsMinimumOrderValue,
-      },
     ],
     [
       contractAccepted,
+      deliveryMode,
       includedLineCount,
+      pickupStoreId,
       shippingAddressLine1,
       shippingCity,
       shippingContactName,
       shippingPhone,
       shippingPostalCode,
-      meetsMinimumOrderValue,
+      deliveryTarget,
+      unloadingMethod,
     ],
   );
 
@@ -388,6 +424,59 @@ export function MaterialOrderWorkspace({
       clearTimeout(timeout);
     };
   }, [addressSearchQuery]);
+
+  useEffect(() => {
+    if (deliveryMode !== "pickup") {
+      setStoreOptions([]);
+      setStoreLoadState("idle");
+      setPickupStoreId(null);
+      setPickupStoreName(null);
+      return;
+    }
+
+    const nobbs = items
+      .filter((item) => item.isIncluded && item.supplierKey === "byggmakker" && item.supplierSku)
+      .map((item) => item.supplierSku as string);
+
+    if (nobbs.length === 0) {
+      setStoreOptions([]);
+      setStoreLoadState("ready");
+      return;
+    }
+
+    const abortController = new AbortController();
+    setStoreLoadState("loading");
+
+    void (async () => {
+      try {
+        const response = await fetch("/api/suppliers/byggmakker/stores", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ nobbs }),
+          signal: abortController.signal,
+        });
+        const payload = (await response.json()) as { ok: boolean; stores?: StoreOption[] };
+
+        if (!response.ok || !payload.ok) {
+          setStoreLoadState("error");
+          return;
+        }
+
+        setStoreOptions(payload.stores ?? []);
+        setStoreLoadState("ready");
+      } catch {
+        if (!abortController.signal.aborted) {
+          setStoreLoadState("error");
+        }
+      }
+    })();
+
+    return () => {
+      abortController.abort();
+    };
+    // Only re-run when deliveryMode switches — not on every item keystroke
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [deliveryMode]);
 
   function markDirty() {
     if (!isDirty) {
@@ -494,13 +583,16 @@ export function MaterialOrderWorkspace({
           companyName: customerType === "business" ? companyName : null,
           organizationNumber: customerType === "business" ? organizationNumber : null,
           deliveryMode,
+          deliveryTarget,
+          unloadingMethod,
           desiredDeliveryDate: desiredDeliveryDate || null,
           shippingContactName,
           shippingPhone,
           shippingAddressLine1: deliveryMode === "delivery" ? shippingAddressLine1 : null,
           shippingPostalCode: deliveryMode === "delivery" ? shippingPostalCode : null,
           shippingCity: deliveryMode === "delivery" ? shippingCity : null,
-          deliveryInstructions,
+          deliveryInstructions: deliveryMode === "delivery" ? deliveryInstructions : null,
+          pickupStoreName: deliveryMode === "pickup" ? pickupStoreName : null,
           expressDelivery: false,
           carryInService: false,
           checkoutFlow,
@@ -579,13 +671,18 @@ export function MaterialOrderWorkspace({
       return;
     }
 
-    if (!shippingAddressLine1.trim() || !shippingPostalCode.trim() || !shippingCity.trim()) {
+    if (deliveryMode === "delivery" && (!shippingAddressLine1.trim() || !shippingPostalCode.trim() || !shippingCity.trim())) {
       setMessage("Legg inn komplett leveringsadresse før innsending.");
       return;
     }
 
-    if (!meetsMinimumOrderValue) {
-      setMessage(`Minste bestillingsverdi for ProAnbud er ${formatCurrency(MINIMUM_ORDER_VALUE_NOK)}.`);
+    if (deliveryMode === "pickup" && !pickupStoreId) {
+      setMessage("Velg en butikk for henting før innsending.");
+      return;
+    }
+
+    if (needsDetailedDeliveryNotes && deliveryInstructions.trim().length < 8) {
+      setMessage("Legg inn fraktinstruksjoner for byggeplass/kran før innsending.");
       return;
     }
 
@@ -630,13 +727,7 @@ export function MaterialOrderWorkspace({
                 <h3 className="text-sm font-semibold text-stone-900">Økonomi og oppgjør</h3>
                 <p className="mt-0.5 text-xs text-stone-600">Kun kortbetaling eller Klarna via Stripe.</p>
               </div>
-              <span
-                className={`rounded-full px-2.5 py-1 text-[11px] font-semibold ${
-                  meetsMinimumOrderValue ? "bg-emerald-100 text-emerald-800" : "bg-amber-100 text-amber-800"
-                }`}
-              >
-                Min {formatCurrency(MINIMUM_ORDER_VALUE_NOK)}
-              </span>
+
             </div>
 
             <div className="mt-3 grid gap-2 md:grid-cols-2">
@@ -707,15 +798,7 @@ export function MaterialOrderWorkspace({
                 </select>
               </label>
 
-              <div
-                className={`rounded-md border px-2.5 py-2 text-xs ${
-                  meetsMinimumOrderValue
-                    ? "border-emerald-200 bg-emerald-50 text-emerald-800"
-                    : "border-amber-200 bg-amber-50 text-amber-800"
-                }`}
-              >
-                Minste bestillingsverdi: <span className="font-semibold">{formatCurrency(MINIMUM_ORDER_VALUE_NOK)}</span>
-              </div>
+
             </div>
 
             {customerType === "business" ? (
@@ -775,7 +858,183 @@ export function MaterialOrderWorkspace({
 
           <section className="panel rounded-2xl p-3">
             <h3 className="text-sm font-semibold text-stone-900">Leveranse</h3>
-            <p className="mt-0.5 text-xs text-stone-600">Fast metode: lastebil til adresse. Velg norsk adresse fra oppslag.</p>
+            <p className="mt-0.5 text-xs text-stone-600">Velg leveringsmåte for ordren.</p>
+
+            <div className="mt-3 grid grid-cols-2 gap-2">
+              <label
+                className={`cursor-pointer rounded-md border px-2.5 py-2.5 transition ${
+                  deliveryMode === "delivery"
+                    ? "border-stone-900 bg-stone-100"
+                    : "border-stone-200 bg-white hover:border-stone-400"
+                }`}
+              >
+                <input
+                  type="radio"
+                  name="deliveryMode"
+                  value="delivery"
+                  checked={deliveryMode === "delivery"}
+                  onChange={() => { setDeliveryMode("delivery"); markDirty(); }}
+                  disabled={isLocked}
+                  className="sr-only"
+                />
+                <p className="text-xs font-semibold text-stone-900">Transport</p>
+                <p className="mt-0.5 text-[11px] text-stone-600">Levering til adresse med bil.</p>
+              </label>
+              <label
+                className={`cursor-pointer rounded-md border px-2.5 py-2.5 transition ${
+                  deliveryMode === "pickup"
+                    ? "border-stone-900 bg-stone-100"
+                    : "border-stone-200 bg-white hover:border-stone-400"
+                }`}
+              >
+                <input
+                  type="radio"
+                  name="deliveryMode"
+                  value="pickup"
+                  checked={deliveryMode === "pickup"}
+                  onChange={() => { setDeliveryMode("pickup"); markDirty(); }}
+                  disabled={isLocked}
+                  className="sr-only"
+                />
+                <p className="text-xs font-semibold text-stone-900">Hent i butikk</p>
+                <p className="mt-0.5 text-[11px] text-stone-600">Klikk-og-hent gjennom partnerkanalen.</p>
+              </label>
+            </div>
+
+            {deliveryMode === "delivery" ? (
+            <>
+            <div className="mt-3 grid gap-2 lg:grid-cols-2">
+              <div className="rounded-lg border border-stone-200 bg-white p-2.5">
+                <p className="text-xs font-semibold text-stone-900">Leveringssted</p>
+                <div className="mt-2 grid gap-2">
+                  <label
+                    className={`cursor-pointer rounded-md border px-2.5 py-2 transition ${
+                      deliveryTarget === "door"
+                        ? "border-stone-900 bg-stone-100"
+                        : "border-stone-200 bg-white hover:border-stone-400"
+                    }`}
+                  >
+                    <input
+                      type="radio"
+                      name="deliveryTarget"
+                      value="door"
+                      checked={deliveryTarget === "door"}
+                      onChange={() => {
+                        setDeliveryTarget("door");
+                        markDirty();
+                      }}
+                      disabled={isLocked}
+                      className="sr-only"
+                    />
+                    <p className="text-xs font-semibold text-stone-900">Til dør/adresse</p>
+                    <p className="mt-0.5 text-[11px] text-stone-600">Leveres til oppgitt adresse med standard mottak.</p>
+                  </label>
+
+                  <label
+                    className={`cursor-pointer rounded-md border px-2.5 py-2 transition ${
+                      deliveryTarget === "construction_site"
+                        ? "border-stone-900 bg-stone-100"
+                        : "border-stone-200 bg-white hover:border-stone-400"
+                    }`}
+                  >
+                    <input
+                      type="radio"
+                      name="deliveryTarget"
+                      value="construction_site"
+                      checked={deliveryTarget === "construction_site"}
+                      onChange={() => {
+                        setDeliveryTarget("construction_site");
+                        markDirty();
+                      }}
+                      disabled={isLocked}
+                      className="sr-only"
+                    />
+                    <p className="text-xs font-semibold text-stone-900">Til byggeplass</p>
+                    <p className="mt-0.5 text-[11px] text-stone-600">Brukes når leveransen skal inn på aktiv rigg/byggeplass.</p>
+                  </label>
+                </div>
+              </div>
+
+              <div className="rounded-lg border border-stone-200 bg-white p-2.5">
+                <p className="text-xs font-semibold text-stone-900">Lossing på stedet</p>
+                <div className="mt-2 grid gap-2">
+                  <label
+                    className={`cursor-pointer rounded-md border px-2.5 py-2 transition ${
+                      unloadingMethod === "standard"
+                        ? "border-stone-900 bg-stone-100"
+                        : "border-stone-200 bg-white hover:border-stone-400"
+                    }`}
+                  >
+                    <input
+                      type="radio"
+                      name="unloadingMethod"
+                      value="standard"
+                      checked={unloadingMethod === "standard"}
+                      onChange={() => {
+                        setUnloadingMethod("standard");
+                        markDirty();
+                      }}
+                      disabled={isLocked}
+                      className="sr-only"
+                    />
+                    <p className="text-xs font-semibold text-stone-900">Standard lossing</p>
+                    <p className="mt-0.5 text-[11px] text-stone-600">Ingen kran eller kunde-maskin er nødvendig.</p>
+                  </label>
+
+                  <label
+                    className={`cursor-pointer rounded-md border px-2.5 py-2 transition ${
+                      unloadingMethod === "crane_needed"
+                        ? "border-stone-900 bg-stone-100"
+                        : "border-stone-200 bg-white hover:border-stone-400"
+                    }`}
+                  >
+                    <input
+                      type="radio"
+                      name="unloadingMethod"
+                      value="crane_needed"
+                      checked={unloadingMethod === "crane_needed"}
+                      onChange={() => {
+                        setUnloadingMethod("crane_needed");
+                        markDirty();
+                      }}
+                      disabled={isLocked}
+                      className="sr-only"
+                    />
+                    <p className="text-xs font-semibold text-stone-900">Kranbil nødvendig</p>
+                    <p className="mt-0.5 text-[11px] text-stone-600">Byggevarehuset planlegger leveranse med kran.</p>
+                  </label>
+
+                  <label
+                    className={`cursor-pointer rounded-md border px-2.5 py-2 transition ${
+                      unloadingMethod === "customer_machine"
+                        ? "border-stone-900 bg-stone-100"
+                        : "border-stone-200 bg-white hover:border-stone-400"
+                    }`}
+                  >
+                    <input
+                      type="radio"
+                      name="unloadingMethod"
+                      value="customer_machine"
+                      checked={unloadingMethod === "customer_machine"}
+                      onChange={() => {
+                        setUnloadingMethod("customer_machine");
+                        markDirty();
+                      }}
+                      disabled={isLocked}
+                      className="sr-only"
+                    />
+                    <p className="text-xs font-semibold text-stone-900">Vi har truck/lignende selv</p>
+                    <p className="mt-0.5 text-[11px] text-stone-600">Mottaker stiller maskin for lossing på stedet.</p>
+                  </label>
+                </div>
+              </div>
+            </div>
+
+            {needsDetailedDeliveryNotes ? (
+              <div className="mt-2 rounded-md border border-amber-200 bg-amber-50 px-2.5 py-2 text-[11px] text-amber-800">
+                Legg inn tydelige fraktinstruksjoner for byggeplass/kran før innsending (adkomst, kontaktperson på plass, tidsvindu).
+              </div>
+            ) : null}
 
             <div className="mt-3 space-y-2 rounded-lg border border-stone-200 bg-stone-50 p-2.5">
               <label className="block text-xs text-stone-700">
@@ -826,7 +1085,7 @@ export function MaterialOrderWorkspace({
               ) : null}
             </div>
 
-            <div className="mt-3 grid gap-2 sm:grid-cols-2 xl:grid-cols-4">
+            <div className="mt-3 grid gap-2 sm:grid-cols-2">
               <label className="text-xs text-stone-700">
                 Ønsket leveringsdato
                 <DatePicker
@@ -840,6 +1099,90 @@ export function MaterialOrderWorkspace({
                 />
               </label>
 
+              <label className="text-xs text-stone-700 sm:col-span-2">
+                Fraktinstruksjoner {needsDetailedDeliveryNotes ? "(obligatorisk)" : "(anbefalt)"}
+                <textarea
+                  value={deliveryInstructions}
+                  onChange={(event) => {
+                    setDeliveryInstructions(event.target.value);
+                    markDirty();
+                  }}
+                  disabled={isLocked}
+                  rows={3}
+                  placeholder={
+                    needsDetailedDeliveryNotes
+                      ? "Beskriv adkomst, kranbehov/maskin på plass, ansvarlig kontakt og ønsket tidsvindu."
+                      : "Valgfritt: portkode, tilgjengelighet, kontakt ved levering."
+                  }
+                  className="mt-1 w-full rounded-sm border border-stone-300 bg-white px-2 py-2 text-xs text-stone-900 outline-none focus:border-stone-900 disabled:cursor-not-allowed"
+                />
+              </label>
+            </div>
+            </>
+            ) : (
+              <div className="mt-3 space-y-2">
+                <p className="text-xs text-stone-600 leading-5">
+                  Velg en Byggmakker-butikk for henting. Lagerstatus per butikk vises for hver varelinje i tabellen under.
+                </p>
+
+                {storeLoadState === "loading" ? (
+                  <p className="text-[11px] text-stone-500">Henter butikkliste...</p>
+                ) : storeLoadState === "error" ? (
+                  <p className="text-[11px] text-amber-700">Klarte ikke hente butikker. Prøv igjen.</p>
+                ) : storeOptions.length === 0 && storeLoadState === "ready" ? (
+                  <p className="text-[11px] text-stone-500">Ingen butikker med lagerstatus funnet for varene dine.</p>
+                ) : storeOptions.length > 0 ? (
+                  <div className="max-h-60 overflow-y-auto space-y-1 rounded-md border border-stone-200 bg-white p-1">
+                    {storeOptions.map((store) => (
+                      <label
+                        key={store.id}
+                        className={`flex cursor-pointer items-center gap-2 rounded px-2.5 py-2 transition ${
+                          pickupStoreId === store.id
+                            ? "bg-stone-100"
+                            : "hover:bg-stone-50"
+                        }`}
+                      >
+                        <input
+                          type="radio"
+                          name="pickupStore"
+                          value={store.id}
+                          checked={pickupStoreId === store.id}
+                          onChange={() => {
+                            setPickupStoreId(store.id);
+                            setPickupStoreName(store.name);
+                            markDirty();
+                          }}
+                          disabled={isLocked}
+                          className="h-3.5 w-3.5 accent-stone-900"
+                        />
+                        <span className={`text-xs ${pickupStoreId === store.id ? "font-semibold text-stone-900" : "text-stone-700"}`}>
+                          {store.name}
+                        </span>
+                        {store.productCount < store.totalProducts ? (
+                          <span className="ml-auto text-[10px] text-amber-600">
+                            {store.productCount}/{store.totalProducts} varer på lager
+                          </span>
+                        ) : (
+                          <span className="ml-auto text-[10px] text-emerald-600">Alle varer på lager</span>
+                        )}
+                      </label>
+                    ))}
+                  </div>
+                ) : null}
+
+                {pickupStoreId ? (
+                  <div className="rounded-md border border-emerald-200 bg-emerald-50 px-2.5 py-2 text-xs text-emerald-800">
+                    Valgt butikk: <span className="font-semibold">{pickupStoreName}</span>
+                  </div>
+                ) : null}
+
+                <p className="text-[11px] text-stone-500">
+                  Oppgi kontaktperson og telefon nedenfor — du mottar henteklar-varsling fra butikken.
+                </p>
+              </div>
+            )}
+
+            <div className="mt-3 grid gap-2 sm:grid-cols-2">
               <label className="text-xs text-stone-700">
                 Kontaktperson
                 <input
@@ -852,7 +1195,6 @@ export function MaterialOrderWorkspace({
                   className="mt-1 h-8 w-full rounded-sm border border-stone-300 bg-white px-2 text-xs text-stone-900 outline-none focus:border-stone-900 disabled:cursor-not-allowed"
                 />
               </label>
-
               <label className="text-xs text-stone-700">
                 Telefon
                 <input
@@ -863,20 +1205,6 @@ export function MaterialOrderWorkspace({
                   }}
                   disabled={isLocked}
                   className="mt-1 h-8 w-full rounded-sm border border-stone-300 bg-white px-2 text-xs text-stone-900 outline-none focus:border-stone-900 disabled:cursor-not-allowed"
-                />
-              </label>
-
-              <label className="text-xs text-stone-700 sm:col-span-2 xl:col-span-4">
-                Fraktinstruksjoner
-                <textarea
-                  value={deliveryInstructions}
-                  onChange={(event) => {
-                    setDeliveryInstructions(event.target.value);
-                    markDirty();
-                  }}
-                  disabled={isLocked}
-                  rows={2}
-                  className="mt-1 w-full rounded-sm border border-stone-300 bg-white px-2 py-2 text-xs text-stone-900 outline-none focus:border-stone-900 disabled:cursor-not-allowed"
                 />
               </label>
             </div>
@@ -909,7 +1237,7 @@ export function MaterialOrderWorkspace({
                 Kontrakt signert: <span className="font-semibold text-stone-900">{contractAcceptedAt ? formatDateTime(contractAcceptedAt) : "Nei"}</span>
               </div>
               <div className="rounded-md border border-stone-200 bg-white px-3 py-2 text-sm text-stone-700">
-                Ordrelinjer med leverandørvalg: <span className="font-semibold text-stone-900">Ja</span>
+                Ordrelinjer koblet til partnerpris: <span className="font-semibold text-stone-900">Ja</span>
               </div>
             </div>
 
@@ -932,7 +1260,7 @@ export function MaterialOrderWorkspace({
             <div className="flex items-center justify-between border-b border-stone-200 px-3 py-3">
               <div>
                 <p className="text-sm font-semibold text-stone-900">Bestillingslinjer</p>
-                <p className="text-xs text-stone-500">Dokumentaktiv visning med linjenummer, varetekst, leverandør, pris og sum.</p>
+                <p className="text-xs text-stone-500">Dokumentaktiv visning med linjenummer, varetekst, partner, pris og sum.</p>
               </div>
               <button
                 type="button"
@@ -951,7 +1279,7 @@ export function MaterialOrderWorkspace({
                     <th className="w-[24%] border border-stone-200 px-2 py-1.5 text-left">Produkt</th>
                     <th className="w-[8%] border border-stone-200 px-2 py-1.5 text-left">Mengde</th>
                     <th className="w-[7%] border border-stone-200 px-2 py-1.5 text-left">Enhet</th>
-                    <th className="w-[14%] border border-stone-200 px-2 py-1.5 text-left">Leverandør</th>
+                    <th className="w-[14%] border border-stone-200 px-2 py-1.5 text-left">Partner</th>
                     <th className="w-[9%] border border-stone-200 px-2 py-1.5 text-left">Veil. pris</th>
                     <th className="w-[9%] border border-stone-200 px-2 py-1.5 text-left">Din Pris</th>
                     <th className="w-[9%] border border-stone-200 px-2 py-1.5 text-left">Linjesum</th>
@@ -996,6 +1324,12 @@ export function MaterialOrderWorkspace({
                             <p className="text-[10px] text-stone-500">
                               Angrerett {returnTerms.angerrettDays} dager · Reklamasjon {returnTerms.complaintYears} år · {returnTerms.returnShipping === "gratis" ? "Returfrakt inkludert" : "Returfrakt kan belastes"}
                             </p>
+                            <SupplierAvailabilityBadge
+                              key={`${item.id}:${item.supplierKey}:${item.supplierSku ?? "none"}`}
+                              supplierKey={item.supplierKey}
+                              supplierSku={item.supplierSku}
+                              selectedStoreId={deliveryMode === "pickup" ? pickupStoreId : null}
+                            />
                           </div>
                         </div>
                       </td>
@@ -1156,11 +1490,9 @@ export function MaterialOrderWorkspace({
           </section>
 
           <section className="panel rounded-2xl p-4">
-            <p className="text-sm font-semibold text-stone-900">Leverandørfordeling</p>
+            <p className="text-sm font-semibold text-stone-900">Partnergrunnlag</p>
             <p className="mt-1 text-xs text-stone-500">
-              {suppliers.length > 1
-                ? "Ordren kan inneholde flere leverandører samtidig."
-                : "Ordren følger leverandører som finnes i prislister."}
+              Ordren følger den aktive partnerprislisten og valgt leveringsmåte.
             </p>
             <div className="mt-3 space-y-2">
               {supplierRollup.map((supplier) => (
@@ -1195,7 +1527,7 @@ export function MaterialOrderWorkspace({
           <section className="panel rounded-2xl p-4">
             <p className="text-sm font-semibold text-stone-900">Returvilkår før kjøp</p>
             <p className="mt-1 text-xs text-stone-600">
-              Leverandørspesifikk angrerett og reklamasjonsinformasjon synlig før innsending.
+              Partnerens angrerett og reklamasjonsinformasjon vises før innsending.
             </p>
             <div className="mt-3 space-y-2">
               {returnTermsBySupplier.map((terms) => (
@@ -1213,7 +1545,7 @@ export function MaterialOrderWorkspace({
               ))}
               {returnTermsBySupplier.length === 0 ? (
                 <div className="rounded-md border border-stone-200 bg-white px-3 py-2 text-xs text-stone-500">
-                  Ingen aktive leverandørlinjer i bestillingen ennå.
+                  Ingen aktive ordrelinjer i bestillingen ennå.
                 </div>
               ) : null}
             </div>
@@ -1224,12 +1556,6 @@ export function MaterialOrderWorkspace({
             <p className="mt-1 text-xs text-stone-600">
               Oppgjørsform: {checkoutFlow === "pay_now" ? "Kortbetaling via Stripe" : "Klarna via Stripe"}
             </p>
-            {!meetsMinimumOrderValue ? (
-              <p className="mt-2 rounded-md border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-800">
-                Minste bestillingsverdi for innsending er {formatCurrency(MINIMUM_ORDER_VALUE_NOK)}.
-              </p>
-            ) : null}
-
             <div className="mt-3 flex flex-col gap-2">
               <button
                 type="button"
@@ -1246,7 +1572,7 @@ export function MaterialOrderWorkspace({
                 onClick={() => {
                   void checkoutOrder();
                 }}
-                disabled={savePending || checkoutPending || isLocked || !contractAccepted || !meetsMinimumOrderValue}
+                disabled={savePending || checkoutPending || isLocked || !contractAccepted}
                 className="inline-flex h-10 items-center justify-center rounded-sm bg-stone-900 px-4 text-sm font-semibold text-white transition hover:bg-stone-800 disabled:cursor-not-allowed disabled:bg-stone-500"
               >
                 {checkoutPending
@@ -1387,6 +1713,120 @@ function OrderLineImagePreviewDialog({
 
 function buildNobbImageUrl(nobbNumber: string, imageSize: "SQUARE" | "ORIGINAL") {
   return `https://export.byggtjeneste.no/api/v1/media/images/items/${encodeURIComponent(nobbNumber)}/${imageSize}`;
+}
+
+function SupplierAvailabilityBadge({
+  supplierKey,
+  supplierSku,
+  selectedStoreId,
+}: {
+  supplierKey: SupplierKey;
+  supplierSku: string | null;
+  selectedStoreId?: string | null;
+}) {
+  const [fetchState, setFetchState] = useState<"idle" | "loading" | "ready" | "error">(
+    supplierKey === "byggmakker" && supplierSku ? "loading" : "idle",
+  );
+  const [availability, setAvailability] = useState<SupplierAvailabilityResponse | null>(null);
+  const [errorMessage, setErrorMessage] = useState<string>("");
+
+  useEffect(() => {
+    if (supplierKey !== "byggmakker" || !supplierSku) {
+      return;
+    }
+
+    setFetchState("loading");
+    const abortController = new AbortController();
+
+    void (async () => {
+      try {
+        const response = await fetch(`/api/suppliers/byggmakker/availability?nobb=${encodeURIComponent(supplierSku)}`, {
+          signal: abortController.signal,
+        });
+        const payload = (await response.json()) as SupplierAvailabilityResponse;
+
+        if (!response.ok || !payload.ok) {
+          setFetchState("error");
+          setErrorMessage(payload.message ?? "Lagerstatus utilgjengelig");
+          return;
+        }
+
+        setAvailability(payload);
+        setFetchState("ready");
+      } catch {
+        if (!abortController.signal.aborted) {
+          setFetchState("error");
+          setErrorMessage("Lagerstatus utilgjengelig");
+        }
+      }
+    })();
+
+    return () => {
+      abortController.abort();
+    };
+  }, [supplierKey, supplierSku]);
+
+  if (supplierKey !== "byggmakker" || !supplierSku) {
+    return null;
+  }
+
+  if (fetchState === "loading") {
+    return (
+      <p className="mt-1 inline-flex rounded-full bg-stone-100 px-2 py-0.5 text-[10px] font-semibold text-stone-600">
+        Henter lagerstatus...
+      </p>
+    );
+  }
+
+  if (fetchState === "error") {
+    return (
+      <p className="mt-1 inline-flex rounded-full bg-amber-100 px-2 py-0.5 text-[10px] font-semibold text-amber-800">
+        {errorMessage}
+      </p>
+    );
+  }
+
+  if (!availability) {
+    return null;
+  }
+
+  // Store-specific stock when a pickup store is selected
+  if (selectedStoreId && availability.stores) {
+    const storeStock = availability.stores.find((s) => s.id === selectedStoreId);
+    const label = storeStock
+      ? storeStock.quantity > 0
+        ? `${storeStock.quantity} stk i butikk`
+        : "Tomt i valgt butikk"
+      : "Ikke på lager i valgt butikk";
+    const tone = storeStock && storeStock.quantity > 0 ? "success" : "warning";
+
+    return (
+      <p
+        className={`mt-1 inline-flex rounded-full px-2 py-0.5 text-[10px] font-semibold ${
+          tone === "success" ? "bg-emerald-100 text-emerald-800" : "bg-amber-100 text-amber-800"
+        }`}
+      >
+        {label}
+      </p>
+    );
+  }
+
+  // Net warehouse label (delivery mode)
+  const quantityLabel =
+    typeof availability.netQuantity === "number" && Number.isFinite(availability.netQuantity)
+      ? ` · ${availability.netQuantity} stk`
+      : "";
+  const netLabel = `${availability.rawLabel ?? "Ukjent lagerstatus"}${quantityLabel}`;
+
+  return (
+    <p
+      className={`mt-1 inline-flex rounded-full px-2 py-0.5 text-[10px] font-semibold ${
+        availability.netAvailable ? "bg-emerald-100 text-emerald-800" : "bg-amber-100 text-amber-800"
+      }`}
+    >
+      {netLabel}
+    </p>
+  );
 }
 
 function SummaryLine({ label, value, strong = false }: { label: string; value: string; strong?: boolean }) {

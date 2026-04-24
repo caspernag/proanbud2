@@ -26,8 +26,8 @@ export default async function ComparisonPage({ params, searchParams }: Compariso
   }
 
   const target = nextParams.size > 0
-    ? `/min-side/materiallister/${slug}/sammenlign?${nextParams.toString()}`
-    : `/min-side/materiallister/${slug}/sammenlign`;
+    ? `/min-side/materiallister/${slug}/bestilling?${nextParams.toString()}`
+    : `/min-side/materiallister/${slug}/bestilling`;
 
   redirect(target);
 }

@@ -1,4 +1,3 @@
-import Image from "next/image";
 import Link from "next/link";
 import { notFound } from "next/navigation";
 
@@ -14,8 +13,6 @@ import {
   type MaterialSection,
   type ProjectView,
 } from "@/lib/project-data";
-import { calculatePriceCheck } from "@/lib/price-check";
-import { getPriceListProducts } from "@/lib/price-lists";
 import { hasSupabaseEnv, isStripeBypassed } from "@/lib/env";
 import { createSupabaseServerClient } from "@/lib/supabase/server";
 import { formatCurrency } from "@/lib/utils";
@@ -62,6 +59,7 @@ export default async function ProjectPage({ params, searchParams }: ProjectPageP
   const bypassStripe = isStripeBypassed();
   const unlockedInTestMode = bypassStripe && resolvedSearchParams.unlocked === "1";
   const locked = project.paymentStatus !== "paid" && !unlockedInTestMode;
+
   const draftKeys = [
     "title",
     "location",
@@ -81,7 +79,6 @@ export default async function ProjectPage({ params, searchParams }: ProjectPageP
     }
   }
 
-  // When project is not persisted yet (user not logged in), preserve draft params through login.
   if (!project.id && draftParams.size === 0) {
     draftParams.set("title", project.title);
     draftParams.set("location", project.location);
@@ -99,299 +96,374 @@ export default async function ProjectPage({ params, searchParams }: ProjectPageP
     !project.id && draftParams.size > 0
       ? `/api/projects/${project.slug}/pdf?${draftParams.toString()}`
       : `/api/projects/${project.slug}/pdf`;
-  const priceListProducts = await getPriceListProducts();
-  const priceCheck = await calculatePriceCheck(project, priceListProducts);
-  const materialCatalogEntries = await getMaterialCatalogEntries(priceListProducts);
-  const priceDuelCheapestSupplier = project.priceDuelCheapestSupplier ?? priceCheck.cheapest?.supplierName ?? null;
-  const priceDuelSavingsNok =
-    project.priceDuelSavingsNok ??
-    (priceCheck.cheapest ? Math.max(0, priceCheck.cheapest.listTotalNok - priceCheck.cheapest.totalNok) : 0);
-  const hasComparedBefore = Boolean(project.priceDuelComparedAt || project.priceDuelCheapestSupplier);
-  const comparedAtLabel = project.priceDuelComparedAt
-    ? new Date(project.priceDuelComparedAt).toLocaleDateString("nb-NO", {
-        day: "2-digit",
-        month: "short",
-        year: "numeric",
-      })
-    : null;
-  const comparedSupplierQuote = priceDuelCheapestSupplier
-    ? priceCheck.quotes.find((quote) => quote.supplierName.toLowerCase() === priceDuelCheapestSupplier.toLowerCase()) ?? null
-    : null;
-  const supplierLogoSrc = getSupplierLogoSrc(priceDuelCheapestSupplier);
+
+  const materialCatalogEntries = await getMaterialCatalogEntries();
   const pdfGeneratedAtLabel = project.pdfGeneratedAt
     ? new Date(project.pdfGeneratedAt).toLocaleString("nb-NO", {
         dateStyle: "medium",
         timeStyle: "short",
       })
     : null;
+
+  const totalLines = project.materialSections.reduce((sum, s) => sum + s.items.length, 0);
+  const totalSections = project.materialSections.length;
   const materialPreview = buildLockedMaterialPreview(project.materialSections);
   const materialSectionsToRender = locked ? materialPreview.sections : project.materialSections;
 
   return (
-    <main className="mx-auto flex w-full max-w-[1500px] flex-1 flex-col px-3 pb-8 pt-3 sm:px-6 sm:pb-10 sm:pt-4 lg:px-8">
-      <div className="mb-4 flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
-        <div>
-          <p className="eyebrow">Prosjekt og prisduell</p>
-          <h1 className="display-font mt-2 text-3xl leading-none text-stone-900 sm:text-5xl">
+    <main className="mx-auto flex w-full max-w-[1500px] flex-1 flex-col px-3 pb-10 pt-3 sm:px-6 sm:pt-5 lg:px-8">
+      {/* Hero */}
+      <header className="mb-4 flex flex-col gap-3 sm:mb-6 sm:flex-row sm:items-end sm:justify-between">
+        <div className="min-w-0">
+          <div className="flex items-center gap-2">
+            <StatusChip locked={locked} />
+            <Link
+              href="/min-side/materiallister"
+              className="inline-flex items-center gap-1 text-xs font-medium text-stone-500 transition hover:text-stone-900"
+            >
+              <span aria-hidden>←</span> Alle materiallister
+            </Link>
+          </div>
+          <h1 className="display-font mt-2 truncate text-3xl leading-none text-stone-900 sm:text-5xl">
             {project.title}
           </h1>
+          <div className="mt-3 flex flex-wrap items-center gap-1.5 text-xs text-stone-600">
+            <MetaChip icon="📍" label={project.location} />
+            <MetaChip icon="🏗" label={project.projectType} />
+            <MetaChip icon="📐" label={`${project.areaSqm} m²`} />
+            <MetaChip icon="✨" label={project.finishLevel} />
+          </div>
         </div>
-        <div className="flex w-full flex-col gap-2 sm:w-auto sm:flex-row sm:items-center">
-          <Link
-            href="/min-side/materiallister"
-            className="inline-flex w-full items-center justify-center rounded-full border border-stone-300 px-4 py-2 text-sm font-medium text-stone-700 transition hover:border-stone-900 hover:text-stone-900 sm:w-auto"
-          >
-            Tilbake til materiallister
-          </Link>
-          {project.id ? (
+        {project.id ? (
+          <div className="shrink-0">
             <DeleteProjectButton
               action={deleteProjectAction}
               slug={project.slug}
               projectTitle={project.title}
             />
-          ) : null}
-        </div>
-      </div>
-
-      <section className="grid gap-4 lg:grid-cols-[minmax(0,1.3fr)_minmax(0,0.7fr)]">
-        <section className="min-w-0 space-y-3">
-          <div className="panel rounded-[1.2rem] p-3 sm:rounded-[1.3rem] sm:p-3.5">
-            <div className="flex flex-wrap items-center gap-2.5 text-xs text-stone-600">
-              <span>{project.location}</span>
-              <span>·</span>
-              <span>{project.projectType}</span>
-              <span>·</span>
-              <span>{project.areaSqm} m²</span>
-              <span>·</span>
-              <span>{project.finishLevel}</span>
-            </div>
-
-            <p className="mt-2 text-sm leading-6 text-stone-700">{project.teaser}</p>
-
-            <details className="mt-2 rounded-lg border border-stone-200 bg-white px-3 py-2 sm:rounded-xl">
-              <summary className="cursor-pointer text-xs font-semibold uppercase tracking-[0.12em] text-stone-600">
-                Vis prosjektdetaljer
-              </summary>
-              <p className="mt-2 text-sm leading-6 text-stone-600">{project.description}</p>
-              <div className="mt-2 grid gap-2 sm:grid-cols-2">
-                <div className="rounded-lg border border-stone-200 bg-stone-50 px-2.5 py-2 text-xs text-stone-600">
-                  <p className="font-semibold text-stone-800">Styrker</p>
-                  <p className="mt-1">{project.previewBullets.slice(0, 2).join(" · ")}</p>
-                </div>
-                <div className="rounded-lg border border-stone-200 bg-stone-50 px-2.5 py-2 text-xs text-stone-600">
-                  <p className="font-semibold text-stone-800">Kontroller</p>
-                  <p className="mt-1">{project.riskBullets.slice(0, 2).join(" · ")}</p>
-                </div>
-              </div>
-            </details>
           </div>
+        ) : null}
+      </header>
 
-          <div className="relative overflow-hidden rounded-[1.2rem] border border-stone-200 bg-white sm:rounded-xl">
-            <div>
-              <div className="border-b border-stone-200 px-4 py-4 sm:px-5">
-                <div className="flex flex-col gap-3 sm:flex-row sm:items-end sm:justify-between">
-                  <div>
-                    <p className="text-lg font-semibold text-stone-900">Komplett materialliste</p>
-                    <p className="mt-1 text-sm text-stone-600">
-                      Dette er grunnlaget leverandørene skal prise på.
-                    </p>
-                  </div>
-                </div>
-              </div>
+      {/* Progress */}
+      <ProgressRail locked={locked} hasOrder={false} />
 
-              <div className="relative space-y-2 p-0">
-                <MaterialListDocument
-                  sections={materialSectionsToRender}
-                  catalogEntries={materialCatalogEntries}
-                  projectSlug={project.slug}
-                  persistToProject={Boolean(project.id) && !locked}
-                  readOnly={locked}
-                />
-                <p className="rounded-0 border border-stone-200 bg-stone-50 px-3 py-2 text-xs leading-5 text-stone-600">
-                  Ansvarsfraskrivelse: Du er selv ansvarlig for å kontrollere at materialene og bestillingen er korrekt før innkjøp.
+      <section className="mt-4 grid gap-4 lg:grid-cols-[minmax(0,1.35fr)_minmax(0,0.65fr)]">
+        {/* Material list */}
+        <div className="min-w-0 space-y-3">
+          <div className="relative overflow-hidden rounded-[0.75rem] border border-stone-200 bg-white">
+            <div className="flex items-center justify-between border-b border-stone-200 px-4 py-3 sm:px-5">
+              <div>
+                <p className="eyebrow">Materialliste</p>
+                <p className="mt-1 text-base font-semibold text-stone-900 sm:text-lg">
+                  {totalLines} varelinjer · {totalSections} seksjoner
                 </p>
-                {locked ? (
-                  <div className="pointer-events-none absolute inset-x-0 bottom-0 h-[80%] bg-gradient-to-b from-transparent via-white/75 to-white" />
-                ) : null}
               </div>
-            </div>
-
-            {locked ? (
-              <div className="relative border-t border-stone-200 bg-gradient-to-b from-white via-stone-50 to-white p-4 sm:p-5">
-                <div className="mb-3 rounded-xl border border-stone-200 bg-white px-3 py-2 text-xs text-stone-600">
-                  Viser {materialPreview.visibleRows} av {materialPreview.totalRows} varelinjer.
-                  {materialPreview.hiddenRows > 0 ? ` ${materialPreview.hiddenRows} linjer er låst bak kjøp.` : ""}
-                </div>
-
-                <div className="panel-strong w-full rounded-[1.2rem] p-3.5 sm:rounded-[1.6rem] sm:p-5">
-                  <p className="eyebrow">Lås opp</p>
-                  <h2 className="mt-2 text-xl font-semibold text-stone-900 sm:text-2xl">
-                    Lås opp full materialliste og prisduell.
-                  </h2>
-                  <p className="mt-2 text-sm leading-6 text-stone-600">
-                    {bypassStripe
-                      ? "Testmodus er aktiv. Prosjektet kan låses opp direkte i denne perioden."
-                      : "Betal én gang og behold materialliste, prisduell og PDF under prosjektet ditt."}
-                  </p>
-                  <div className="mt-4 grid gap-3 sm:grid-cols-[1fr_auto] sm:items-end">
-                    <div>
-                      <p className="text-3xl font-semibold text-stone-900">
-                        {formatCurrency(project.priceNok)}
-                      </p>
-                      <p className="text-sm text-stone-600">Per prosjekt / materialliste</p>
-                    </div>
-                    <CheckoutButton
-                      slug={project.slug}
-                      projectId={project.id}
-                      projectName={project.title}
-                      priceNok={project.priceNok}
-                      requiresAuth={hasSupabaseEnv() && !user}
-                      bypassStripe={bypassStripe}
-                      authNextPath={authNextPath}
-                    />
-                  </div>
-                  <p className="mt-3 rounded-xl border border-stone-200 bg-white/75 px-3 py-2 text-xs leading-5 text-stone-600">
-                    Du er selv ansvarlig for at materialliste og bestilling er korrekt.
-                  </p>
-                  {bypassStripe && resolvedSearchParams.test_mode === "1" ? (
-                    <p className="mt-3 text-sm text-[var(--success)]">
-                      Testmodus: prosjektet er låst opp uten betaling.
-                    </p>
-                  ) : null}
-                  {paymentCancelled ? (
-                    <p className="mt-3 text-sm text-[var(--danger)]">
-                      Betalingen ble avbrutt. Prosjektet er fortsatt klart til å låses opp.
-                    </p>
-                  ) : null}
-                </div>
-              </div>
-            ) : null}
-          </div>
-        </section>
-
-        <div className="w-full min-w-0 space-y-3">
-          <div className="panel rounded-[1.2rem] p-3.5 sm:rounded-[1.5rem] sm:p-4">
-            <p className="text-sm font-semibold text-stone-900">Prosjektoppsummering</p>
-            <div className="mt-3 space-y-2.5 text-sm text-stone-600">
-              <div className="flex items-center justify-between">
-                <span>Status</span>
-                <span className="font-semibold text-stone-900">
-                  {locked ? "Låst" : "Låst opp"}
-                </span>
-              </div>
-              <div className="flex items-center justify-between">
-                <span>Prosjekttype</span>
-                <span className="font-semibold text-stone-900">{project.projectType}</span>
-              </div>
-              <div className="flex items-center justify-between">
-                <span>PDF</span>
-                <span className="font-semibold text-stone-900">
-                  {pdfGeneratedAtLabel ? "Lagret" : "Ikke generert"}
-                </span>
-              </div>
-            </div>
-
-            {locked ? (
-              <p className="mt-4 rounded-xl border border-stone-200 bg-stone-50 px-3 py-2 text-sm text-stone-600">
-                Lås opp prosjektet for å aktivere sammenlign priser og bestilling.
-              </p>
-            ) : (
-              <div className="mt-4 space-y-2">
-                <Link
-                  href={`/min-side/materiallister/${project.slug}/sammenlign`}
-                  prefetch={false}
-                  className="inline-flex w-full items-center justify-center rounded-full bg-stone-900 px-4 py-2 text-sm font-semibold text-white transition hover:bg-stone-800"
-                >
-                  Hent priser fra leverandører
-                </Link>
-                {project.id ? (
-                  <Link
-                    href={`/min-side/materiallister/${project.slug}/bestilling`}
-                    className="inline-flex w-full items-center justify-center rounded-full border border-stone-300 bg-white px-4 py-2 text-sm font-semibold text-stone-700 transition hover:border-stone-900 hover:text-stone-900"
-                  >
-                    Bestill materialer
-                  </Link>
-                ) : null}
+              {!locked ? (
                 <a
                   href={pdfHref}
-                  className="inline-flex w-full items-center justify-center rounded-full border border-stone-300 bg-white px-4 py-2 text-sm font-semibold text-stone-700 transition hover:border-stone-900 hover:text-stone-900"
+                  className="hidden items-center gap-1.5 rounded-sm border border-stone-300 bg-white px-3 py-1.5 text-xs font-semibold text-stone-700 transition hover:border-stone-900 hover:text-stone-900 sm:inline-flex"
                 >
-                  Last ned PDF
+                  <span aria-hidden>⬇</span> PDF
                 </a>
+              ) : null}
+            </div>
+
+            <div className="relative">
+              <MaterialListDocument
+                sections={materialSectionsToRender}
+                catalogEntries={materialCatalogEntries}
+                projectSlug={project.slug}
+                persistToProject={Boolean(project.id) && !locked}
+                readOnly={locked}
+              />
+              {locked ? (
+                <div className="pointer-events-none absolute inset-x-0 bottom-0 h-[70%] bg-gradient-to-b from-transparent via-white/80 to-white" />
+              ) : null}
+            </div>
+
+            {locked ? (
+              <div className="border-t border-stone-200 bg-stone-50/60 px-4 py-2 text-xs text-stone-600 sm:px-5">
+                Viser {materialPreview.visibleRows} av {materialPreview.totalRows} linjer.
+                {materialPreview.hiddenRows > 0
+                  ? ` ${materialPreview.hiddenRows} linjer er låst.`
+                  : ""}
               </div>
-            )}
-            {pdfGeneratedAtLabel ? (
-              <p className="mt-2 text-xs text-stone-500">Sist generert: {pdfGeneratedAtLabel}</p>
             ) : null}
           </div>
-          <div className="panel rounded-[1.2rem] p-3.5 sm:rounded-[1.5rem] sm:p-4">
-            <p className="text-sm font-semibold text-stone-900">Neste steg</p>
-            <p className="mt-1 text-sm text-stone-600">
-              Send materiallisten til prisduell og velg leverandør før bestilling.
-            </p>
-            <div className="mt-3 rounded-md border border-stone-200 bg-[var(--card-strong)] p-3 text-sm text-stone-700">
-              <p className="text-[11px] font-semibold uppercase tracking-[0.08em] text-stone-500">Prisduell - billigst</p>
-              {priceDuelCheapestSupplier ? (
-                <div className="mt-2 rounded-md border border-stone-200 bg-white p-2.5">
-                  <div className="flex items-start justify-between gap-3">
-                    <div className="flex items-center gap-2">
-                      <span className="inline-flex h-8 w-8 items-center justify-center overflow-hidden rounded-md bg-white">
-                        {supplierLogoSrc ? (
-                          <Image
-                            src={supplierLogoSrc}
-                            alt={`${priceDuelCheapestSupplier} logo`}
-                            width={120}
-                            height={32}
-                            className="h-full w-full object-contain p-0"
-                          />
-                        ) : (
-                          <span className="text-[10px] font-semibold uppercase tracking-[0.06em] text-stone-500">
-                            Logo
-                          </span>
-                        )}
-                      </span>
-                      <div className="inline-flex items-left flex-col justify-center overflow-hidden rounded-md bg-white">
-                        <p className="text-sm font-semibold text-stone-900">{priceDuelCheapestSupplier}</p>
-                        <p className="text-[11px] text-stone-500">{comparedAtLabel ? `Sist sammenlignet ${comparedAtLabel}` : "Tidligere sammenlignet"}</p>
-                      </div>
-                    </div>
-                    {comparedSupplierQuote ? (
-                      <p className="text-sm font-semibold text-stone-900">{formatCurrency(comparedSupplierQuote.totalNok)}</p>
-                    ) : null}
-                  </div>
 
-                  <div className="mt-2 flex flex-wrap items-center gap-2 text-[11px] text-stone-600">
-                    {comparedSupplierQuote ? (
-                      <>
-                        <span className="rounded-md bg-stone-100 px-2 py-0.5">Veil.pris {formatCurrency(comparedSupplierQuote.listTotalNok)}</span>
-                        <span className="rounded-md bg-emerald-100 px-2 py-0.5 font-semibold text-emerald-800">Spart {formatCurrency(priceDuelSavingsNok)}</span>
-                      </>
-                    ) : (
-                      <span className="rounded-md bg-emerald-100 px-2 py-0.5 font-semibold text-emerald-800">Spart {formatCurrency(priceDuelSavingsNok)}</span>
-                    )}
-                  </div>
-                </div>
-              ) : (
-                <p className="mt-2 text-xs text-stone-500">Ikke sammenlignet enda.</p>
-              )}
-            </div>
-            <p className="mt-2 text-xs text-stone-500">
-              Sammenligningsdekning: {priceCheck.comparedLineCount}/{priceCheck.totalLineCount} linjer ({Math.round(priceCheck.coverageRatio * 100)}%).
-            </p>
-            <Link
-              href={`/min-side/materiallister/${project.slug}/sammenlign`}
-              prefetch={false}
-              className="mt-3 inline-flex w-full items-center justify-center rounded-md bg-black px-4 py-2 text-sm font-semibold text-white transition hover:bg-black/90"
-            >
-              {hasComparedBefore ? "Sammenlign igjen" : "Sammenlign priser"}
-            </Link>
-          </div>
-
+          <p className="px-1 text-[11px] leading-5 text-stone-500">
+            Du er selv ansvarlig for å kontrollere at materiallisten er korrekt før bestilling.
+          </p>
         </div>
+
+        {/* Action column */}
+        <aside className="w-full min-w-0 space-y-3">
+          {locked ? (
+            <UnlockCard
+              priceNok={project.priceNok}
+              projectSlug={project.slug}
+              projectId={project.id}
+              projectTitle={project.title}
+              bypassStripe={bypassStripe}
+              requiresAuth={hasSupabaseEnv() && !user}
+              authNextPath={authNextPath}
+              paymentCancelled={paymentCancelled}
+              testModeUnlocked={bypassStripe && resolvedSearchParams.test_mode === "1"}
+            />
+          ) : (
+            <OrderCard
+              projectSlug={project.slug}
+              projectId={project.id}
+              pdfHref={pdfHref}
+              pdfGeneratedAtLabel={pdfGeneratedAtLabel}
+            />
+          )}
+
+          <TeaserCard teaser={project.teaser} description={project.description} />
+        </aside>
       </section>
     </main>
   );
 }
+
+/* ---------- UI building blocks ---------- */
+
+function StatusChip({ locked }: { locked: boolean }) {
+  if (locked) {
+    return (
+      <span className="inline-flex items-center gap-1.5 rounded-full border border-stone-300 bg-white px-2.5 py-1 text-[11px] font-semibold uppercase tracking-[0.08em] text-stone-700">
+        <span className="h-1.5 w-1.5 rounded-full bg-stone-400" />
+        Låst
+      </span>
+    );
+  }
+  return (
+    <span className="inline-flex items-center gap-1.5 rounded-full border border-emerald-200 bg-emerald-50 px-2.5 py-1 text-[11px] font-semibold uppercase tracking-[0.08em] text-emerald-800">
+      <span className="h-1.5 w-1.5 rounded-full bg-emerald-600" />
+      Klar til bestilling
+    </span>
+  );
+}
+
+function MetaChip({ icon, label }: { icon: string; label: string }) {
+  return (
+    <span className="inline-flex items-center gap-1 rounded-full border border-stone-200 bg-white px-2.5 py-1">
+      <span aria-hidden>{icon}</span>
+      <span className="font-medium text-stone-700">{label}</span>
+    </span>
+  );
+}
+
+function ProgressRail({ locked, hasOrder }: { locked: boolean; hasOrder: boolean }) {
+  const stepOne = !locked;
+  const stepTwo = !locked && hasOrder;
+
+  return (
+    <div className="rounded-[0.6rem] border border-stone-200 bg-white px-3 py-2.5 sm:px-4">
+      <ol className="flex items-center gap-2 text-xs font-medium sm:gap-3">
+        <Step index={1} label="Lås opp" done={stepOne} active={locked} />
+        <StepDivider done={stepOne} />
+        <Step index={2} label="Bestill" done={stepTwo} active={!locked && !hasOrder} />
+      </ol>
+    </div>
+  );
+}
+
+function Step({
+  index,
+  label,
+  done,
+  active,
+}: {
+  index: number;
+  label: string;
+  done: boolean;
+  active: boolean;
+}) {
+  const base =
+    "inline-flex h-6 w-6 items-center justify-center rounded-full text-[11px] font-semibold";
+  const dot = done
+    ? `${base} bg-emerald-600 text-white`
+    : active
+      ? `${base} bg-stone-900 text-white`
+      : `${base} bg-stone-100 text-stone-500`;
+  const text = done
+    ? "text-emerald-800"
+    : active
+      ? "text-stone-900"
+      : "text-stone-500";
+  return (
+    <li className="inline-flex items-center gap-2">
+      <span className={dot}>{done ? "✓" : index}</span>
+      <span className={text}>{label}</span>
+    </li>
+  );
+}
+
+function StepDivider({ done }: { done: boolean }) {
+  return (
+    <li className="h-px flex-1 bg-stone-200" aria-hidden>
+      <span
+        className={`block h-px transition-all ${done ? "w-full bg-emerald-500" : "w-0"}`}
+      />
+    </li>
+  );
+}
+
+function UnlockCard({
+  priceNok,
+  projectSlug,
+  projectId,
+  projectTitle,
+  bypassStripe,
+  requiresAuth,
+  authNextPath,
+  paymentCancelled,
+  testModeUnlocked,
+}: {
+  priceNok: number;
+  projectSlug: string;
+  projectId: string | null;
+  projectTitle: string;
+  bypassStripe: boolean;
+  requiresAuth: boolean;
+  authNextPath: string;
+  paymentCancelled: boolean;
+  testModeUnlocked: boolean;
+}) {
+  return (
+    <div className="panel-strong p-4 sm:p-5">
+      <div className="flex items-center gap-2">
+        <span className="inline-flex h-7 w-7 items-center justify-center rounded-full bg-stone-900 text-xs text-white" aria-hidden>
+          🔒
+        </span>
+        <p className="eyebrow">Lås opp</p>
+      </div>
+      <h2 className="mt-3 text-lg font-semibold leading-tight text-stone-900 sm:text-xl">
+        Lås opp full materialliste og bestill til partnerpris gjennom Proanbud.
+      </h2>
+
+      <div className="mt-4 flex items-baseline gap-2">
+        <p className="text-3xl font-semibold text-stone-900">{formatCurrency(priceNok)}</p>
+        <p className="text-xs text-stone-500">engangspris</p>
+      </div>
+
+      <div className="mt-4">
+        <CheckoutButton
+          slug={projectSlug}
+          projectId={projectId}
+          projectName={projectTitle}
+          priceNok={priceNok}
+          requiresAuth={requiresAuth}
+          bypassStripe={bypassStripe}
+          authNextPath={authNextPath}
+        />
+      </div>
+
+      <ul className="mt-4 space-y-1.5 text-xs text-stone-600">
+        <FeatureRow>Full oversikt over alle materiallinjer</FeatureRow>
+        <FeatureRow>Rediger og eksporter PDF ubegrenset</FeatureRow>
+        <FeatureRow>Bestill direkte gjennom Proanbuds innkjøpspartner</FeatureRow>
+      </ul>
+
+      {paymentCancelled ? (
+        <p className="mt-3 rounded-md border border-amber-200 bg-amber-50 px-3 py-2 text-xs font-medium text-amber-800">
+          Betalingen ble avbrutt. Du kan prøve på nytt når du vil.
+        </p>
+      ) : null}
+      {testModeUnlocked ? (
+        <p className="mt-3 rounded-md border border-emerald-200 bg-emerald-50 px-3 py-2 text-xs font-medium text-emerald-800">
+          Testmodus aktiv – prosjektet er låst opp uten betaling.
+        </p>
+      ) : null}
+    </div>
+  );
+}
+
+function OrderCard({
+  projectSlug,
+  projectId,
+  pdfHref,
+  pdfGeneratedAtLabel,
+}: {
+  projectSlug: string;
+  projectId: string | null;
+  pdfHref: string;
+  pdfGeneratedAtLabel: string | null;
+}) {
+  return (
+    <div className="panel-strong p-4 sm:p-5">
+      <div className="flex items-center gap-2">
+        <span className="inline-flex h-7 w-7 items-center justify-center rounded-full bg-emerald-600 text-xs text-white" aria-hidden>
+          ✓
+        </span>
+        <p className="eyebrow">Klar til bestilling</p>
+      </div>
+      <h2 className="mt-3 text-lg font-semibold leading-tight text-stone-900 sm:text-xl">
+        Bestill materialene direkte gjennom Proanbud.
+      </h2>
+      <p className="mt-2 text-xs leading-5 text-stone-600">
+        Vi bruker partnerprislisten, sjekker tilgjengelighet og sender bestillingen videre i samme kanal.
+      </p>
+
+      <div className="mt-4 space-y-2">
+        {projectId ? (
+          <Link
+            href={`/min-side/materiallister/${projectSlug}/bestilling`}
+            className="inline-flex h-11 w-full items-center justify-center rounded-sm bg-stone-900 px-4 text-sm font-semibold text-white transition hover:bg-stone-800"
+          >
+            Gå til bestilling →
+          </Link>
+        ) : (
+          <p className="rounded-md border border-stone-200 bg-white px-3 py-2 text-xs text-stone-600">
+            Logg inn for å lagre prosjektet før bestilling.
+          </p>
+        )}
+        <a
+          href={pdfHref}
+          className="inline-flex h-10 w-full items-center justify-center gap-1.5 rounded-sm border border-stone-300 bg-white px-4 text-sm font-semibold text-stone-800 transition hover:border-stone-900"
+        >
+          <span aria-hidden>⬇</span> Last ned PDF
+        </a>
+      </div>
+
+      {pdfGeneratedAtLabel ? (
+        <p className="mt-3 text-[11px] text-stone-500">
+          Sist generert: {pdfGeneratedAtLabel}
+        </p>
+      ) : null}
+    </div>
+  );
+}
+
+function TeaserCard({ teaser, description }: { teaser: string; description: string }) {
+  return (
+    <div className="panel p-4 sm:p-5">
+      <p className="eyebrow">Om prosjektet</p>
+      <p className="mt-2 text-sm leading-6 text-stone-700">{teaser}</p>
+      <details className="mt-2 text-sm text-stone-600">
+        <summary className="cursor-pointer text-xs font-semibold text-stone-500 hover:text-stone-900">
+          Vis full beskrivelse
+        </summary>
+        <p className="mt-2 leading-6">{description}</p>
+      </details>
+    </div>
+  );
+}
+
+function FeatureRow({ children }: { children: React.ReactNode }) {
+  return (
+    <li className="flex items-start gap-2">
+      <span className="mt-0.5 inline-flex h-4 w-4 shrink-0 items-center justify-center rounded-full bg-emerald-100 text-[10px] font-bold text-emerald-700" aria-hidden>
+        ✓
+      </span>
+      <span>{children}</span>
+    </li>
+  );
+}
+
+/* ---------- Helpers ---------- */
 
 function buildLockedMaterialPreview(sections: MaterialSection[]) {
   const totalRows = sections.reduce((sum, section) => sum + section.items.length, 0);
@@ -427,38 +499,4 @@ function buildLockedMaterialPreview(sections: MaterialSection[]) {
     visibleRows,
     hiddenRows,
   };
-}
-
-function getSupplierLogoSrc(supplierName: string | null) {
-  if (!supplierName) {
-    return null;
-  }
-
-  const normalized = supplierName.toLowerCase();
-  let logoName: string;
-
-  if (normalized.includes("byggmakker")) {
-    logoName = "byggmakker";
-  } else if (normalized.includes("monter") || normalized.includes("optimera")) {
-    logoName = "monter-optimera";
-  } else if (normalized.includes("byggmax")) {
-    logoName = "byggmax";
-  } else if (normalized.includes("xl")) {
-    logoName = "xl-bygg";
-  } else {
-    logoName = supplierName
-      .normalize("NFKD")
-      .replace(/[\u0300-\u036f]/g, "")
-      .toLowerCase()
-      .replace(/[\s/]+/g, "-")
-      .replace(/[^a-z0-9-]/g, "")
-      .replace(/-+/g, "-")
-      .replace(/^-|-$/g, "");
-  }
-
-  if (!logoName) {
-    return null;
-  }
-
-  return `/byggevarehus-logo/${logoName}.png`;
 }

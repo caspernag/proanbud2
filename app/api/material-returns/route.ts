@@ -458,8 +458,8 @@ async function uploadAttachments({
 
 function sanitizeFileName(value: string) {
   const normalized = value
-    .toLocaleLowerCase("nb-NO")
-    .replace(/[^a-z0-9æøå._-]+/g, "-")
+    .toLowerCase()
+    .replace(/[^a-z0-9._-]+/g, "-")
     .replace(/-+/g, "-");
   return normalized.slice(0, 120) || "vedlegg";
 }

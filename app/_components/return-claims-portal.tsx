@@ -448,7 +448,7 @@ export function ReturnClaimsPortal({
         <div className="space-y-3">
           <article className="rounded-md border border-[#1d4f35]/15 bg-[#f7f8f6] p-3.5 shadow-[0_12px_30px_rgba(13,34,22,0.06)] sm:p-4">
             <h2 className="text-base font-semibold text-stone-900">Returvilkår før kjøp</h2>
-            <p className="mt-1 text-xs text-stone-500">Leverandørspesifikke vilkår for valgt ordre og varelinjer.</p>
+            <p className="mt-1 text-xs text-stone-500">Partnerspesifikke vilkår for valgt ordre og varelinjer.</p>
 
             <div className="mt-3 space-y-2">
               {selectedSupplierTerms.map((terms) => (
@@ -489,7 +489,7 @@ export function ReturnClaimsPortal({
                     <p className="mt-1 text-xs text-stone-600">
                       {returnCase.returnType === "return" ? "Retur" : "Reklamasjon"} · {formatDate(returnCase.createdAt)}
                     </p>
-                    <p className="text-xs text-stone-500">{returnCase.supplierLabel ?? "Flere leverandører"}</p>
+                    <p className="text-xs text-stone-500">{returnCase.supplierLabel ?? "Aktiv partner"}</p>
 
                     <div className="mt-2 flex flex-wrap items-center gap-2 text-[11px] text-stone-500">
                       <span>{attachmentCountByReturnId.get(returnCase.id) ?? 0} vedlegg</span>

@@ -4,6 +4,8 @@ import type { MaterialSection } from "@/lib/project-data";
 
 export type SupplierKey = "byggmakker" | "monter_optimera" | "byggmax" | "xl_bygg";
 export type OrderDeliveryMode = "delivery" | "pickup";
+export type MaterialOrderDeliveryTarget = "door" | "construction_site";
+export type MaterialOrderUnloadingMethod = "standard" | "crane_needed" | "customer_machine";
 export type MaterialOrderCustomerType = "private" | "business";
 export type MaterialOrderCheckoutFlow = "pay_now" | "klarna" | "business_invoice" | "financing";
 export type MaterialOrderStatus =
@@ -51,11 +53,10 @@ export const MATERIAL_ORDER_SUPPLIERS: Record<SupplierKey, MaterialOrderSupplier
   },
 };
 
-export async function getAvailableMaterialOrderSupplierKeys() {
-  const priceProducts = await getPriceListProducts();
+function detectMaterialOrderSupplierKeys(products: PriceListProduct[]) {
   const keys = new Set<SupplierKey>();
 
-  for (const product of priceProducts) {
+  for (const product of products) {
     const key = inferSupplierKey(product.supplierName);
 
     if (key !== null) {
@@ -66,6 +67,14 @@ export async function getAvailableMaterialOrderSupplierKeys() {
   return Array.from(keys).sort((left, right) =>
     MATERIAL_ORDER_SUPPLIERS[left].label.localeCompare(MATERIAL_ORDER_SUPPLIERS[right].label, "nb-NO"),
   );
+}
+
+export async function getAvailableMaterialOrderSupplierKeys() {
+  const priceProducts = await getPriceListProducts();
+  const detectedKeys = detectMaterialOrderSupplierKeys(priceProducts);
+  const activePartnerKey = detectedKeys[0];
+
+  return activePartnerKey ? [activePartnerKey] : [];
 }
 
 export async function getAvailableMaterialOrderSuppliers() {
@@ -83,6 +92,8 @@ export type MaterialOrderRow = {
   company_name: string | null;
   organization_number: string | null;
   delivery_mode: OrderDeliveryMode;
+  delivery_target: MaterialOrderDeliveryTarget;
+  unloading_method: MaterialOrderUnloadingMethod;
   desired_delivery_date: string | null;
   earliest_delivery_date: string | null;
   latest_delivery_date: string | null;
@@ -170,6 +181,8 @@ export type MaterialOrderView = {
   companyName: string | null;
   organizationNumber: string | null;
   deliveryMode: OrderDeliveryMode;
+  deliveryTarget: MaterialOrderDeliveryTarget;
+  unloadingMethod: MaterialOrderUnloadingMethod;
   desiredDeliveryDate: string | null;
   earliestDeliveryDate: string | null;
   latestDeliveryDate: string | null;
@@ -206,7 +219,8 @@ export function toVatInclusiveNok(value: number, vatRate = VAT_RATE) {
     return 0;
   }
 
-  return Math.max(0, Math.round(value * (1 + vatRate)));
+  // Round to 2 decimal places (øre), not to whole kroner.
+  return Math.max(0, Math.round(value * (1 + vatRate) * 100) / 100);
 }
 
 export type MaterialOrderItemView = {
@@ -261,6 +275,8 @@ export function materialOrderFromRows(order: MaterialOrderRow, items: MaterialOr
     companyName: order.company_name,
     organizationNumber: order.organization_number,
     deliveryMode: order.delivery_mode,
+    deliveryTarget: order.delivery_target,
+    unloadingMethod: order.unloading_method,
     desiredDeliveryDate: order.desired_delivery_date,
     earliestDeliveryDate: order.earliest_delivery_date,
     latestDeliveryDate: order.latest_delivery_date,
@@ -294,18 +310,12 @@ export function materialOrderFromRows(order: MaterialOrderRow, items: MaterialOr
 export async function buildSuggestedOrderItems(sections: MaterialSection[]) {
   const priceProducts = await getPriceListProducts();
   const supplierMarkups = await getSupplierMarkups();
-  const availableSupplierKeys = Array.from(
-    new Set(
-      priceProducts
-        .map((product) => inferSupplierKey(product.supplierName))
-        .filter((key): key is SupplierKey => key !== null),
-    ),
-  );
+  const activePartnerKey = detectMaterialOrderSupplierKeys(priceProducts)[0] ?? "byggmakker";
 
   return sections.flatMap((section, sectionIndex) => {
     return section.items.map((item, itemIndex) => {
       const match = findBestPriceMatch(item.item, item.note, item.nobb, priceProducts);
-      const defaultSupplierKey = inferSupplierKey(match?.supplierName) ?? availableSupplierKeys[0] ?? "byggmakker";
+      const defaultSupplierKey = activePartnerKey;
       const quantityValue = parseQuantityValue(item.quantity);
       const quantityUnit = parseQuantityUnit(item.quantity);
       const baseListPriceNok =
@@ -540,10 +550,10 @@ function normalizeNobb(value?: string) {
 
 function tokenize(value: string) {
   return value
-    .toLocaleLowerCase("nb-NO")
+    .toLowerCase()
     .normalize("NFKD")
     .replace(/[\u0300-\u036f]/g, "")
-    .split(/[^a-z0-9æøå]+/)
+    .split(/[^a-z0-9]+/)
     .filter((token) => token.length > 1);
 }
 

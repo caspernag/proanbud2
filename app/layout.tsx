@@ -1,6 +1,5 @@
 import type { Metadata } from "next";
 import { Suspense } from "react";
-import { headers } from "next/headers";
 import { Sora, Space_Grotesk } from "next/font/google";
 import { GlobalNav } from "@/app/_components/global-nav";
 import "./globals.css";
@@ -23,7 +22,7 @@ export const metadata: Metadata = {
     template: "%s | Proanbud",
   },
   description:
-    "Proanbud gir privatkunder materiallister og prisduell mellom byggevareleverandører, slik at flere leverandører konkurrerer om samme prosjekt.",
+    "Proanbud gir privatkunder AI-materiallister, partnerpris på byggevarer og bestilling gjennom én innkjøpskanal.",
 };
 
 export default async function RootLayout({
@@ -31,11 +30,6 @@ export default async function RootLayout({
 }: Readonly<{
   children: React.ReactNode;
 }>) {
-  const headersList = await headers();
-  const hostname = headersList.get("host") || "";
-  const isAppHostname = hostname.startsWith("app.");
-  const renderGlobalNav = isAppHostname;
-
   return (
     <html
       lang="nb"
@@ -43,11 +37,9 @@ export default async function RootLayout({
       className={`${spaceGrotesk.variable} ${sora.variable} h-full antialiased`}
     >
       <body suppressHydrationWarning={true} className="min-h-full flex flex-col">
-        {renderGlobalNav && (
-          <Suspense fallback={null}>
-            <GlobalNav />
-          </Suspense>
-        )}
+        <Suspense fallback={null}>
+          <GlobalNav />
+        </Suspense>
         {children}
       </body>
     </html>

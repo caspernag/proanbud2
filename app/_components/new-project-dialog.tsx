@@ -2,7 +2,7 @@
 
 import { type FormEvent, type KeyboardEvent as ReactKeyboardEvent, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useFormStatus } from "react-dom";
-import { CirclePlus } from 'lucide-react';
+import { CirclePlus } from "lucide-react";
 
 type NewProjectDialogProps = {
   action: (formData: FormData) => void | Promise<void>;
@@ -35,7 +35,7 @@ const AI_STATUS_STEPS = [
   "Tolker vedlegg og tegninger",
   "Identifiserer byggdeler og materialbehov",
   "Beregner mengder med svinnmargin",
-  "Strukturerer materialliste for prisduell",
+  "Strukturerer materialliste for partnerpris",
 ];
 
 const AI_ACTIVITY_TICKERS = [
@@ -43,7 +43,7 @@ const AI_ACTIVITY_TICKERS = [
   "Mapper fagområder mot materialkategorier",
   "Validerer mengdelogikk mot materiallisteomfang",
   "Kvalitetssikrer enheter, antall og svinn",
-  "Optimaliserer listen for leverandorsammenligning",
+  "Optimaliserer listen for partnerbestilling",
 ];
 
 type ClarificationQuestion = {
@@ -55,6 +55,17 @@ type ClarificationQuestion = {
 };
 
 type ClarificationSession = {
+  project: {
+    title: string;
+    location: string;
+    projectType: string;
+    areaSqm: number;
+    finishLevel: string;
+    description: string;
+  };
+  documentContext: string;
+  askedQuestionIds: string[];
+  fallbackQuestions: ClarificationQuestion[];
   questions: ClarificationQuestion[];
   answers: Record<string, string>;
   index: number;
@@ -85,6 +96,8 @@ type DesiredProductDraft = {
   unitPriceNok?: number;
   productUrl?: string;
   imageUrl?: string;
+  sectionTitle?: string;
+  category?: string;
 };
 
 type FromWebProductResponse = {
@@ -98,57 +111,6 @@ type FromWebProductResponse = {
   productUrl: string;
   unitPriceNok?: number;
 };
-
-function parseClarificationQuestions(payload: unknown) {
-  if (!payload || typeof payload !== "object") {
-    return [] as ClarificationQuestion[];
-  }
-
-  const rawQuestions = (payload as { questions?: unknown }).questions;
-
-  if (!Array.isArray(rawQuestions)) {
-    return [] as ClarificationQuestion[];
-  }
-
-  const parsed: ClarificationQuestion[] = [];
-
-  for (const raw of rawQuestions) {
-    if (!raw || typeof raw !== "object") {
-      continue;
-    }
-
-    const entry = raw as {
-      id?: unknown;
-      title?: unknown;
-      helpText?: unknown;
-      placeholder?: unknown;
-      options?: unknown;
-    };
-
-    if (
-      typeof entry.id !== "string" ||
-      typeof entry.title !== "string" ||
-      typeof entry.helpText !== "string" ||
-      typeof entry.placeholder !== "string"
-    ) {
-      continue;
-    }
-
-    const options = Array.isArray(entry.options)
-      ? entry.options.filter((option): option is string => typeof option === "string" && option.trim().length > 0)
-      : undefined;
-
-    parsed.push({
-      id: entry.id,
-      title: entry.title,
-      helpText: entry.helpText,
-      placeholder: entry.placeholder,
-      ...(options && options.length > 0 ? { options } : {}),
-    });
-  }
-
-  return parsed;
-}
 
 function buildClarificationNotes(session: ClarificationSession) {
   const answeredLines = session.questions
@@ -168,6 +130,23 @@ function buildClarificationNotes(session: ClarificationSession) {
   }
 
   return ["Avklaringer fra bruker:", ...answeredLines].join("\n");
+}
+
+function toClarificationAnswerEntries(session: ClarificationSession) {
+  return session.questions
+    .map((question) => {
+      const answer = (session.answers[question.id] || "").trim();
+      if (!answer) {
+        return null;
+      }
+
+      return {
+        questionId: question.id,
+        title: question.title,
+        answer,
+      };
+    })
+    .filter((entry): entry is { questionId: string; title: string; answer: string } => entry !== null);
 }
 
 export function NewProjectDialog({ action, initialOpen = false }: NewProjectDialogProps) {
@@ -410,7 +389,7 @@ export function NewProjectDialog({ action, initialOpen = false }: NewProjectDial
     setClarificationFetchPending(true);
 
     try {
-      const response = await fetch("/api/material-list/clarifications", {
+      const response = await fetch("/api/material-list/chat", {
         method: "POST",
         body: formData,
         signal: abortController.signal,
@@ -421,18 +400,37 @@ export function NewProjectDialog({ action, initialOpen = false }: NewProjectDial
       }
 
       const payload = await response.json();
-      const questions = parseClarificationQuestions(payload);
+      const question = payload?.question as ClarificationQuestion | null;
+      const askedQuestionIds = Array.isArray(payload?.askedQuestionIds)
+        ? payload.askedQuestionIds.filter((entry: unknown): entry is string => typeof entry === "string")
+        : [];
+      const fallbackQuestions = Array.isArray(payload?.fallbackQuestions)
+        ? payload.fallbackQuestions.filter(
+            (entry: unknown): entry is ClarificationQuestion =>
+              Boolean(entry) &&
+              typeof entry === "object" &&
+              typeof (entry as { id?: unknown }).id === "string" &&
+              typeof (entry as { title?: unknown }).title === "string" &&
+              typeof (entry as { helpText?: unknown }).helpText === "string" &&
+              typeof (entry as { placeholder?: unknown }).placeholder === "string",
+          )
+        : [];
+      const done = Boolean(payload?.done);
 
-      if (questions.length === 0) {
+      if (!question || done) {
         submitAfterClarification("");
         return;
       }
 
       setCalculationPending(false);
       setClarificationSession({
-        questions,
+        project: payload?.project,
+        documentContext: typeof payload?.documentContext === "string" ? payload.documentContext : "",
+        askedQuestionIds,
+        fallbackQuestions,
+        questions: [question],
         index: 0,
-        answers: Object.fromEntries(questions.map((question) => [question.id, ""])),
+        answers: { [question.id]: "" },
       });
     } catch (error) {
       if (error instanceof Error && error.name === "AbortError") {
@@ -505,7 +503,7 @@ export function NewProjectDialog({ action, initialOpen = false }: NewProjectDial
                   Legg inn materiallistegrunnlag
                 </h2>
                 <p className="mt-1 text-sm text-stone-600">
-                  Dette brukes til å generere materialliste og prisduell.
+                  Dette brukes til å generere materialliste og klargjøre bestilling til partnerpris.
                 </p>
               </div>
               <button
@@ -842,24 +840,89 @@ export function NewProjectDialog({ action, initialOpen = false }: NewProjectDial
                       <button
                         type="button"
                         disabled={!currentAnswer.trim()}
-                        onClick={() => {
+                        onClick={async () => {
                           const isLast = clarificationSession.index === clarificationSession.questions.length - 1;
 
-                          if (isLast) {
-                            submitAfterClarification(buildClarificationNotes(clarificationSession));
+                          if (!isLast) {
+                            setClarificationSession((previous) => {
+                              if (!previous) {
+                                return previous;
+                              }
+
+                              return {
+                                ...previous,
+                                index: Math.min(previous.questions.length - 1, previous.index + 1),
+                              };
+                            });
                             return;
                           }
 
-                          setClarificationSession((previous) => {
-                            if (!previous) {
-                              return previous;
+                          const answers = toClarificationAnswerEntries(clarificationSession);
+                          setClarificationFetchPending(true);
+
+                          try {
+                            const response = await fetch("/api/material-list/chat", {
+                              method: "POST",
+                              headers: {
+                                "Content-Type": "application/json",
+                              },
+                              body: JSON.stringify({
+                                mode: "next",
+                                project: clarificationSession.project,
+                                documentContext: clarificationSession.documentContext,
+                                askedQuestionIds: clarificationSession.askedQuestionIds,
+                                answers,
+                                fallbackQuestions: clarificationSession.fallbackQuestions,
+                              }),
+                            });
+                            const payload = await response.json();
+                            const nextQuestion = payload?.question as ClarificationQuestion | null;
+                            const done = Boolean(payload?.done);
+                            const nextAskedQuestionIds = Array.isArray(payload?.askedQuestionIds)
+                              ? payload.askedQuestionIds.filter((entry: unknown): entry is string => typeof entry === "string")
+                              : clarificationSession.askedQuestionIds;
+                            const nextFallbackQuestions = Array.isArray(payload?.fallbackQuestions)
+                              ? payload.fallbackQuestions.filter(
+                                  (entry: unknown): entry is ClarificationQuestion =>
+                                    Boolean(entry) &&
+                                    typeof entry === "object" &&
+                                    typeof (entry as { id?: unknown }).id === "string" &&
+                                    typeof (entry as { title?: unknown }).title === "string" &&
+                                    typeof (entry as { helpText?: unknown }).helpText === "string" &&
+                                    typeof (entry as { placeholder?: unknown }).placeholder === "string",
+                                )
+                              : clarificationSession.fallbackQuestions;
+
+                            if (done || !nextQuestion) {
+                              submitAfterClarification(buildClarificationNotes(clarificationSession));
+                              return;
                             }
 
-                            return {
-                              ...previous,
-                              index: Math.min(previous.questions.length - 1, previous.index + 1),
-                            };
-                          });
+                            setClarificationSession((previous) => {
+                              if (!previous) {
+                                return previous;
+                              }
+
+                              const questionExists = previous.questions.some((entry) => entry.id === nextQuestion.id);
+                              const questions = questionExists ? previous.questions : [...previous.questions, nextQuestion];
+                              const answersWithNew = previous.answers[nextQuestion.id]
+                                ? previous.answers
+                                : { ...previous.answers, [nextQuestion.id]: "" };
+
+                              return {
+                                ...previous,
+                                askedQuestionIds: nextAskedQuestionIds,
+                                fallbackQuestions: nextFallbackQuestions,
+                                questions,
+                                answers: answersWithNew,
+                                index: Math.max(0, questions.length - 1),
+                              };
+                            });
+                          } catch {
+                            submitAfterClarification(buildClarificationNotes(clarificationSession));
+                          } finally {
+                            setClarificationFetchPending(false);
+                          }
                         }}
                         className="inline-flex items-center justify-center rounded-full bg-[#2eb872] px-5 py-2 text-xs font-semibold text-white transition hover:bg-[#27a866] disabled:cursor-not-allowed disabled:bg-[#1f8e59]"
                       >
@@ -1247,6 +1310,8 @@ function DesiredProductsField() {
                         nobbNumber: entry.nobbNumber,
                         supplierName: entry.supplierName,
                         unitPriceNok: entry.unitPriceNok,
+                        sectionTitle: entry.sectionTitle,
+                        category: entry.category,
                       })
                     }
                     className="shrink-0 rounded-full border border-stone-300 bg-white px-2.5 py-1 text-[11px] font-semibold text-stone-700 transition hover:border-stone-900 hover:text-stone-900"

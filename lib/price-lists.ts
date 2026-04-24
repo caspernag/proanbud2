@@ -134,7 +134,7 @@ async function parseSupplierCsv(csvPath: string): Promise<PriceListProduct[]> {
     const lastUpdated = stats.mtime.toISOString().slice(0, 10);
     const products: PriceListProduct[] = [];
 
-    for (const [index, line] of lines.entries()) {
+    for (const line of lines) {
       const columns = line.split(";");
       const categoryCode = normalizeColumn(columns[0]);
       const eanRaw = normalizeColumn(columns[1]);
@@ -166,7 +166,7 @@ async function parseSupplierCsv(csvPath: string): Promise<PriceListProduct[]> {
       ].filter((value) => value.length > 0);
 
       products.push({
-        id: `${supplierKey}-${nobbNumber}-${index}`,
+        id: `${supplierKey}-${nobbNumber}`,
         nobbNumber,
         productName,
         supplierName,
@@ -275,23 +275,237 @@ function parseEan(raw: string) {
   return ean.length >= 8 ? ean : null;
 }
 
-function inferSectionTitle(categoryCode: string, productName: string) {
+// NOBB Varekategori-kode → lesbar kategori.
+// Kodene i CSV-ene er zero-padded (f.eks. "0502", "1130"). Dette er primærkilden
+// for kategorisering – tekstheuristikk brukes bare som siste fallback.
+const CATEGORY_BY_CODE: Record<string, string> = {
+  // Trelast og konstruksjon
+  "0502": "Konstruksjonsvirke",
+  "0504": "Kledning",
+  "0505": "Innvendig panel",
+  "0506": "Terrasse",
+  "0508": "Gjerde og stolper",
+  "0509": "Limtre",
+  "0510": "Gulv",
+  "0511": "Lister",
+  "0512": "Lister",
+  "0513": "Lister",
+  // Mur, betong og grunn
+  "0601": "Mur og betong",
+  "0602": "Mur og betong",
+  "0605": "Mur og betong",
+  "0610": "Mur og betong",
+  "0615": "Mur og betong",
+  // Stål og tak
+  "0703": "Stålprofiler",
+  "0707": "Stålprofiler",
+  "0710": "Taktekking",
+  // Armering
+  "0812": "Armering",
+  "0830": "Armering",
+  // Plater (gips, OSB, spon, finer, MDF, sement)
+  "0910": "Gips og plater",
+  "0920": "Gips og plater",
+  "0935": "Gips og plater",
+  "0940": "Gips og plater",
+  "0950": "Gips og plater",
+  "0960": "Gips og plater",
+  "0965": "Gips og plater",
+  "0970": "Gips og plater",
+  "0980": "Gips og plater",
+  // Takbeslag og takrenner
+  "1020": "Takbeslag",
+  "1021": "Takbeslag",
+  "1022": "Takbeslag",
+  "1023": "Takbeslag",
+  "1024": "Takbeslag",
+  // Isolasjon og tetting
+  "1130": "Isolasjon",
+  "1131": "Spileplater og akustikk",
+  "1140": "Tetting og fukt",
+  // Innredning
+  "1214": "Innredning",
+  "1226": "Innredning",
+  // Dører, porter og vinduer
+  "1310": "Dører",
+  "1340": "Dører",
+  "1350": "Garasjeport",
+  "1355": "Dører",
+  "1410": "Vinduer",
+  "1452": "Ventilasjon",
+  // Baderom og gulvbelegg
+  "1510": "Baderom",
+  "1512": "Baderom",
+  "1513": "Gulvbelegg",
+  "1523": "Tetting og fukt",
+  "1525": "Gulvbelegg",
+  "1568": "Lim og fuge",
+  "1580": "Lister",
+  "1584": "Tapet og vegg",
+  "1598": "Tilbud og restesalg",
+  // Jernvarer og tilbehør
+  "1601": "Jernvarer",
+  "1602": "Jernvarer",
+  "1603": "Jernvarer",
+  "1604": "Jernvarer",
+  "1605": "Jernvarer",
+  "1606": "Jernvarer",
+  "1607": "Jernvarer",
+  "1608": "Jernvarer",
+  "1612": "Jernvarer",
+  "1634": "Tilbehør",
+  "1637": "Sikkerhet",
+  "1638": "Sikkerhet",
+  "1641": "Tilbehør",
+  "1642": "Tilbehør",
+  "1650": "Tilbehør",
+  "1655": "Jernvarer",
+  // Festemidler
+  "1701": "Festemidler",
+  "1704": "Festemidler",
+  "1706": "Festemidler",
+  "1708": "Festemidler",
+  "1714": "Festemidler",
+  "1715": "Festemidler",
+  "1720": "Festemidler",
+  "1725": "Festemidler",
+  "1726": "Festemidler",
+  "1730": "Festemidler",
+  "1732": "Festemidler",
+  "1740": "Festemidler",
+  "1780": "Festemidler",
+  // Håndverktøy
+  "1843": "Håndverktøy",
+  "1844": "Håndverktøy",
+  "1845": "Håndverktøy",
+  "1846": "Håndverktøy",
+  "1847": "Håndverktøy",
+  "1850": "Håndverktøy",
+  "1852": "Håndverktøy",
+  "1853": "Håndverktøy",
+  "1854": "Pensler og ruller",
+  "1855": "Håndverktøy",
+  "1858": "Håndverktøy",
+  "1859": "Håndverktøy",
+  "1860": "Håndverktøy",
+  // Elektroverktøy og maskiner
+  "1959": "Elverktøy",
+  "1962": "Elverktøy",
+  "1963": "Elverktøy",
+  "1965": "Elverktøy",
+  "1967": "Elverktøy",
+  "1968": "Elverktøy",
+  "1969": "Elverktøy",
+  "1972": "Elverktøy",
+  "1973": "Elverktøy",
+  "1974": "Elverktøy",
+  "1980": "Elverktøy",
+  "1985": "Elverktøy",
+  // Maling, kjemi og forbruk
+  "2002": "Overflatebehandling",
+  "2004": "Maling",
+  "2007": "Maling",
+  "2010": "Overflatebehandling",
+  "2011": "Forbruksvarer",
+  "2014": "Overflatebehandling",
+  "2017": "Overflatebehandling",
+  "2020": "Lim og fuge",
+  "2022": "Lim og fuge",
+  "2024": "Sparkel",
+  "2026": "Tetting og fukt",
+  "2028": "Maling",
+  "2029": "Maling",
+  "2031": "Forbruksvarer",
+};
+
+// Kategori → grovere seksjon (for materialliste-grupperinger).
+const SECTION_BY_CATEGORY: Record<string, string> = {
+  "Konstruksjonsvirke": "Konstruksjon og underlag",
+  "Limtre": "Konstruksjon og underlag",
+  "Armering": "Konstruksjon og underlag",
+  "Mur og betong": "Konstruksjon og underlag",
+  "Stålprofiler": "Konstruksjon og underlag",
+  "Kledning": "Kledning og fasade",
+  "Taktekking": "Kledning og fasade",
+  "Takbeslag": "Kledning og fasade",
+  "Gjerde og stolper": "Kledning og fasade",
+  "Terrasse": "Dekke",
+  "Gulv": "Dekke",
+  "Gulvbelegg": "Dekke",
+  "Gips og plater": "Innvendig ferdigstilling",
+  "Innvendig panel": "Innvendig ferdigstilling",
+  "Lister": "Innvendig ferdigstilling",
+  "Spileplater og akustikk": "Innvendig ferdigstilling",
+  "Baderom": "Innvendig ferdigstilling",
+  "Innredning": "Innvendig ferdigstilling",
+  "Dører": "Innvendig ferdigstilling",
+  "Vinduer": "Innvendig ferdigstilling",
+  "Garasjeport": "Innvendig ferdigstilling",
+  "Isolasjon": "Teknisk klargjøring",
+  "Tetting og fukt": "Teknisk klargjøring",
+  "Ventilasjon": "Teknisk klargjøring",
+  "Maling": "Finish",
+  "Overflatebehandling": "Finish",
+  "Sparkel": "Finish",
+  "Lim og fuge": "Finish",
+  "Tapet og vegg": "Finish",
+  "Pensler og ruller": "Finish",
+  "Festemidler": "Jernvarer og feste",
+  "Jernvarer": "Jernvarer og feste",
+  "Håndverktøy": "Verktøy",
+  "Elverktøy": "Verktøy",
+  "Tilbehør": "Verktøy",
+  "Sikkerhet": "Verktøy",
+  "Forbruksvarer": "Verktøy",
+  "Tilbud og restesalg": "Tilbud",
+};
+
+function inferCategory(categoryCode: string, productName: string) {
+  const fromCode = CATEGORY_BY_CODE[categoryCode];
+  if (fromCode) {
+    return fromCode;
+  }
+
   const text = productName.toLowerCase();
 
-  if (categoryCode === "502") {
-    return "Konstruksjon og underlag";
+  if (/glava|rockwool|isolasjon|jackofoam|jackopor|cellplast/i.test(text)) {
+    return "Isolasjon";
   }
-  if (categoryCode === "504") {
-    return "Kledning og fasade";
+  if (/skrue|spiker|beslag|bolt|mutter|skive/i.test(text)) {
+    return "Festemidler";
   }
-  if (categoryCode === "505" || categoryCode === "511") {
-    return "Innvendig ferdigstilling";
+  if (/primer|fuktsperre|dampsperre|tape|skum|membran/i.test(text)) {
+    return "Tetting og fukt";
   }
-  if (categoryCode === "506" || /terrasse|altan|rekk/i.test(text)) {
+  if (/maling|lakk|beis|olje|pensel/i.test(text)) {
+    return "Maling";
+  }
+  if (/list|sparkel|fug|akryl/i.test(text)) {
+    return "Overflatebehandling";
+  }
+  if (/terrasse|altan|rekk/i.test(text)) {
+    return "Terrasse";
+  }
+  if (/virke|k-virke|lekt|bjelke|forskaling/i.test(text)) {
+    return "Konstruksjonsvirke";
+  }
+  if (/gips|plate|osb|spon|finer|mdf/i.test(text)) {
+    return "Gips og plater";
+  }
+
+  return "Generelt";
+}
+
+function inferSectionTitle(categoryCode: string, productName: string) {
+  const category = inferCategory(categoryCode, productName);
+  const section = SECTION_BY_CATEGORY[category];
+  if (section) {
+    return section;
+  }
+
+  const text = productName.toLowerCase();
+  if (/terrasse|altan|rekk/i.test(text)) {
     return "Dekke";
-  }
-  if (categoryCode === "510") {
-    return "Finish";
   }
   if (/skrue|beslag|lekt|virke|k-virke|forskaling/i.test(text)) {
     return "Konstruksjon og underlag";
@@ -304,31 +518,6 @@ function inferSectionTitle(categoryCode: string, productName: string) {
   }
 
   return "Uklassifisert";
-}
-
-function inferCategory(categoryCode: string, productName: string) {
-  const text = productName.toLowerCase();
-
-  if (categoryCode === "502") {
-    return "Konstruksjonsvirke";
-  }
-  if (categoryCode === "504") {
-    return "Kledning";
-  }
-  if (categoryCode === "506") {
-    return "Terrasse";
-  }
-  if (/skrue|spiker|beslag/i.test(text)) {
-    return "Festemidler";
-  }
-  if (/primer|fuktsperre|dampsperre|tape|skum/i.test(text)) {
-    return "Tetthet og kjemi";
-  }
-  if (/list|sparkel|fug|akryl|maling/i.test(text)) {
-    return "Overflate";
-  }
-
-  return "Generelt";
 }
 
 function inferBrand(brandOrSeries: string, productName: string) {

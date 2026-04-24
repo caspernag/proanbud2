@@ -2,17 +2,18 @@ export function formatCurrency(value: number) {
   return new Intl.NumberFormat("nb-NO", {
     style: "currency",
     currency: "NOK",
-    maximumFractionDigits: 0,
+    minimumFractionDigits: 2,
+    maximumFractionDigits: 2,
   }).format(value);
 }
 
 export function slugify(value: string) {
   return (
     value
-      .toLocaleLowerCase("nb-NO")
+      .toLowerCase()
       .normalize("NFKD")
       .replace(/[\u0300-\u036f]/g, "")
-      .replace(/[^a-z0-9æøå]+/g, "-")
+      .replace(/[^a-z0-9]+/g, "-")
       .replace(/(^-|-$)/g, "")
       .slice(0, 60) || "prosjekt"
   );

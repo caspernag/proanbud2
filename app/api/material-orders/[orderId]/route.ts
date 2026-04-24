@@ -22,14 +22,17 @@ const updateOrderSchema = z.object({
   customerType: z.enum(["private", "business"]),
   companyName: z.string().max(160).nullable().optional(),
   organizationNumber: z.string().max(32).nullable().optional(),
-  deliveryMode: z.enum(["delivery"]),
+  deliveryMode: z.enum(["delivery", "pickup"]),
+  pickupStoreName: z.string().max(200).nullable().optional(),
+  deliveryTarget: z.enum(["door", "construction_site"]),
+  unloadingMethod: z.enum(["standard", "crane_needed", "customer_machine"]),
   desiredDeliveryDate: z.string().nullable().optional(),
   shippingContactName: z.string().max(120).optional(),
   shippingPhone: z.string().max(40).optional(),
   shippingAddressLine1: z.string().max(200).nullable().optional(),
   shippingPostalCode: z.string().max(20).nullable().optional(),
   shippingCity: z.string().max(120).nullable().optional(),
-  deliveryInstructions: z.string().max(600).optional(),
+  deliveryInstructions: z.string().max(600).nullable().optional(),
   expressDelivery: z.boolean().optional(),
   carryInService: z.boolean().optional(),
   checkoutFlow: z.enum(["pay_now", "klarna"]),
@@ -222,8 +225,26 @@ export async function PUT(request: Request, { params }: RouteContext) {
     return NextResponse.json({ error: "Gyldig organisasjonsnummer (9 siffer) er obligatorisk for bedriftsordre." }, { status: 400 });
   }
 
-  if (!parsed.data.shippingAddressLine1?.trim() || !parsed.data.shippingPostalCode?.trim() || !parsed.data.shippingCity?.trim()) {
+  if (parsed.data.deliveryMode === "delivery" && (!parsed.data.shippingAddressLine1?.trim() || !parsed.data.shippingPostalCode?.trim() || !parsed.data.shippingCity?.trim())) {
     return NextResponse.json({ error: "Komplett leveringsadresse er obligatorisk for levering." }, { status: 400 });
+  }
+
+  if (parsed.data.deliveryMode === "pickup" && !parsed.data.pickupStoreName?.trim()) {
+    return NextResponse.json({ error: "Velg en butikk for henting." }, { status: 400 });
+  }
+
+  if (parsed.data.deliveryTarget === "construction_site" && (parsed.data.deliveryInstructions ?? "").trim().length < 8) {
+    return NextResponse.json(
+      { error: "Legg inn leveringsinstruksjon for byggeplass (adkomst, plassering eller mottak)." },
+      { status: 400 },
+    );
+  }
+
+  if (parsed.data.unloadingMethod === "crane_needed" && (parsed.data.deliveryInstructions ?? "").trim().length < 8) {
+    return NextResponse.json(
+      { error: "Legg inn detaljer for kranlevering i fraktinstruksjoner før lagring." },
+      { status: 400 },
+    );
   }
 
   const contractAccepted = parsed.data.contractAccepted === true;
@@ -249,13 +270,17 @@ export async function PUT(request: Request, { params }: RouteContext) {
       organization_number:
         parsed.data.customerType === "business" ? (parsed.data.organizationNumber ?? "").trim() || null : null,
       delivery_mode: parsed.data.deliveryMode,
+      delivery_target: parsed.data.deliveryTarget,
+      unloading_method: parsed.data.unloadingMethod,
       desired_delivery_date: desiredDeliveryDate,
       shipping_contact_name: parsed.data.shippingContactName?.trim() || null,
       shipping_phone: parsed.data.shippingPhone?.trim() || null,
       shipping_address_line1: parsed.data.shippingAddressLine1?.trim() || null,
       shipping_postal_code: parsed.data.shippingPostalCode?.trim() || null,
       shipping_city: parsed.data.shippingCity?.trim() || null,
-      delivery_instructions: (parsed.data.deliveryInstructions ?? "").trim(),
+      delivery_instructions: parsed.data.deliveryMode === "pickup"
+        ? (parsed.data.pickupStoreName ?? "").trim()
+        : (parsed.data.deliveryInstructions ?? "").trim(),
       express_delivery: parsed.data.expressDelivery === true,
       carry_in_service: parsed.data.carryInService === true,
       checkout_flow: parsed.data.checkoutFlow,
@@ -302,6 +327,8 @@ export async function PUT(request: Request, { params }: RouteContext) {
       lineCount: rows.length,
       includedLineCount: normalizedItems.filter((item) => item.isIncluded).length,
       deliveryMode: parsed.data.deliveryMode,
+      deliveryTarget: parsed.data.deliveryTarget,
+      unloadingMethod: parsed.data.unloadingMethod,
       totalNok: summary.totalNok,
     },
   });

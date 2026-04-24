@@ -39,9 +39,6 @@ export type ProjectView = ProjectInput & {
   materialSections: MaterialSection[];
   priceNok: number;
   paymentStatus: "locked" | "paid";
-  priceDuelCheapestSupplier?: string;
-  priceDuelSavingsNok?: number;
-  priceDuelComparedAt?: string;
   pdfGeneratedAt?: string;
   pdfFileName?: string;
   createdAt?: string;
@@ -61,9 +58,6 @@ export type ProjectRow = {
         teaser?: string;
         previewBullets?: string[];
         riskBullets?: string[];
-        priceDuelCheapestSupplier?: string;
-        priceDuelSavingsNok?: number;
-        priceDuelComparedAt?: string;
       }
     | null;
   material_list: MaterialSection[] | null;
@@ -138,7 +132,7 @@ function sectionLibrary(input: ProjectInput): MaterialSection[] {
           {
             item: "Smøremembran",
             quantity: qty(areaSqm, 4, "spann", 3),
-            note: "Beregnet for gulv, vegg og sikkerhetsmargin.",
+            note: "Beregnet for , vegg og sikkerhetsmargin.",
           },
           {
             item: "Mansjetter og hjørnebånd",
@@ -452,21 +446,21 @@ export function buildProjectView(input: ProjectInput, overrides?: Partial<Projec
   const priceNok = MATERIAL_LIST_PRICE_NOK;
   const teaserByScenario: Record<string, string> = {
     bathroom:
-      "AI-en har identifisert våtromssoner, membranbehov og kritiske tettesjikt på et grunnlag leverandører kan prises mot.",
+      "AI-en har identifisert våtromssoner, membranbehov og kritiske tettesjikt i et ordregrunnlag klart for partnerpris.",
     terrace:
-      "AI-en har estimert bjelkelag, terrassebord og beslag med reserve for kapp, klart for direkte prissammenligning.",
+      "AI-en har estimert bjelkelag, terrassebord og beslag med reserve for kapp, klart for bestilling gjennom partnerprislisten.",
     kitchen:
-      "AI-en har brutt prosjektet ned i klargjøring, innbygging og finish så leverandører sammenlignes på samme liste.",
+      "AI-en har brutt prosjektet ned i klargjøring, innbygging og finish, slik at kjøkkenprosjektet kan prises og bestilles raskt.",
     extension:
       "AI-en har delt opp tilbygget i konstruksjon, tetthet og ferdigstilling for å redusere feil og styrke innkjøpsgrunnlaget.",
     renovation:
-      "AI-en har laget et første materialløp med fokus på underlag, tekniske lag og finish, klart for prisduell.",
+      "AI-en har laget et første materialløp med fokus på underlag, tekniske lag og finish, klart for partnerpris og bestilling.",
   };
 
   const previewBullets = [
     `${Math.ceil(input.areaSqm * 1.1)} m² overflategrunnlag analysert for ${input.projectType.toLowerCase()}.`,
     `${input.finishLevel}-nivå gir anbefalinger for finish, reserve og detaljarbeid.`,
-    "Samme materialliste kan brukes mot flere leverandører for renere prissammenligning.",
+    "Materiallisten er strukturert for én partnerpris og en raskere bestillingsflyt.",
   ];
 
   const riskBullets = [
@@ -488,6 +482,13 @@ export function buildProjectView(input: ProjectInput, overrides?: Partial<Projec
   };
 }
 
+export function buildDefaultMaterialSections(input: ProjectInput): MaterialSection[] {
+  return sectionLibrary(input).map((section) => ({
+    ...section,
+    items: section.items.map((item) => ({ ...item })),
+  }));
+}
+
 export function projectFromRow(row: ProjectRow): ProjectView {
   const normalizedTitle = normalizeProjectTitle(row.title);
 
@@ -502,7 +503,7 @@ export function projectFromRow(row: ProjectRow): ProjectView {
     description: row.description ?? "Prosjektbeskrivelse mangler",
     teaser:
       row.preview_summary?.teaser ??
-      "AI-en har analysert prosjektbeskrivelsen og satt opp materialstruktur for prissammenligning.",
+      "AI-en har analysert prosjektbeskrivelsen og satt opp materialstruktur for partnerpris og bestilling.",
     previewBullets:
       row.preview_summary?.previewBullets ??
       buildProjectView({
@@ -528,9 +529,6 @@ export function projectFromRow(row: ProjectRow): ProjectView {
       [],
     priceNok: MATERIAL_LIST_PRICE_NOK,
     paymentStatus: row.payment_status === "paid" ? "paid" : "locked",
-    priceDuelCheapestSupplier: row.preview_summary?.priceDuelCheapestSupplier ?? undefined,
-    priceDuelSavingsNok: row.preview_summary?.priceDuelSavingsNok ?? undefined,
-    priceDuelComparedAt: row.preview_summary?.priceDuelComparedAt ?? undefined,
     pdfGeneratedAt: row.pdf_generated_at ?? undefined,
     pdfFileName: row.pdf_file_name ?? undefined,
     createdAt: row.created_at,

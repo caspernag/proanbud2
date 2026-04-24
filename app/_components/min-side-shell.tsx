@@ -20,8 +20,13 @@ type NavItem = {
 
 const NAV_ITEMS: NavItem[] = [
   {
+    href: "/",
+    label: "Nettbutikk",
+    isActive: (pathname) => pathname === "/" || pathname.startsWith("/checkout") || pathname.startsWith("/ordre/"),
+  },
+  {
     href: "/min-side",
-    label: "Oversikt",
+    label: "Min side",
     isActive: (pathname) => pathname === "/min-side",
   },
   {

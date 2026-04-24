@@ -55,7 +55,7 @@ export async function POST(request: Request, { params }: RouteContext) {
   }
 
   revalidatePath(`/min-side/materiallister/${slug}`);
-  revalidatePath(`/min-side/materiallister/${slug}/sammenlign`);
+  revalidatePath(`/min-side/materiallister/${slug}/bestilling`);
 
   return NextResponse.json({ ok: true, sections: materialSections.length });
 }
