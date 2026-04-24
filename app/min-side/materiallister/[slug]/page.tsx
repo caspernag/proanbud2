@@ -203,7 +203,7 @@ export default async function ProjectPage({ params, searchParams }: ProjectPageP
             <UnlockCard
               priceNok={project.priceNok}
               projectSlug={project.slug}
-              projectId={project.id ?? null}
+              projectId={project.id}
               projectTitle={project.title}
               bypassStripe={bypassStripe}
               requiresAuth={hasSupabaseEnv() && !user}
@@ -324,7 +324,7 @@ function UnlockCard({
 }: {
   priceNok: number;
   projectSlug: string;
-  projectId: string | null;
+  projectId: string | undefined;
   projectTitle: string;
   bypassStripe: boolean;
   requiresAuth: boolean;
@@ -388,7 +388,7 @@ function OrderCard({
   pdfGeneratedAtLabel,
 }: {
   projectSlug: string;
-  projectId: string | null;
+  projectId: string | undefined;
   pdfHref: string;
   pdfGeneratedAtLabel: string | null;
 }) {

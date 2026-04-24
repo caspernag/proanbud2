@@ -18,7 +18,7 @@ type Row = {
   type: string;
   lineCount: number;
   paymentStatus: ProjectView["paymentStatus"];
-  createdAt: string | null;
+  createdAt: string | undefined;
 };
 
 export default async function MateriallisterPage({ searchParams }: MaterialListsPageProps) {

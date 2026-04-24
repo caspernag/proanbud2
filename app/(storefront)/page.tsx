@@ -1,4 +1,5 @@
 import Link from "next/link";
+import { Suspense } from "react";
 
 import { AddToCartButton } from "@/app/_components/storefront/add-to-cart-button";
 import { StorefrontProductImage } from "@/app/_components/storefront/storefront-product-image";
@@ -188,7 +189,7 @@ export default async function StorefrontPage({ searchParams }: StorefrontPagePro
               </p>
             </div>
 
-            <StorefrontViewControls initialSort={sort} initialCols={cols} />
+            <Suspense><StorefrontViewControls initialSort={sort} initialCols={cols} /></Suspense>
           </div>
 
           {hasFilters ? (
