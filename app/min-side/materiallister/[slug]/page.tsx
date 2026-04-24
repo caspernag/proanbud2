@@ -203,7 +203,7 @@ export default async function ProjectPage({ params, searchParams }: ProjectPageP
             <UnlockCard
               priceNok={project.priceNok}
               projectSlug={project.slug}
-              projectId={project.id}
+              projectId={project.id ?? null}
               projectTitle={project.title}
               bypassStripe={bypassStripe}
               requiresAuth={hasSupabaseEnv() && !user}
