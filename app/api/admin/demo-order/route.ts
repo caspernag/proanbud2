@@ -251,10 +251,3 @@ export async function POST(request: NextRequest) {
 
   return NextResponse.json({ orderId: order.id, projectId: project.id, total });
 }
-
-export const PRESETS_META = Object.entries(PRESETS).map(([key, p]) => ({
-  key,
-  title: p.title,
-  location: p.location,
-  itemCount: p.items.length,
-}));
