@@ -181,11 +181,6 @@ export default async function StorefrontPage({ searchParams }: StorefrontPagePro
               </p>
               <p className="text-sm text-stone-500">
                 {result.total.toLocaleString("nb-NO")} produkter
-                {result.source === "vector_store" ? (
-                  <span className="ml-2 inline-flex items-center gap-1 rounded bg-[#15452d]/10 px-2 py-0.5 text-[10px] font-semibold uppercase tracking-[0.12em] text-[#15452d]">
-                    <span className="h-1.5 w-1.5 rounded-full bg-[#15452d]" /> AI-katalog
-                  </span>
-                ) : null}
               </p>
             </div>
 
@@ -255,7 +250,7 @@ function HeroSection({ total, highlights }: { total: number; highlights: Storefr
               <span className="h-1.5 w-1.5 rounded-full bg-[#0f321f]" /> Partnerpris
             </span>
             <span className="rounded bg-white/10 px-2.5 py-1 text-[11px] font-semibold uppercase tracking-[0.14em] text-emerald-50">
-              En innkjøpskanal
+              Inntil -80% rabatt
             </span>
             <span className="rounded bg-[#d9ff7a]/20 border border-[#d9ff7a]/40 px-2.5 py-1 text-[11px] font-semibold uppercase tracking-[0.14em] text-[#d9ff7a]">
               Gratis frakt over 15 000 kr
@@ -266,7 +261,7 @@ function HeroSection({ total, highlights }: { total: number; highlights: Storefr
             <span className="block mt-1 text-emerald-50/90">gjennom Proanbuds partneravtale.</span>
           </h1>
           <p className="mt-4 max-w-xl text-[15px] leading-7 text-emerald-50/75">
-            Proanbud bruker en ferdigforhandlet partnerprisliste, legger på kontrollert margin og gir deg sluttpris som fortsatt ligger under veiledende pris. {total.toLocaleString("nb-NO")} varer er tilgjengelig akkurat nå.
+            Samme varer som hos byggevarehuset — til prisen proffene betaler. Ingen binding, ingen avtale. {total.toLocaleString("nb-NO")} varer klar til bestilling akkurat nå.
           </p>
           <div className="mt-5 flex flex-wrap gap-2.5">
             <Link
@@ -285,7 +280,7 @@ function HeroSection({ total, highlights }: { total: number; highlights: Storefr
           </div>
 
           <div className="mt-6 grid grid-cols-3 gap-2 text-[11px] font-semibold uppercase tracking-[0.12em] text-emerald-50/70">
-            <HeroMini label="Prisnivå" value="Under veil." />
+            <HeroMini label="Rabatt" value="Opptil -80%" />
             <HeroMini label="Varer" value={total.toLocaleString("nb-NO")} />
             <HeroMini label="Levering" value="24-48t" />
           </div>
@@ -386,8 +381,8 @@ function ProductCollage({ products }: { products: StorefrontProduct[] }) {
       ) : null}
       {/* Floating "save" badge */}
       <div className="absolute bottom-[108px] left-[10px] flex h-20 w-20 rotate-[-8deg] flex-col items-center justify-center rounded-full bg-[#d9ff7a] text-[#0f321f] shadow-[0_12px_28px_rgba(217,255,122,0.3)]">
-        <span className="text-[10px] font-bold uppercase tracking-wider">Pris</span>
-        <span className="text-lg font-bold">Under veil.</span>
+        <span className="text-[10px] font-bold uppercase tracking-wider">Spar</span>
+        <span className="text-lg font-bold leading-tight">-{mainDiscount}%</span>
       </div>
     </div>
   );

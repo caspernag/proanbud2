@@ -36,10 +36,10 @@ export function StorefrontHeader() {
           <div className="flex items-center gap-4 text-emerald-50/90">
             <span className="inline-flex items-center gap-1.5">
               <span className="inline-flex h-4 items-center rounded-sm bg-[#d9ff7a] px-1.5 text-[10px] font-bold text-[#0f321f]">PARTNERPRIS</span>
-              Byggevarer under <strong className="text-[#d9ff7a]">veil. pris</strong>
+              Byggevarer til <strong className="text-[#d9ff7a]">proffpris</strong>
             </span>
             <span className="hidden items-center gap-1.5 md:inline-flex">
-              <Dot /> Gratis frakt over 5 000 kr
+              <Dot /> Gratis frakt over 15 000 kr
             </span>
             <span className="hidden items-center gap-1.5 lg:inline-flex">
               <Dot /> Lag materialliste med KI

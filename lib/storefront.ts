@@ -50,9 +50,20 @@ export async function getStorefrontProducts() {
 
     if (fromVectorStore.products.length > 0) {
       const enriched = applyPriceListCategoryOverrides(fromVectorStore.products, priceListProducts);
+
+      // Merge: add any price list products whose NOBB isn't already in the
+      // vector store. This ensures the full catalog is always visible even
+      // when the vector store index is stale or partially uploaded.
+      const vectorStoreNobbs = new Set(enriched.map((p) => p.nobbNumber));
+      const missingFromVectorStore = normalizePriceListProducts(
+        priceListProducts.filter((p) => !vectorStoreNobbs.has(p.nobbNumber.replace(/\D/g, ""))),
+        "price_lists",
+      );
+      const merged = dedupeStorefrontProducts([...enriched, ...missingFromVectorStore]);
+
       const pricedResult = {
         ...fromVectorStore,
-        products: applyStorefrontPricing(enriched, markups),
+        products: applyStorefrontPricing(merged, markups),
       };
       storefrontCache = {
         expiresAt: Date.now() + STOREFRONT_CACHE_TTL_MS,
