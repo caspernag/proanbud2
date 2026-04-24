@@ -42,15 +42,17 @@ export async function getStorefrontProducts() {
   }
 
   storefrontInFlight = (async () => {
-    const [fromVectorStore, markups] = await Promise.all([
+    const [fromVectorStore, markups, priceListProducts] = await Promise.all([
       loadStorefrontProductsFromVectorStore(),
       getSupplierMarkups(),
+      getPriceListProducts(),
     ]);
 
     if (fromVectorStore.products.length > 0) {
+      const enriched = applyPriceListCategoryOverrides(fromVectorStore.products, priceListProducts);
       const pricedResult = {
         ...fromVectorStore,
-        products: applyStorefrontPricing(fromVectorStore.products, markups),
+        products: applyStorefrontPricing(enriched, markups),
       };
       storefrontCache = {
         expiresAt: Date.now() + STOREFRONT_CACHE_TTL_MS,
@@ -59,7 +61,7 @@ export async function getStorefrontProducts() {
       return pricedResult;
     }
 
-    const fallbackProducts = await getPriceListProducts();
+    const fallbackProducts = priceListProducts;
     const normalizedFallbackProducts = normalizePriceListProducts(fallbackProducts, "price_lists");
     const dedupedFallbackProducts = dedupeStorefrontProducts(normalizedFallbackProducts);
     const fallbackResult = {
