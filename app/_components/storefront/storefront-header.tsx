@@ -6,15 +6,19 @@ import { usePathname, useSearchParams } from "next/navigation";
 
 import { useStorefront } from "@/app/_components/storefront/storefront-provider";
 
+// Ekte kategorier fra prislistens Varekategori-felt. Bruker /?category=... (filter),
+// ikke /?q=... (søk). Filteret gjør case-insensitive includes-match, så korte navn
+// som "Verktøy" og "Tak" treffer flere nærliggende kategorier (Elverktøy, Håndverktøy;
+// Takbeslag, Taktekking) uten å miste presisjon.
 const TOP_CATEGORIES: Array<{ label: string; href: string; highlight?: boolean }> = [
-  { label: "Trelast", href: "/?category=konstruksjon" },
-  { label: "Isolasjon", href: "/?q=isolasjon" },
-  { label: "Gips & plater", href: "/?q=gips" },
-  { label: "Festemidler", href: "/?q=skruer" },
-  { label: "Maling", href: "/?q=maling" },
-  { label: "Verktøy", href: "/?q=verktøy" },
-  { label: "Tak & fasade", href: "/?q=tak" },
-  //{ label: "Alle tilbud", href: "/?sort=price_asc", highlight: true },
+  { label: "Konstruksjonsvirke", href: "/?category=Konstruksjonsvirke" },
+  { label: "Isolasjon", href: "/?category=Isolasjon" },
+  { label: "Gips og plater", href: "/?category=Gips%20og%20plater" },
+  { label: "Festemidler", href: "/?category=Festemidler" },
+  { label: "Maling", href: "/?category=Maling" },
+  { label: "Verktøy", href: "/?category=verkt%C3%B8y" },
+  { label: "Tak", href: "/?category=tak" },
+  { label: "Kledning", href: "/?category=Kledning" },
 ];
 
 export function StorefrontHeader() {

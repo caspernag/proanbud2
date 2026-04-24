@@ -550,6 +550,41 @@ function normalizeStorefrontProduct(
   } satisfies StorefrontProduct;
 }
 
+// Prislisten (Varekategori-kolonnen) er autoritativ for kategorisering.
+// Vector-store-indeksen kan inneholde utdaterte kategorier, så vi overlegger
+// category/sectionTitle fra prislisten matchet på NOBB-nummer.
+function applyPriceListCategoryOverrides(
+  products: StorefrontProduct[],
+  priceListProducts: PriceListProduct[],
+): StorefrontProduct[] {
+  if (priceListProducts.length === 0) {
+    return products;
+  }
+
+  const byNobb = new Map<string, PriceListProduct>();
+  for (const entry of priceListProducts) {
+    const key = entry.nobbNumber.replace(/\D/g, "");
+    if (!key) continue;
+    const existing = byNobb.get(key);
+    if (!existing || entry.priceNok < existing.priceNok) {
+      byNobb.set(key, entry);
+    }
+  }
+
+  return products.map((product) => {
+    const match = byNobb.get(product.nobbNumber);
+    if (!match) return product;
+    const nextCategory = match.category?.trim();
+    const nextSection = match.sectionTitle?.trim();
+    if (!nextCategory && !nextSection) return product;
+    return {
+      ...product,
+      category: nextCategory || product.category,
+      sectionTitle: nextSection || product.sectionTitle,
+    };
+  });
+}
+
 function applyStorefrontPricing(products: StorefrontProduct[], markups: SupplierMarkup[]): StorefrontProduct[] {
   return products.map((product) => {
     // Salgs-/minpris: markup + MVA.

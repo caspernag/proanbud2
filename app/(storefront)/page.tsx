@@ -39,53 +39,55 @@ const MOST_POPULAR_NOBB = [
   "60743886", // KONSTRUKSJONSKRUE WAF 6X40
 ];
 
-// Curated visual categories shown on the landing hero. The `match` field is
-// compared case-insensitively against the real category names found in the
-// product catalog so we only link to categories that actually have products.
+// Curated visual categories shown on the landing hero. Labels og match-arrays
+// speiler de ekte kategorinavnene i prislistens Varekategori-felt, som er
+// autoritativ kilde. `match` sammenlignes case-insensitivt med substring mot
+// de faktiske kategoriene, så korte nøkkelord fanger flere relaterte kategorier
+// (f.eks. "verktøy" matcher både Elverktøy og Håndverktøy).
 const FEATURED_CATEGORIES: Array<{
   label: string;
   match: string[];
   tone: string;
 }> = [
   {
-    label: "Trelast",
-    match: ["trelast", "trevare", "bygge", "konstruksjon"],
+    label: "Konstruksjonsvirke",
+    match: ["konstruksjonsvirke", "limtre"],
     tone: "from-[#c48a4d] to-[#8a5c2b]",
   },
   {
     label: "Isolasjon",
-    match: ["isolasjon", "isolering", "glava", "rockwool"],
+    match: ["isolasjon"],
     tone: "from-[#d9b779] to-[#b08a42]",
   },
   {
-    label: "Gips & plater",
-    match: ["gips", "plate", "spon", "osb", "finer"],
+    label: "Gips og plater",
+    match: ["gips og plater"],
     tone: "from-[#7c9474] to-[#3f5c3a]",
   },
   {
-    label: "Skruer & festemidler",
-    match: ["skru", "spiker", "feste", "bolt"],
+    label: "Festemidler",
+    match: ["festemidler"],
     tone: "from-[#8796a6] to-[#445566]",
   },
   {
-    label: "Maling & verktøy",
-    match: ["maling", "verktøy", "verktoy", "pensel"],
+    label: "Maling",
+    match: ["maling", "overflatebehandling"],
     tone: "from-[#b15b47] to-[#7a3523]",
   },
   {
-    label: "Tak & yttervegg",
-    match: ["tak", "ytter", "fasade", "kledning"],
+    label: "Verktøy",
+    match: ["verktøy"],
+    tone: "from-[#8a6a3b] to-[#4d3818]",
+  },
+  {
+    label: "Tak",
+    match: ["takbeslag", "taktekking"],
     tone: "from-[#5c6b57] to-[#2e3a2a]",
   },
   {
-    label: "VVS & rør",
-    match: ["vvs", "rør", "ror", "vann", "avløp"],
+    label: "Kledning",
+    match: ["kledning"],
     tone: "from-[#4a7fa7] to-[#234a6c]",
-  },
-  {
-    label: "Elektro",
-    match: ["elektro", "el-", "kabel", "strøm"],
-    tone: "from-[#c89b2d] to-[#7a5b13]",
   },
 ];
 
