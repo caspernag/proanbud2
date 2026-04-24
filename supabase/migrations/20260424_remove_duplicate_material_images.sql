@@ -1,0 +1,4 @@
+-- Duplicate (1) files in the material-images bucket are cleaned up via the
+-- Storage API instead of direct SQL (Supabase blocks direct deletes from
+-- storage.objects to prevent orphaned data).
+-- See: scripts/delete_duplicate_material_images.py

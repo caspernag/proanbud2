@@ -1,6 +1,4 @@
-import { promises as fs } from "node:fs";
-import path from "node:path";
-
+import { createSupabaseAdminClient } from "@/lib/supabase/admin";
 import { env, hasNobbExportEnv } from "@/lib/env";
 import { STORE_IMAGE_FALLBACK_URL } from "@/lib/storefront-image";
 
@@ -8,8 +6,7 @@ import { STORE_IMAGE_FALLBACK_URL } from "@/lib/storefront-image";
 // Cache configuration
 // ---------------------------------------------------------------------------
 
-/** Directory where downloaded images are persisted keyed by NOBB number. */
-const CACHE_DIR = path.join(process.cwd(), ".private", "nobb-images");
+const BUCKET = "material-images";
 
 /** Number of seconds browsers / CDNs should cache a real image response. */
 const HIT_CACHE_SECONDS = 60 * 60 * 24 * 30; // 30 days
@@ -39,17 +36,10 @@ export async function GET(_request: Request, context: RouteContext) {
     return Response.redirect(STORE_IMAGE_FALLBACK_URL, 307);
   }
 
-  // 1. Serve from local disk cache if available --------------------------------
-  const cached = await readCachedImage(nobbNumber);
-  if (cached) {
-    return new Response(cached.buffer, {
-      status: 200,
-      headers: {
-        "Content-Type": cached.contentType,
-        "Cache-Control": `public, max-age=${HIT_CACHE_SECONDS}, s-maxage=${HIT_CACHE_SECONDS}, immutable`,
-        "X-Image-Source": "disk-cache",
-      },
-    });
+  // 1. Redirect to Supabase Storage public URL if cached ----------------------
+  const cachedUrl = await getStoragePublicUrl(nobbNumber);
+  if (cachedUrl) {
+    return Response.redirect(cachedUrl, 302);
   }
 
   // 2. Skip re-fetch if we tried recently and found nothing --------------------
@@ -135,7 +125,7 @@ async function resolveUpstreamImage(nobb: string): Promise<UpstreamResolution> {
 }
 
 // ---------------------------------------------------------------------------
-// Disk cache helpers
+// Supabase Storage helpers
 // ---------------------------------------------------------------------------
 
 const IMAGE_EXTENSIONS: Array<{ ext: string; contentType: string }> = [
@@ -145,55 +135,65 @@ const IMAGE_EXTENSIONS: Array<{ ext: string; contentType: string }> = [
   { ext: ".gif", contentType: "image/gif" },
 ];
 
-async function readCachedImage(nobb: string): Promise<{ buffer: ArrayBuffer; contentType: string } | null> {
-  for (const { ext, contentType } of IMAGE_EXTENSIONS) {
-    const filePath = path.join(CACHE_DIR, `${nobb}${ext}`);
+/** Returns the public CDN URL if the image exists in Supabase Storage, else null. */
+async function getStoragePublicUrl(nobb: string): Promise<string | null> {
+  const supabase = createSupabaseAdminClient();
+  if (!supabase) return null;
+
+  for (const { ext } of IMAGE_EXTENSIONS) {
+    const path = `${nobb}${ext}`;
+    const { data } = supabase.storage.from(BUCKET).getPublicUrl(path);
+    // Verify the file actually exists with a cheap HEAD request
     try {
-      const nodeBuffer = await fs.readFile(filePath);
-      // Slice out a clean ArrayBuffer (avoids SharedArrayBuffer ambiguity with BodyInit)
-      const buffer = nodeBuffer.buffer.slice(
-        nodeBuffer.byteOffset,
-        nodeBuffer.byteOffset + nodeBuffer.byteLength,
-      ) as ArrayBuffer;
-      return { buffer, contentType };
+      const res = await fetch(data.publicUrl, {
+        method: "HEAD",
+        signal: AbortSignal.timeout(3000),
+      });
+      if (res.ok) return data.publicUrl;
     } catch {
-      // file not found, try next extension
+      // not found, try next extension
     }
   }
   return null;
 }
 
 async function persistImage(nobb: string, data: ArrayBuffer, contentType: string): Promise<void> {
-  try {
-    await fs.mkdir(CACHE_DIR, { recursive: true });
-    const ext = contentTypeToExt(contentType);
-    const filePath = path.join(CACHE_DIR, `${nobb}${ext}`);
-    await fs.writeFile(filePath, Buffer.from(data));
-    // Remove any stale null marker for this nobb
-    await fs.unlink(path.join(CACHE_DIR, `${nobb}.null`)).catch(() => undefined);
-  } catch {
-    // Non-fatal: if we can't write the cache the image still loads this request
-  }
+  const supabase = createSupabaseAdminClient();
+  if (!supabase) return;
+
+  const ext = contentTypeToExt(contentType);
+  const storagePath = `${nobb}${ext}`;
+  await supabase.storage.from(BUCKET).upload(storagePath, data, {
+    contentType,
+    upsert: true,
+  });
+  // Remove any stale null marker
+  await supabase.storage.from(BUCKET).remove([`${nobb}.null`]);
 }
 
 async function isRecentlyNull(nobb: string): Promise<boolean> {
-  const markerPath = path.join(CACHE_DIR, `${nobb}.null`);
-  try {
-    const stat = await fs.stat(markerPath);
-    const ageMs = Date.now() - stat.mtimeMs;
-    return ageMs < NULL_RETRY_DAYS * 24 * 60 * 60 * 1000;
-  } catch {
-    return false;
-  }
+  const supabase = createSupabaseAdminClient();
+  if (!supabase) return false;
+
+  const { data } = await supabase.storage.from(BUCKET).list("", {
+    search: `${nobb}.null`,
+  });
+  if (!data?.length) return false;
+
+  const marker = data.find((f) => f.name === `${nobb}.null`);
+  if (!marker?.updated_at) return false;
+
+  const ageMs = Date.now() - new Date(marker.updated_at).getTime();
+  return ageMs < NULL_RETRY_DAYS * 24 * 60 * 60 * 1000;
 }
 
 async function writeNullMarker(nobb: string): Promise<void> {
-  try {
-    await fs.mkdir(CACHE_DIR, { recursive: true });
-    await fs.writeFile(path.join(CACHE_DIR, `${nobb}.null`), "");
-  } catch {
-    // Non-fatal
-  }
+  const supabase = createSupabaseAdminClient();
+  if (!supabase) return;
+
+  await supabase.storage.from(BUCKET).upload(`${nobb}.null`, new Uint8Array(0), {
+    upsert: true,
+  });
 }
 
 function contentTypeToExt(ct: string): string {
