@@ -39,7 +39,9 @@ export async function GET(_request: Request, context: RouteContext) {
   // 1. Redirect to Supabase Storage public URL if cached ----------------------
   const cachedUrl = await getStoragePublicUrl(nobbNumber);
   if (cachedUrl) {
-    return Response.redirect(cachedUrl, 302);
+    // 301 = permanent redirect — browsers cache this and skip the API route
+    // entirely on subsequent page loads for the same NOBB.
+    return Response.redirect(cachedUrl, 301);
   }
 
   // 2. Skip re-fetch if we tried recently and found nothing --------------------
@@ -125,36 +127,31 @@ async function resolveUpstreamImage(nobb: string): Promise<UpstreamResolution> {
 }
 
 // ---------------------------------------------------------------------------
-// Supabase Storage helpers
+// Supabase DB + Storage helpers
 // ---------------------------------------------------------------------------
 
-const IMAGE_EXTENSIONS: Array<{ ext: string; contentType: string }> = [
-  { ext: ".jpg", contentType: "image/jpeg" },
-  { ext: ".png", contentType: "image/png" },
-  { ext: ".webp", contentType: "image/webp" },
-  { ext: ".gif", contentType: "image/gif" },
-];
-
-/** Returns the public CDN URL if the image exists in Supabase Storage, else null. */
+/**
+ * Returns the Supabase Storage public URL for a NOBB image if it exists in the
+ * nobb_images lookup table — single DB query, no HEAD requests.
+ */
 async function getStoragePublicUrl(nobb: string): Promise<string | null> {
   const supabase = createSupabaseAdminClient();
   if (!supabase) return null;
 
-  for (const { ext } of IMAGE_EXTENSIONS) {
-    const path = `${nobb}${ext}`;
-    const { data } = supabase.storage.from(BUCKET).getPublicUrl(path);
-    // Verify the file actually exists with a cheap HEAD request
-    try {
-      const res = await fetch(data.publicUrl, {
-        method: "HEAD",
-        signal: AbortSignal.timeout(3000),
-      });
-      if (res.ok) return data.publicUrl;
-    } catch {
-      // not found, try next extension
-    }
-  }
-  return null;
+  const { data } = await supabase
+    .from("nobb_images")
+    .select("storage_path")
+    .eq("nobb_number", nobb)
+    .not("storage_path", "is", null)
+    .maybeSingle();
+
+  if (!data?.storage_path) return null;
+
+  const { data: urlData } = supabase.storage
+    .from(BUCKET)
+    .getPublicUrl(data.storage_path);
+
+  return urlData.publicUrl;
 }
 
 async function persistImage(nobb: string, data: ArrayBuffer, contentType: string): Promise<void> {
@@ -163,37 +160,42 @@ async function persistImage(nobb: string, data: ArrayBuffer, contentType: string
 
   const ext = contentTypeToExt(contentType);
   const storagePath = `${nobb}${ext}`;
+
   await supabase.storage.from(BUCKET).upload(storagePath, data, {
     contentType,
     upsert: true,
   });
-  // Remove any stale null marker
-  await supabase.storage.from(BUCKET).remove([`${nobb}.null`]);
+
+  // Record in lookup table so future requests skip the HEAD loop
+  await supabase.from("nobb_images").upsert(
+    { nobb_number: nobb, storage_path: storagePath, null_until: null, updated_at: new Date().toISOString() },
+    { onConflict: "nobb_number" },
+  );
 }
 
 async function isRecentlyNull(nobb: string): Promise<boolean> {
   const supabase = createSupabaseAdminClient();
   if (!supabase) return false;
 
-  const { data } = await supabase.storage.from(BUCKET).list("", {
-    search: `${nobb}.null`,
-  });
-  if (!data?.length) return false;
+  const { data } = await supabase
+    .from("nobb_images")
+    .select("null_until")
+    .eq("nobb_number", nobb)
+    .maybeSingle();
 
-  const marker = data.find((f) => f.name === `${nobb}.null`);
-  if (!marker?.updated_at) return false;
-
-  const ageMs = Date.now() - new Date(marker.updated_at).getTime();
-  return ageMs < NULL_RETRY_DAYS * 24 * 60 * 60 * 1000;
+  if (!data?.null_until) return false;
+  return new Date(data.null_until) > new Date();
 }
 
 async function writeNullMarker(nobb: string): Promise<void> {
   const supabase = createSupabaseAdminClient();
   if (!supabase) return;
 
-  await supabase.storage.from(BUCKET).upload(`${nobb}.null`, new Uint8Array(0), {
-    upsert: true,
-  });
+  const nullUntil = new Date(Date.now() + NULL_RETRY_DAYS * 24 * 60 * 60 * 1000).toISOString();
+  await supabase.from("nobb_images").upsert(
+    { nobb_number: nobb, storage_path: null, null_until: nullUntil, updated_at: new Date().toISOString() },
+    { onConflict: "nobb_number" },
+  );
 }
 
 function contentTypeToExt(ct: string): string {
