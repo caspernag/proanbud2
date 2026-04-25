@@ -60,9 +60,9 @@ export default async function StorefrontProductPage({ params }: StorefrontProduc
         <span className="truncate text-stone-500">{product.productName}</span>
       </nav>
 
-      <section className="grid gap-5 lg:grid-cols-[minmax(0,1fr)_520px]">
+      <section className="grid gap-4 lg:grid-cols-[minmax(0,1fr)_520px] lg:gap-5">
         {/* Image panel */}
-        <div className="relative overflow-hidden rounded-3xl border border-stone-200 bg-gradient-to-br from-white via-stone-50 to-stone-100 shadow-[0_14px_32px_rgba(32,25,15,0.06)]">
+        <div className="relative overflow-hidden rounded-xl border border-stone-200 bg-gradient-to-br from-white via-stone-50 to-stone-100 shadow-[0_10px_26px_rgba(32,25,15,0.05)]">
           {hasDiscount ? (
             <div className="absolute left-5 top-5 z-10 flex flex-col gap-2">
               <span className="inline-flex items-center gap-1.5 rounded-xl bg-[#c03a2b] px-3 py-1.5 text-sm font-bold text-white shadow-[0_8px_20px_rgba(192,58,43,0.35)]">
@@ -74,11 +74,11 @@ export default async function StorefrontProductPage({ params }: StorefrontProduc
               </span>
             </div>
           ) : null}
-          <div className="flex items-center justify-center p-6">
+          <div className="flex aspect-square items-center justify-center p-4 sm:p-6">
             <StorefrontProductImage
               src={getStorefrontImageUrl(product)}
               alt={product.productName}
-              className="aspect-square w-full max-h-[480px] object-contain drop-shadow-[0_8px_22px_rgba(0,0,0,0.12)]"
+              className="h-full w-full object-contain drop-shadow-[0_8px_22px_rgba(0,0,0,0.12)]"
             />
           </div>
         </div>
@@ -99,9 +99,9 @@ export default async function StorefrontProductPage({ params }: StorefrontProduc
           </div>
 
           {/* Price block */}
-          <div className="rounded-2xl border-2 border-[#15452d]/15 bg-gradient-to-br from-[#f7fef0] via-white to-white p-5 shadow-[0_10px_24px_rgba(21,69,45,0.08)]">
-            <div className="flex items-end gap-3">
-              <p className={`text-4xl font-bold leading-none sm:text-5xl ${hasDiscount ? "text-[#c03a2b]" : "text-[#0f321f]"}`}>
+          <div className="rounded-xl border-2 border-[#15452d]/15 bg-gradient-to-br from-[#f7fef0] via-white to-white p-4 shadow-[0_10px_24px_rgba(21,69,45,0.08)] sm:p-5">
+            <div className="flex flex-wrap items-end gap-2 sm:gap-3">
+              <p className={`text-3xl font-bold leading-none sm:text-5xl ${hasDiscount ? "text-[#c03a2b]" : "text-[#0f321f]"}`}>
                 {formatCurrency(product.unitPriceNok)}
               </p>
               {hasDiscount ? (
@@ -116,8 +116,8 @@ export default async function StorefrontProductPage({ params }: StorefrontProduc
             </p>
 
             <div className="mt-4 flex flex-wrap items-center gap-3">
-              <div className="min-w-[200px] flex-1">
-                <AddToCartButton productId={product.id} />
+              <div className="min-w-full flex-1 sm:min-w-[200px]">
+                <AddToCartButton productId={product.id} fullWidth />
               </div>
               <div className="flex items-center gap-4 text-xs font-medium">
                 {isVerifiedNetAvailable ? (
@@ -156,7 +156,7 @@ export default async function StorefrontProductPage({ params }: StorefrontProduc
           </div>
 
           {/* Delivery promise card — replaces pickup-in-store since we deliver everything home */}
-          <div className="rounded-2xl border border-stone-200 bg-white p-4">
+          <div className="rounded-xl border border-stone-200 bg-white p-4">
             <p className="text-[11px] font-bold uppercase tracking-[0.14em] text-[#15452d]">Levering hjem til deg</p>
             <div className="mt-2 flex items-start gap-3">
               <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full bg-[#15452d]/10 text-lg">🚚</div>
@@ -202,7 +202,7 @@ export default async function StorefrontProductPage({ params }: StorefrontProduc
           </div>
 
           {product.technicalDetails.length > 0 ? (
-            <div className="rounded-2xl border border-stone-200 bg-white p-4">
+            <div className="rounded-xl border border-stone-200 bg-white p-4">
               <p className="text-sm font-semibold text-stone-900">Tekniske detaljer</p>
               <div className="mt-2 flex flex-wrap gap-1.5">
                 {product.technicalDetails.map((detail) => (
@@ -216,7 +216,7 @@ export default async function StorefrontProductPage({ params }: StorefrontProduc
         </div>
       </section>
 
-      <section className="rounded-2xl border border-stone-200 bg-white p-5 shadow-[0_14px_32px_rgba(32,25,15,0.06)]">
+      <section className="rounded-xl border border-stone-200 bg-white p-4 shadow-[0_10px_26px_rgba(32,25,15,0.05)] sm:p-5">
         <div className="flex items-end justify-between gap-3">
           <div>
             <p className="text-[11px] font-bold uppercase tracking-[0.16em] text-[#c03a2b]">Du kan også like</p>
@@ -230,7 +230,7 @@ export default async function StorefrontProductPage({ params }: StorefrontProduc
           </Link>
         </div>
 
-        <div className="mt-4 grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
+        <div className="mt-4 grid grid-cols-2 gap-2 sm:gap-3 lg:grid-cols-4">
           {related.items
             .filter((relatedProduct) => relatedProduct.id !== product.id)
             .slice(0, 4)
@@ -243,9 +243,9 @@ export default async function StorefrontProductPage({ params }: StorefrontProduc
                 <Link
                   key={relatedProduct.id}
                   href={`/${relatedProduct.slug}`}
-                  className="group overflow-hidden rounded-2xl border border-stone-200 bg-white transition hover:-translate-y-0.5 hover:border-[#15452d] hover:shadow-[0_16px_34px_rgba(21,69,45,0.12)]"
+                  className="group flex min-w-0 flex-col overflow-hidden rounded-xl border border-stone-200 bg-white transition hover:-translate-y-0.5 hover:border-[#15452d] hover:shadow-[0_16px_34px_rgba(21,69,45,0.12)]"
                 >
-                  <div className="relative flex h-36 items-center justify-center border-b border-stone-100 bg-gradient-to-br from-white to-stone-50 p-3">
+                  <div className="relative flex aspect-square items-center justify-center border-b border-stone-100 bg-gradient-to-br from-white to-stone-50 p-2.5 sm:p-3">
                     {hasRelDiscount ? (
                       <span className="absolute left-2 top-2 inline-flex items-center rounded-md bg-[#c03a2b] px-1.5 py-0.5 text-[10px] font-bold text-white">
                         -{relDiscount}%
@@ -257,11 +257,11 @@ export default async function StorefrontProductPage({ params }: StorefrontProduc
                       className="h-full w-full object-contain transition group-hover:scale-[1.03]"
                     />
                   </div>
-                  <div className="p-3">
-                    <p className="line-clamp-2 text-sm font-semibold text-stone-900">{relatedProduct.productName}</p>
-                    <p className="mt-1 text-xs text-stone-500">{relatedProduct.brand || relatedProduct.category}</p>
-                    <div className="mt-2 flex items-baseline gap-2">
-                      <p className={`text-lg font-bold ${hasRelDiscount ? "text-[#c03a2b]" : "text-stone-900"}`}>
+                  <div className="flex flex-1 flex-col p-2.5 sm:p-3">
+                    <p className="line-clamp-2 text-xs font-semibold leading-4 text-stone-900 sm:text-sm">{relatedProduct.productName}</p>
+                    <p className="mt-1 truncate text-[11px] text-stone-500 sm:text-xs">{relatedProduct.brand || relatedProduct.category}</p>
+                    <div className="mt-auto flex flex-wrap items-baseline gap-x-1.5 gap-y-0.5 pt-2">
+                      <p className={`text-base font-bold sm:text-lg ${hasRelDiscount ? "text-[#c03a2b]" : "text-stone-900"}`}>
                         {formatCurrency(relatedProduct.unitPriceNok)}
                       </p>
                       {hasRelDiscount ? (

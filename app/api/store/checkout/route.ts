@@ -27,7 +27,6 @@ const checkoutPayloadSchema = z.object({
     .min(1),
 });
 
-export const runtime = "nodejs";
 
 export async function POST(request: Request) {
   const supabase = createSupabaseAdminClient();

@@ -138,6 +138,46 @@ export async function POST(request: Request, { params }: RouteContext) {
     return NextResponse.json({ error: "Stripe er ikke konfigurert." }, { status: 503 });
   }
 
+  // Atomically claim the checkout slot: mark as pending_payment only when the
+  // order is still in a claimable state AND has no active session yet.
+  // This prevents two concurrent requests from both creating Stripe sessions.
+  const { data: claimedRows } = await supabase
+    .from("material_orders")
+    .update({ status: "pending_payment" })
+    .eq("id", order.id)
+    .eq("user_id", user.id)
+    .in("status", ["draft", "pending_payment"])
+    .is("checkout_session_id", null)
+    .select("id");
+
+  if (!claimedRows || claimedRows.length === 0) {
+    // Order was not claimable — check if there is already an open Stripe session
+    // (e.g. a concurrent request just created one) and return it so the user
+    // is not stuck.
+    const { data: current } = await supabase
+      .from("material_orders")
+      .select("checkout_session_id, status")
+      .eq("id", order.id)
+      .eq("user_id", user.id)
+      .maybeSingle();
+
+    if (current?.checkout_session_id) {
+      try {
+        const existing = await stripe.checkout.sessions.retrieve(current.checkout_session_id);
+        if (existing.status === "open" && existing.url) {
+          return NextResponse.json({ url: existing.url });
+        }
+      } catch {
+        // Session expired or invalid — fall through to 409
+      }
+    }
+
+    return NextResponse.json(
+      { error: "Bestillingen er allerede under behandling. Prøv igjen om et øyeblikk." },
+      { status: 409 },
+    );
+  }
+
   const paymentMethodTypes =
     order.checkout_flow === "klarna"
       ? (["klarna"] as const)
@@ -178,6 +218,15 @@ export async function POST(request: Request, { params }: RouteContext) {
       ],
     });
   } catch (error) {
+    // Release the claim so the user can retry
+    await supabase
+      .from("material_orders")
+      .update({ status: "draft" })
+      .eq("id", order.id)
+      .eq("user_id", user.id)
+      .eq("status", "pending_payment")
+      .is("checkout_session_id", null);
+
     const stripeMessage = error instanceof Error ? error.message : "Ukjent Stripe-feil.";
     const klarnaNotReady =
       order.checkout_flow === "klarna" &&
@@ -197,7 +246,6 @@ export async function POST(request: Request, { params }: RouteContext) {
   await supabase
     .from("material_orders")
     .update({
-      status: "pending_payment",
       checkout_session_id: session.id,
     })
     .eq("id", order.id)

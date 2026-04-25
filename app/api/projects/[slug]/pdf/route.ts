@@ -11,7 +11,6 @@ import { createMaterialListPdf } from "@/lib/pdf/material-list-pdf";
 import { createSupabaseServerClient } from "@/lib/supabase/server";
 import { slugify } from "@/lib/utils";
 
-export const runtime = "nodejs";
 
 type RouteContext = {
   params: Promise<{

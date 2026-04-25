@@ -1,10 +1,10 @@
 import { redirect } from "next/navigation";
-import type { ReactNode } from "react";
+import { Suspense, type ReactNode } from "react";
 
 import { MinSideShell } from "@/app/_components/min-side-shell";
 import { createSupabaseServerClient } from "@/lib/supabase/server";
 
-export default async function MinSideLayout({ children }: { children: ReactNode }) {
+async function MinSideAuthGate({ children }: { children: ReactNode }) {
   const supabase = await createSupabaseServerClient();
   const {
     data: { user },
@@ -15,4 +15,12 @@ export default async function MinSideLayout({ children }: { children: ReactNode 
   }
 
   return <MinSideShell userEmail={user?.email ?? null}>{children}</MinSideShell>;
+}
+
+export default function MinSideLayout({ children }: { children: ReactNode }) {
+  return (
+    <Suspense fallback={null}>
+      <MinSideAuthGate>{children}</MinSideAuthGate>
+    </Suspense>
+  );
 }

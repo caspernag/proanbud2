@@ -3,7 +3,6 @@ import { NextResponse } from "next/server";
 import { getStorefrontProductsByIds, queryStorefrontProducts } from "@/lib/storefront";
 import type { StorefrontSortOption } from "@/lib/storefront-types";
 
-export const runtime = "nodejs";
 
 export async function GET(request: Request) {
   const requestUrl = new URL(request.url);

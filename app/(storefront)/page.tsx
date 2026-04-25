@@ -2,6 +2,7 @@ import Link from "next/link";
 import { Suspense } from "react";
 
 import { AddToCartButton } from "@/app/_components/storefront/add-to-cart-button";
+import { MobileFilterDrawer } from "@/app/_components/storefront/mobile-filter-drawer";
 import { StorefrontProductImage } from "@/app/_components/storefront/storefront-product-image";
 import { StorefrontViewControls } from "@/app/_components/storefront/storefront-view-controls";
 import { getByggmakkerAvailabilityBatch } from "@/lib/byggmakker-availability";
@@ -118,7 +119,6 @@ export default async function StorefrontPage({ searchParams }: StorefrontPagePro
   const featuredCategories = showLanding
     ? resolveFeaturedCategories(result.categories, allProducts)
     : [];
-  const heroHighlights = showLanding ? pickHeroHighlights(featuredDeals, allProducts) : [];
 
   // Batch-resolve real stock status for all visible products using the
   // Byggmakker availability API with EANs sourced directly from the price list.
@@ -146,17 +146,18 @@ export default async function StorefrontPage({ searchParams }: StorefrontPagePro
     <div className="space-y-6">
       {showLanding ? (
         <>
-          <HeroSection total={result.total} highlights={heroHighlights} />
+          <HeroSection total={result.total} />
           {featuredCategories.length > 0 ? (
             <CategoryTiles tiles={featuredCategories} counts={result.categoryCounts} />
           ) : null}
           {featuredDeals.length > 0 ? <DealsStrip deals={featuredDeals} /> : null}
-          <ValuePropsBand />
+          <div className="hidden sm:block"><ValuePropsBand /></div>
         </>
       ) : null}
 
       <section className="grid gap-5 lg:grid-cols-[280px_minmax(0,1fr)]">
-        <aside className="space-y-4 lg:sticky lg:top-[168px] lg:self-start">
+        {/* Desktop sidebar – hidden on mobile */}
+        <aside className="hidden space-y-4 lg:sticky lg:top-[168px] lg:block lg:self-start">
           <FilterPanel
             q={q}
             category={category}
@@ -164,9 +165,7 @@ export default async function StorefrontPage({ searchParams }: StorefrontPagePro
             sort={sort}
             cols={cols}
             categories={result.categories}
-            suppliers={result.suppliers}
             categoryCounts={result.categoryCounts}
-            supplierCounts={result.supplierCounts}
             priceRange={result.priceRange}
           />
 
@@ -174,7 +173,24 @@ export default async function StorefrontPage({ searchParams }: StorefrontPagePro
         </aside>
 
         <div className="space-y-4">
-          <div className="flex flex-col gap-3 rounded-xl border border-stone-200 bg-white p-4 shadow-[0_8px_20px_rgba(32,25,15,0.05)] sm:flex-row sm:items-center sm:justify-between">
+          {/* Mobile filter drawer – only visible on mobile */}
+          <div className="flex items-center justify-between lg:hidden">
+            <MobileFilterDrawer activeFiltersCount={(q ? 1 : 0) + (category ? 1 : 0) + (supplier ? 1 : 0)}>
+              <FilterPanel
+                q={q}
+                category={category}
+                supplier={supplier}
+                sort={sort}
+                cols={cols}
+                categories={result.categories}
+                categoryCounts={result.categoryCounts}
+                priceRange={result.priceRange}
+              />
+            </MobileFilterDrawer>
+            <Suspense><StorefrontViewControls initialSort={sort} initialCols={cols} /></Suspense>
+          </div>
+
+          <div className="flex flex-col gap-3 rounded-xl border border-stone-200 bg-white p-3 shadow-[0_8px_20px_rgba(32,25,15,0.04)] sm:flex-row sm:items-center sm:justify-between sm:p-4">
             <div className="min-w-0">
               <p className="text-sm font-semibold text-stone-900">
                 {q ? `Søkeresultat for "${q}"` : category || supplier || "Alle produkter"}
@@ -184,7 +200,9 @@ export default async function StorefrontPage({ searchParams }: StorefrontPagePro
               </p>
             </div>
 
-            <Suspense><StorefrontViewControls initialSort={sort} initialCols={cols} /></Suspense>
+            <div className="hidden lg:block">
+              <Suspense><StorefrontViewControls initialSort={sort} initialCols={cols} /></Suspense>
+            </div>
           </div>
 
           {hasFilters ? (
@@ -222,190 +240,47 @@ export default async function StorefrontPage({ searchParams }: StorefrontPagePro
   );
 }
 
-function HeroSection({ total, highlights }: { total: number; highlights: StorefrontProduct[] }) {
+function HeroSection({ total }: { total: number }) {
   return (
-    <section className="relative overflow-hidden rounded-xl border border-[#0f321f]/20 bg-gradient-to-br from-[#0f321f] via-[#15452d] to-[#1d5a3b] text-white shadow-[0_20px_48px_rgba(18,36,25,0.28)]">
-      {/* Decorative pattern */}
-      <div
-        className="pointer-events-none absolute inset-0 opacity-[0.08]"
-        style={{
-          backgroundImage:
-            "repeating-linear-gradient(45deg, #d9ff7a 0, #d9ff7a 1px, transparent 1px, transparent 22px)",
-        }}
-      />
-      <div
-        className="pointer-events-none absolute -right-32 -top-32 h-96 w-96 rounded-full"
-        style={{ background: "radial-gradient(circle, rgba(217,255,122,0.3), transparent 60%)" }}
-      />
-      <div
-        className="pointer-events-none absolute -left-20 bottom-0 h-80 w-80 rounded-full"
-        style={{ background: "radial-gradient(circle, rgba(196,138,77,0.25), transparent 60%)" }}
-      />
-
-      <div className="relative grid gap-6 px-6 py-7 sm:px-10 sm:py-9 lg:grid-cols-[minmax(0,1fr)_minmax(0,480px)] lg:gap-10">
-        {/* Left copy */}
-        <div className="flex flex-col justify-center">
+    <section className="overflow-hidden rounded-xl border border-[#123321]/15 bg-[#123321] px-3 py-3 text-white shadow-[0_8px_20px_rgba(18,51,33,0.14)] sm:px-4">
+      <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+        <div className="min-w-0">
           <div className="flex flex-wrap items-center gap-2">
-            <span className="inline-flex items-center gap-1.5 rounded bg-[#d9ff7a] px-2.5 py-1 text-[11px] font-bold uppercase tracking-[0.16em] text-[#0f321f]">
-              <span className="h-1.5 w-1.5 rounded-full bg-[#0f321f]" /> Partnerpris
+            <span className="rounded-md bg-[#d9ff7a] px-2 py-1 text-[10px] font-bold uppercase tracking-[0.12em] text-[#123321]">
+              Partnerpris
             </span>
-            <span className="rounded bg-white/10 px-2.5 py-1 text-[11px] font-semibold uppercase tracking-[0.14em] text-emerald-50">
-              Inntil -80% rabatt
-            </span>
-            <span className="rounded bg-[#d9ff7a]/20 border border-[#d9ff7a]/40 px-2.5 py-1 text-[11px] font-semibold uppercase tracking-[0.14em] text-[#d9ff7a]">
-              Gratis frakt over 15 000 kr
+            <span className="text-xs font-semibold text-emerald-50/70">
+              {total.toLocaleString("nb-NO")} byggevarer
             </span>
           </div>
-          <h1 className="mt-4 text-3xl font-semibold leading-[1.07] sm:text-4xl lg:text-[2.75rem]">
-            Byggevarer til <span className="bg-[#d9ff7a] px-2 text-[#0f321f]">proffpris</span>
-            <span className="block mt-1 text-emerald-50/90">gjennom Proanbuds partneravtale.</span>
+
+          <h1 className="mt-1 text-xl font-semibold leading-tight text-white sm:text-2xl">
+            Proanbud gir deg byggevarer til proffpris.
           </h1>
-          <p className="mt-4 max-w-xl text-[15px] leading-7 text-emerald-50/75">
-            Samme varer som hos byggevarehuset — til prisen proffene betaler. Ingen binding, ingen avtale. {total.toLocaleString("nb-NO")} varer klar til bestilling akkurat nå.
+          <p className="mt-1 max-w-2xl text-xs leading-5 text-emerald-50/75 sm:text-sm">
+            Partneravtaler gir lavere pris på samme type varer som i byggevarehus.
           </p>
-          <div className="mt-5 flex flex-wrap gap-2.5">
+        </div>
+
+        <div className="w-full rounded-lg border border-white/15 bg-white p-3 text-stone-900 shadow-[0_8px_18px_rgba(0,0,0,0.14)] sm:max-w-[300px]">
+          <div className="flex items-center justify-between gap-3">
+            <div>
+              <p className="text-[10px] font-bold uppercase tracking-[0.14em] text-stone-500">Typisk besparelse</p>
+              <p className="text-xl font-bold text-[#123321]">-20 til -60%</p>
+            </div>
             <Link
               href="/?sort=price_asc"
-              className="inline-flex items-center gap-2 rounded-md bg-[#d9ff7a] px-5 py-2.5 text-sm font-bold text-black! shadow-[0_8px_24px_rgba(217,255,122,0.3)] transition hover:bg-white"
+              className="inline-flex h-9 shrink-0 items-center justify-center rounded-md bg-[#d9ff7a] px-3 text-xs font-bold text-[#123321]! transition hover:bg-[#cfff55]"
             >
-              Se partnerprisene
-              <svg viewBox="0 0 16 16" fill="currentColor" className="h-3.5 w-3.5"><path d="M3 8h9.59L9 4.41 10.41 3l6 6-6 6L9 13.59 12.59 10H3z" /></svg>
-            </Link>
-            <Link
-              href="#kategorier"
-              className="inline-flex items-center gap-2 rounded-md border border-white/25 bg-white/5 px-4 py-2.5 text-sm font-semibold text-white transition hover:bg-white/10"
-            >
-              Utforsk kategorier
+              Se priser
             </Link>
           </div>
-
-          <div className="mt-6 grid grid-cols-3 gap-2 text-[11px] font-semibold uppercase tracking-[0.12em] text-emerald-50/70">
-            <HeroMini label="Rabatt" value="Opptil -80%" />
-            <HeroMini label="Varer" value={total.toLocaleString("nb-NO")} />
-            <HeroMini label="Levering" value="24-48t" />
+          <div className="mt-2 h-2 overflow-hidden rounded-full bg-stone-200">
+            <div className="h-full w-[52%] rounded-full bg-[#15452d]" />
           </div>
         </div>
-
-        {/* Right product collage */}
-        <div className="relative hidden lg:block">
-          <ProductCollage products={highlights} />
-        </div>
-      </div>
-
-      {/* Mobile collage (horizontal strip) */}
-      <div className="relative mt-2 border-t border-white/10 bg-white/[0.04] px-6 py-4 lg:hidden">
-        <MobileHighlightStrip products={highlights} />
       </div>
     </section>
-  );
-}
-
-function HeroMini({ label, value }: { label: string; value: string }) {
-  return (
-    <div className="rounded-md border border-white/15 bg-white/5 px-3 py-2 text-center backdrop-blur">
-      <p className="text-lg font-bold normal-case text-white sm:text-xl">{value}</p>
-      <p className="mt-0.5 text-[10px] text-emerald-50/70">{label}</p>
-    </div>
-  );
-}
-
-function ProductCollage({ products }: { products: StorefrontProduct[] }) {
-  if (products.length === 0) {
-    return null;
-  }
-
-  const main = products[0];
-  const secondary = products[1];
-  const tertiary = products[2];
-  const quaternary = products[3];
-  const mainDiscount = main && main.listPriceNok > main.unitPriceNok
-    ? Math.round(((main.listPriceNok - main.unitPriceNok) / main.listPriceNok) * 100)
-    : 35;
-
-  return (
-    <div className="relative h-[380px]">
-      {/* Big main card */}
-      {main ? (
-        <Link
-          href={`/${main.slug}`}
-          className="absolute left-6 top-4 h-[260px] w-[240px] rotate-[-4deg] overflow-hidden rounded-xl border border-white/20 bg-white p-4 shadow-[0_20px_48px_rgba(0,0,0,0.32)] transition hover:rotate-[-2deg]"
-        >
-          <span className="absolute left-3 top-3 z-10 inline-flex items-center rounded-full bg-[#c03a2b] px-2.5 py-1 text-[11px] font-bold text-white shadow">
-            -{mainDiscount}%
-          </span>
-          <StorefrontProductImage
-            src={getStorefrontImageUrl(main)}
-            alt={main.productName}
-            className="h-full w-full object-contain"
-          />
-        </Link>
-      ) : null}
-      {/* Top-right small card */}
-      {secondary ? (
-        <Link
-          href={`/${secondary.slug}`}
-          className="absolute right-2 top-0 h-[140px] w-[140px] rotate-[5deg] overflow-hidden rounded-xl border border-white/20 bg-white p-2 shadow-[0_16px_40px_rgba(0,0,0,0.28)] transition hover:rotate-[3deg]"
-        >
-          <StorefrontProductImage
-            src={getStorefrontImageUrl(secondary)}
-            alt={secondary.productName}
-            className="h-full w-full object-contain"
-          />
-        </Link>
-      ) : null}
-      {/* Middle-right card */}
-      {tertiary ? (
-        <Link
-          href={`/${tertiary.slug}`}
-          className="absolute right-10 top-[130px] h-[130px] w-[160px] rotate-[-2deg] overflow-hidden rounded-xl border border-white/20 bg-white p-2 shadow-[0_16px_40px_rgba(0,0,0,0.28)] transition hover:rotate-0"
-        >
-          <StorefrontProductImage
-            src={getStorefrontImageUrl(tertiary)}
-            alt={tertiary.productName}
-            className="h-full w-full object-contain"
-          />
-        </Link>
-      ) : null}
-      {/* Bottom-right price tag */}
-      {quaternary ? (
-        <Link
-          href={`/${quaternary.slug}`}
-          className="absolute bottom-2 right-4 h-[120px] w-[150px] rotate-[6deg] overflow-hidden rounded-xl border border-white/20 bg-white p-2 shadow-[0_16px_40px_rgba(0,0,0,0.28)] transition hover:rotate-[4deg]"
-        >
-          <StorefrontProductImage
-            src={getStorefrontImageUrl(quaternary)}
-            alt={quaternary.productName}
-            className="h-full w-full object-contain"
-          />
-        </Link>
-      ) : null}
-      {/* Floating "save" badge */}
-      <div className="absolute bottom-[108px] left-[10px] flex h-20 w-20 rotate-[-8deg] flex-col items-center justify-center rounded-full bg-[#d9ff7a] text-[#0f321f] shadow-[0_12px_28px_rgba(217,255,122,0.3)]">
-        <span className="text-[10px] font-bold uppercase tracking-wider">Spar</span>
-        <span className="text-lg font-bold leading-tight">-{mainDiscount}%</span>
-      </div>
-    </div>
-  );
-}
-
-function MobileHighlightStrip({ products }: { products: StorefrontProduct[] }) {
-  if (products.length === 0) return null;
-  return (
-    <div className="flex gap-3 overflow-x-auto scrollbar-none">
-      {products.slice(0, 6).map((product) => (
-        <Link
-          key={product.id}
-          href={`/${product.slug}`}
-          className="h-20 w-20 shrink-0 overflow-hidden rounded-lg border border-white/20 bg-white p-1.5"
-        >
-          <StorefrontProductImage
-            src={getStorefrontImageUrl(product)}
-            alt={product.productName}
-            className="h-full w-full object-contain"
-          />
-        </Link>
-      ))}
-    </div>
   );
 }
 
@@ -418,9 +293,9 @@ function CategoryTiles({
 }) {
   return (
     <section id="kategorier">
-      <div className="mb-4 flex items-end justify-between">
+      <div className="mb-3 flex items-end justify-between">
         <div>
-          <p className="text-[11px] font-bold uppercase tracking-[0.18em] text-[#c03a2b]">Byggevarekategorier</p>
+          <p className="text-[11px] font-bold uppercase tracking-[0.16em] text-[#15452d]">Byggevarekategorier</p>
           <h2 className="mt-1 text-xl font-semibold text-stone-900 sm:text-2xl">Handle etter kategori</h2>
         </div>
         <Link href="/?sort=price_asc" className="hidden text-sm font-semibold text-[#15452d] hover:underline sm:inline">
@@ -428,7 +303,7 @@ function CategoryTiles({
         </Link>
       </div>
 
-      <div className="-mx-4 flex gap-3 overflow-x-auto scroll-smooth px-4 scrollbar-none sm:-mx-6 sm:px-6 lg:-mx-8 lg:px-8">
+      <div className="-mx-3 flex gap-3 overflow-x-auto scroll-smooth px-3 scrollbar-none sm:-mx-6 sm:px-6 lg:-mx-8 lg:px-8">
         {tiles.map((tile, i) => (
           <CategoryTile key={tile.label} tile={tile} count={counts[tile.category] ?? 0} featured={i === 0} priority={i < 2} />
         ))}
@@ -451,8 +326,8 @@ function CategoryTile({
   return (
     <Link
       href={`/?category=${encodeURIComponent(tile.category)}`}
-      className={`group relative shrink-0 overflow-hidden rounded-xl border border-stone-200 bg-gradient-to-br ${tile.tone} shadow-[0_10px_24px_rgba(32,25,15,0.1)] transition hover:-translate-y-0.5 hover:shadow-[0_18px_36px_rgba(21,69,45,0.18)] ${
-        featured ? "h-52 w-68 sm:h-56 sm:w-80" : priority ? "h-48 w-60 sm:h-52 sm:w-68" : "h-44 w-56 sm:h-48 sm:w-64"
+      className={`group relative shrink-0 overflow-hidden rounded-xl border border-stone-200 bg-gradient-to-br ${tile.tone} shadow-[0_8px_18px_rgba(32,25,15,0.08)] transition hover:-translate-y-0.5 hover:shadow-[0_16px_30px_rgba(21,69,45,0.15)] ${
+        featured ? "h-44 w-64 sm:h-52 sm:w-80" : priority ? "h-40 w-56 sm:h-48 sm:w-64" : "h-40 w-52 sm:h-44 sm:w-60"
       }`}
     >
       {/* Background product image */}
@@ -473,7 +348,7 @@ function CategoryTile({
           <span className="inline-flex items-center rounded-full bg-white/20 px-2 py-0.5 text-[10px] font-semibold uppercase tracking-[0.14em] backdrop-blur">
             {count} varer
           </span>
-          <p className={`mt-2 font-semibold leading-tight ${featured ? "text-xl sm:text-2xl" : "text-base sm:text-lg"}`}>
+          <p className={`mt-2 font-semibold leading-tight ${featured ? "text-lg sm:text-2xl" : "text-base sm:text-lg"}`}>
             {tile.label}
           </p>
         </div>
@@ -490,7 +365,7 @@ function ValuePropsBand() {
   const props = [
     {
       title: "Gratis frakt over 15 000 kr",
-      body: "Bestil over 15 000 kr og vi sender gratis til din bygge- eller leveringsadresse.",
+      body: "Gratis levert over 15 000 kr.",
       icon: (
         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" className="h-5 w-5">
           <path d="M3 7h11v9H3zM14 10h4l3 3v3h-7z" />
@@ -501,7 +376,7 @@ function ValuePropsBand() {
     },
     {
       title: "Partnerforhandlet pris",
-      body: "Pris bygget på partneravtale og kontrollert margin, fortsatt under veil. pris.",
+      body: "Lavere pris via partneravtale.",
       icon: (
         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" className="h-5 w-5">
           <path d="M7 17L17 7" strokeLinecap="round" />
@@ -512,7 +387,7 @@ function ValuePropsBand() {
     },
     {
       title: "Samme byggevarehus",
-      body: "Hele kjøpsreisen går gjennom den samme partnerkanalen fra prisgrunnlag til levering.",
+      body: "Samme kanal hele veien.",
       icon: (
         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" className="h-5 w-5">
           <path d="M12 3l8 4v6c0 5-3.5 7.5-8 8-4.5-0.5-8-3-8-8V7z" />
@@ -522,7 +397,7 @@ function ValuePropsBand() {
     },
     {
       title: "Rask levering",
-      body: "Fra sentrallager rett til byggeplass — 24-48 timer.",
+      body: "Til byggeplass på 24-48 timer.",
       icon: (
         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" className="h-5 w-5">
           <path d="M3 7h11v9H3zM14 10h4l3 3v3h-7z" />
@@ -533,7 +408,7 @@ function ValuePropsBand() {
     },
     {
       title: "KI til innkjøp",
-      body: "Lag materialliste med KI og gjør den om til bestilling uten ekstra mellomledd.",
+      body: "Fra materialliste til bestilling.",
       icon: (
         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" className="h-5 w-5">
           <rect x="3" y="5" width="18" height="14" rx="2" />
@@ -543,7 +418,7 @@ function ValuePropsBand() {
     },
   ];
   return (
-    <section className="grid gap-3 rounded-xl border border-stone-200 bg-white p-4 shadow-[0_10px_24px_rgba(32,25,15,0.05)] sm:grid-cols-2 lg:grid-cols-5">
+    <section className="grid gap-3 rounded-xl border border-stone-200 bg-white p-4 shadow-[0_8px_20px_rgba(32,25,15,0.04)] sm:grid-cols-2 lg:grid-cols-5">
       {props.map((prop) => (
         <div key={prop.title} className="flex items-start gap-3">
           <span className="flex h-10 w-10 shrink-0 items-center justify-center rounded-lg bg-[#15452d]/10 text-[#15452d]">
@@ -570,13 +445,13 @@ function DealsStrip({ deals }: { deals: StorefrontProduct[] }) {
             </span>
             Mest populære byggevarer
           </h2>
-          <p className="text-sm text-stone-500">De byggevarene privatpersoner kjøper mest – til partnerpris.</p>
+          <p className="hidden text-sm text-stone-500 sm:block">De byggevarene privatpersoner kjøper mest – til partnerpris.</p>
         </div>
         <Link href="/?sort=price_asc" className="text-sm font-semibold text-[#15452d] hover:underline">
           Se alle varer →
         </Link>
       </div>
-      <div className="-mx-4 flex gap-3 overflow-x-auto scroll-smooth px-4 scrollbar-none sm:-mx-6 sm:px-6 lg:-mx-8 lg:px-8">
+      <div className="-mx-3 flex gap-3 overflow-x-auto scroll-smooth px-3 scrollbar-none sm:-mx-6 sm:px-6 lg:-mx-8 lg:px-8">
         {deals.map((product) => {
           const hasDiscount = product.listPriceNok > product.unitPriceNok;
           const discountPct = hasDiscount
@@ -586,7 +461,7 @@ function DealsStrip({ deals }: { deals: StorefrontProduct[] }) {
             <Link
               key={product.id}
               href={`/${product.slug}`}
-              className="group relative w-44 shrink-0 overflow-hidden rounded-xl border border-stone-200 bg-white shadow-[0_8px_20px_rgba(32,25,15,0.06)] transition hover:-translate-y-0.5 hover:border-[#15452d] sm:w-52"
+              className="group relative w-44 shrink-0 overflow-hidden rounded-xl border border-stone-200 bg-white shadow-[0_6px_16px_rgba(32,25,15,0.05)] transition hover:-translate-y-0.5 hover:border-[#15452d] sm:w-52"
             >
               {hasDiscount ? (
                 <span className="absolute left-2 top-2 z-10 inline-flex items-center rounded bg-[#c03a2b] px-2 py-0.5 text-[11px] font-semibold text-white shadow">
@@ -626,7 +501,7 @@ function ProductCard({ product, stockStatus }: { product: StorefrontProduct; sto
     : 0;
 
   return (
-    <article className="group relative flex flex-col overflow-hidden rounded-xl border border-stone-200 bg-white shadow-[0_6px_16px_rgba(32,25,15,0.05)] transition hover:-translate-y-0.5 hover:border-[#15452d] hover:shadow-[0_14px_28px_rgba(21,69,45,0.1)]">
+    <article className="group relative flex min-w-0 flex-col overflow-hidden rounded-xl border border-stone-200 bg-white shadow-[0_5px_14px_rgba(32,25,15,0.04)] transition hover:-translate-y-0.5 hover:border-[#15452d] hover:shadow-[0_14px_28px_rgba(21,69,45,0.1)]">
       {hasDiscount ? (
         <span className="absolute left-3 top-3 z-10 inline-flex items-center rounded bg-[#c03a2b] px-2 py-0.5 text-[11px] font-semibold text-white shadow">
           -{discountPct}%
@@ -634,7 +509,7 @@ function ProductCard({ product, stockStatus }: { product: StorefrontProduct; sto
       ) : null}
 
       <Link href={`/${product.slug}`} className="block">
-        <div className="flex h-44 items-center justify-center bg-gradient-to-b from-white to-stone-50 p-4">
+        <div className="flex aspect-[1.08] items-center justify-center bg-gradient-to-b from-white to-stone-50 p-3 sm:p-4">
           <StorefrontProductImage
             src={getStorefrontImageUrl(product)}
             alt={product.productName}
@@ -643,7 +518,7 @@ function ProductCard({ product, stockStatus }: { product: StorefrontProduct; sto
         </div>
       </Link>
 
-      <div className="flex flex-1 flex-col gap-2 border-t border-stone-100 p-3.5">
+      <div className="flex flex-1 flex-col gap-2 border-t border-stone-100 p-2.5 sm:p-3.5">
         <div className="flex flex-wrap items-center gap-1.5 text-[10px] font-semibold uppercase tracking-[0.12em] text-stone-500">
           <span className="rounded bg-stone-100 px-1.5 py-0.5 text-stone-700">{product.category}</span>
           {product.brand ? <span className="text-stone-400">{product.brand}</span> : null}
@@ -658,21 +533,19 @@ function ProductCard({ product, stockStatus }: { product: StorefrontProduct; sto
 
         <div className="mt-auto space-y-2 pt-1">
           <div className="flex items-end gap-2">
-            <p className={`text-xl font-semibold ${hasDiscount ? "text-[#c03a2b]" : "text-stone-900"}`}>
+            <p className={`text-lg font-semibold sm:text-xl ${hasDiscount ? "text-[#c03a2b]" : "text-stone-900"}`}>
               {formatCurrency(product.unitPriceNok)}
             </p>
             {hasDiscount ? (
               <p className="pb-1 text-xs text-stone-500 line-through">{formatCurrency(product.listPriceNok)}</p>
             ) : null}
           </div>
-          <p className="text-[11px] text-stone-500">
-            per {product.unit.toLowerCase() || "stk"} · Varenr. {product.nobbNumber}
-          </p>
-
-          <div className="flex items-center justify-between gap-2">
+          <div className="flex min-w-0 items-center gap-1.5 text-[11px] text-stone-500">
             <StockChip status={stockStatus} />
-            <AddToCartButton productId={product.id} />
+            <span className="truncate">per {product.unit.toLowerCase() || "stk"}</span>
           </div>
+
+          <AddToCartButton productId={product.id} fullWidth />
         </div>
       </div>
     </article>
@@ -682,7 +555,7 @@ function ProductCard({ product, stockStatus }: { product: StorefrontProduct; sto
 function StockChip({ status }: { status: StockStatus }) {
   if (status === "in-stock") {
     return (
-      <span className="inline-flex items-center gap-1.5 rounded bg-emerald-50 px-2 py-0.5 text-[11px] font-semibold text-emerald-700 ring-1 ring-emerald-200">
+      <span className="inline-flex shrink-0 items-center gap-1 rounded-full bg-emerald-50 px-1.5 py-0.5 text-[10px] font-semibold text-emerald-700 ring-1 ring-emerald-200">
         <span className="h-1.5 w-1.5 rounded-full bg-emerald-500" />
         På lager
       </span>
@@ -690,24 +563,24 @@ function StockChip({ status }: { status: StockStatus }) {
   }
   if (status === "stores") {
     return (
-      <span className="inline-flex items-center gap-1.5 rounded bg-amber-50 px-2 py-0.5 text-[11px] font-semibold text-amber-800 ring-1 ring-amber-200">
+      <span className="inline-flex shrink-0 items-center gap-1 rounded-full bg-amber-50 px-1.5 py-0.5 text-[10px] font-semibold text-amber-800 ring-1 ring-amber-200">
         <span className="h-1.5 w-1.5 rounded-full bg-amber-500" />
-        Utvalgte butikker
+        I butikk
       </span>
     );
   }
   if (status === "backorder") {
     return (
-      <span className="inline-flex items-center gap-1.5 rounded bg-stone-100 px-2 py-0.5 text-[11px] font-semibold text-stone-600 ring-1 ring-stone-200">
+      <span className="inline-flex shrink-0 items-center gap-1 rounded-full bg-stone-100 px-1.5 py-0.5 text-[10px] font-semibold text-stone-600 ring-1 ring-stone-200">
         <span className="h-1.5 w-1.5 rounded-full bg-stone-400" />
-        Ikke på lager
+        Bestilling
       </span>
     );
   }
   return (
-    <span className="inline-flex items-center gap-1.5 text-[11px] font-medium text-stone-500">
+    <span className="inline-flex shrink-0 items-center gap-1 text-[10px] font-medium text-stone-500">
       <span className="h-1.5 w-1.5 rounded-full bg-stone-400" />
-      Sjekk levering
+      Sjekk
     </span>
   );
 }
@@ -780,9 +653,7 @@ function FilterPanel({
   sort,
   cols,
   categories,
-  suppliers,
   categoryCounts,
-  supplierCounts,
   priceRange,
 }: {
   q: string;
@@ -791,9 +662,7 @@ function FilterPanel({
   sort: StorefrontSortOption;
   cols: number;
   categories: string[];
-  suppliers: string[];
   categoryCounts: Record<string, number>;
-  supplierCounts: Record<string, number>;
   priceRange: { min: number; max: number };
 }) {
   return (
@@ -849,7 +718,7 @@ function TrustCard() {
   const items = [
     {
       title: "Gratis frakt over 15 000 kr",
-      body: "Bestil over 15 000 kr og få gratis levering.",
+      body: "Gratis levert over 15 000 kr.",
       icon: (
         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" className="h-4 w-4">
           <path d="M3 7h11v9H3zM14 10h4l3 3v3h-7z" />
@@ -860,7 +729,7 @@ function TrustCard() {
     },
     {
       title: "Rask levering",
-      body: "Fra sentrallager til byggeplass innen 24-48 timer.",
+      body: "Til byggeplass på 24-48 timer.",
       icon: (
         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" className="h-4 w-4">
           <path d="M3 7h11v9H3zM14 10h4l3 3v3h-7z" />
@@ -1016,18 +885,6 @@ function resolveFeaturedCategories(
   return tiles.slice(0, 8);
 }
 
-function pickHeroHighlights(
-  deals: StorefrontProduct[],
-  products: StorefrontProduct[],
-): StorefrontProduct[] {
-  const withImages = (list: StorefrontProduct[]) =>
-    list.filter((p) => Boolean(getStorefrontImageUrl(p)));
-  const primary = withImages(deals);
-  if (primary.length >= 4) return primary.slice(0, 4);
-  const fallback = withImages(products).slice(0, 4 - primary.length);
-  return [...primary, ...fallback];
-}
-
 function normalizeSortOption(value: string): StorefrontSortOption {
   switch (value) {
     case "price_asc":
@@ -1055,11 +912,11 @@ function normalizeGridColumns(value: string) {
 function getGridClasses(cols: number) {
   switch (cols) {
     case 5:
-      return "grid gap-4 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5";
+      return "grid grid-cols-2 gap-3 sm:gap-4 md:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5";
     case 6:
-      return "grid gap-4 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-4 xl:grid-cols-6";
+      return "grid grid-cols-2 gap-3 sm:gap-4 md:grid-cols-3 lg:grid-cols-4 xl:grid-cols-6";
     default:
-      return "grid gap-4 sm:grid-cols-2 md:grid-cols-3 xl:grid-cols-4";
+      return "grid grid-cols-2 gap-3 sm:gap-4 md:grid-cols-3 xl:grid-cols-4";
   }
 }
 

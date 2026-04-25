@@ -1,4 +1,5 @@
 import { redirect } from "next/navigation";
+import { Suspense } from "react";
 
 type ComparisonPageProps = {
   params: Promise<{
@@ -7,7 +8,7 @@ type ComparisonPageProps = {
   searchParams: Promise<Record<string, string | string[] | undefined>>;
 };
 
-export default async function ComparisonPage({ params, searchParams }: ComparisonPageProps) {
+async function RedirectContent({ params, searchParams }: ComparisonPageProps) {
   const { slug } = await params;
   const resolvedSearchParams = await searchParams;
   const nextParams = new URLSearchParams();
@@ -30,4 +31,13 @@ export default async function ComparisonPage({ params, searchParams }: Compariso
     : `/min-side/materiallister/${slug}/bestilling`;
 
   redirect(target);
+  return null;
+}
+
+export default function ComparisonPage(props: ComparisonPageProps) {
+  return (
+    <Suspense fallback={null}>
+      <RedirectContent {...props} />
+    </Suspense>
+  );
 }

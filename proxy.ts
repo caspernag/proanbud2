@@ -7,6 +7,54 @@ const PUBLIC_PATHS = new Set(["/login", "/auth/callback"]);
 
 const PROTECTED_PREFIXES = ["/min-side", "/prosjekter", "/betaling", "/admin"];
 
+// ---------------------------------------------------------------------------
+// Per-IP rate limiting for sensitive POST endpoints.
+// Uses a sliding-window counter stored in process memory.
+// NOTE: This is per-instance — for distributed deployments with many serverless
+// instances, replace with an Upstash Redis-backed rate limiter.
+// ---------------------------------------------------------------------------
+
+const RATE_LIMIT_WINDOW_MS = 60_000; // 1 minute
+const RATE_LIMIT_MAX_REQUESTS = 10; // max 10 POSTs per IP per minute
+
+// Map<ip, timestamps[]>
+const rateLimitStore = new Map<string, number[]>();
+
+const RATE_LIMITED_PATTERNS = [
+  /^\/api\/checkout$/,
+  /^\/api\/material-orders\/[^/]+\/checkout$/,
+  /^\/api\/material-list-ai$/,
+];
+
+/** Returns true if the given IP has exceeded the rate limit. Mutates rateLimitStore. */
+export function checkRateLimit(ip: string, now: number = Date.now()): boolean {
+  const existing = rateLimitStore.get(ip) ?? [];
+  const recent = existing.filter((t) => now - t < RATE_LIMIT_WINDOW_MS);
+
+  if (recent.length >= RATE_LIMIT_MAX_REQUESTS) {
+    rateLimitStore.set(ip, recent);
+    return true; // blocked
+  }
+
+  recent.push(now);
+  rateLimitStore.set(ip, recent);
+
+  // Evict entries older than 5 minutes to keep the map bounded.
+  if (rateLimitStore.size > 5_000) {
+    const evictBefore = now - 5 * RATE_LIMIT_WINDOW_MS;
+    for (const [key, ts] of rateLimitStore) {
+      const live = ts.filter((t) => t > evictBefore);
+      if (live.length === 0) {
+        rateLimitStore.delete(key);
+      } else {
+        rateLimitStore.set(key, live);
+      }
+    }
+  }
+
+  return false; // allowed
+}
+
 function isAdminHostname(hostname: string) {
   return hostname.startsWith("admin.");
 }
@@ -41,6 +89,21 @@ function toLoginRedirect(request: NextRequest) {
 export async function proxy(request: NextRequest) {
   const pathname = request.nextUrl.pathname;
   const hostname = request.headers.get("host") || "";
+
+  // Rate limit sensitive POST endpoints
+  if (request.method === "POST" && RATE_LIMITED_PATTERNS.some((re) => re.test(pathname))) {
+    const ip =
+      request.headers.get("x-forwarded-for")?.split(",")[0]?.trim() ||
+      request.headers.get("x-real-ip") ||
+      "unknown";
+
+    if (checkRateLimit(ip)) {
+      return new NextResponse("Too Many Requests", {
+        status: 429,
+        headers: { "Retry-After": "60" },
+      });
+    }
+  }
 
   if (
     pathname.startsWith("/min-side/materiallister/") &&

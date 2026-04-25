@@ -2,6 +2,8 @@ import "server-only";
 import { promises as fs } from "node:fs";
 import path from "node:path";
 
+import { cacheLife } from "next/cache";
+
 export type PriceListProduct = {
   id: string;
   nobbNumber: string;
@@ -25,52 +27,19 @@ export type PriceListProduct = {
 
 const PRIVATE_PRICE_LIST_DIR = path.join(process.cwd(), ".private", "prislister");
 const LEGACY_PRICE_LIST_DIR = path.join(process.cwd(), "prislister");
-const PRICE_LIST_CACHE_TTL_MS = 5 * 60 * 1000;
-
-let cachedPriceListProducts: {
-  expiresAt: number;
-  products: PriceListProduct[];
-} | null = null;
-let priceListProductsInFlight: Promise<PriceListProduct[]> | null = null;
 
 export async function getPriceListProducts() {
-  const now = Date.now();
+  "use cache";
+  cacheLife("minutes");
 
-  if (cachedPriceListProducts && cachedPriceListProducts.expiresAt > now) {
-    return cachedPriceListProducts.products;
+  const csvPaths = await resolvePriceListCsvPaths();
+
+  if (csvPaths.length === 0) {
+    return [] as PriceListProduct[];
   }
 
-  if (priceListProductsInFlight) {
-    return priceListProductsInFlight;
-  }
-
-  priceListProductsInFlight = (async () => {
-    const csvPaths = await resolvePriceListCsvPaths();
-
-    if (csvPaths.length === 0) {
-      cachedPriceListProducts = {
-        expiresAt: Date.now() + PRICE_LIST_CACHE_TTL_MS,
-        products: [],
-      };
-      return [];
-    }
-
-    const productGroups = await Promise.all(csvPaths.map((csvPath) => parseSupplierCsv(csvPath)));
-    const products = productGroups.flat();
-
-    cachedPriceListProducts = {
-      expiresAt: Date.now() + PRICE_LIST_CACHE_TTL_MS,
-      products,
-    };
-
-    return products;
-  })();
-
-  try {
-    return await priceListProductsInFlight;
-  } finally {
-    priceListProductsInFlight = null;
-  }
+  const productGroups = await Promise.all(csvPaths.map((csvPath) => parseSupplierCsv(csvPath)));
+  return productGroups.flat();
 }
 
 function decodePriceListCsv(rawBuffer: Buffer) {

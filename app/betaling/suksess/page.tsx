@@ -1,4 +1,5 @@
 import Link from "next/link";
+import { Suspense } from "react";
 
 import { StorefrontCartReset } from "@/app/_components/storefront/storefront-cart-reset";
 import { getStripe } from "@/lib/stripe";
@@ -12,7 +13,7 @@ type SuccessPageProps = {
   }>;
 };
 
-export default async function PaymentSuccessPage({ searchParams }: SuccessPageProps) {
+async function SuccessPageContent({ searchParams }: SuccessPageProps) {
   const resolvedSearchParams = await searchParams;
   let slug = resolvedSearchParams.slug?.trim() || "";
   const orderIdFromQuery = resolvedSearchParams.order_id?.trim() || "";
@@ -109,5 +110,13 @@ export default async function PaymentSuccessPage({ searchParams }: SuccessPagePr
         </div>
       </div>
     </main>
+  );
+}
+
+export default function PaymentSuccessPage(props: SuccessPageProps) {
+  return (
+    <Suspense fallback={null}>
+      <SuccessPageContent {...props} />
+    </Suspense>
   );
 }

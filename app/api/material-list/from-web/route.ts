@@ -6,7 +6,6 @@ type AnalyzeProductPayload = {
   url?: unknown;
 };
 
-export const runtime = "nodejs";
 
 export async function POST(request: Request) {
   let payload: AnalyzeProductPayload;

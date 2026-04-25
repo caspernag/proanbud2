@@ -138,28 +138,71 @@ export function MinSideShell({ children, userEmail }: MinSideShellProps) {
 
         <header className="sticky top-0 z-20 border-b border-emerald-900/25 bg-[#0f271b] px-4 py-2.5 text-white lg:hidden">
           <div className="flex items-center justify-between gap-3">
+            <Link
+              href="/min-side"
+              onClick={() => setMobileOpen(false)}
+              className="inline-flex items-center"
+            >
+              <Image
+                src="/logo/dark/logo-primary.svg"
+                alt="proanbud"
+                width={120}
+                height={28}
+                className="h-5 w-auto"
+              />
+            </Link>
             <button
               type="button"
-              aria-label="Apne meny"
+              aria-label="Åpne meny"
               onClick={() => setMobileOpen(true)}
               className="inline-flex h-8 w-8 items-center justify-center rounded-[3px] border border-white/35 text-white"
             >
               <MenuIcon />
             </button>
-            <p className="truncate text-xs font-semibold tracking-[0.12em] text-emerald-100">MIN SIDE</p>
-            <Link
-              href="/min-side"
-              onClick={() => setMobileOpen(false)}
-              className="inline-flex h-8 items-center justify-center rounded-[3px] border border-white/35 px-2 text-[11px] font-semibold text-white"
-            >
-              Hjem
-            </Link>
           </div>
         </header>
 
-        <main className="relative flex-1 px-3 pb-7 pt-3 sm:px-5 lg:px-6 lg:pt-5">
+        <main className="relative flex-1 px-3 pb-24 pt-3 sm:px-5 lg:px-6 lg:pb-7 lg:pt-5">
           <div className="mx-auto w-full max-w-[1500px]">{children}</div>
         </main>
+
+        {/* Mobile bottom tab bar */}
+        <nav className="fixed inset-x-0 bottom-0 z-30 border-t border-emerald-900/40 bg-[#0f271b] lg:hidden">
+          <div className="grid grid-cols-4">
+            <BottomNavLink
+              href="/"
+              label="Butikk"
+              icon={<StoreIcon />}
+              isActive={(p) => p === "/" || p.startsWith("/checkout") || p.startsWith("/ordre/")}
+              pathname={pathname}
+              onClick={() => setMobileOpen(false)}
+            />
+            <BottomNavLink
+              href="/min-side"
+              label="Oversikt"
+              icon={<HomeIcon />}
+              isActive={(p) => p === "/min-side"}
+              pathname={pathname}
+              onClick={() => setMobileOpen(false)}
+            />
+            <BottomNavLink
+              href="/min-side/materiallister"
+              label="Lister"
+              icon={<ListIcon />}
+              isActive={(p) => p.startsWith("/min-side/materiallister")}
+              pathname={pathname}
+              onClick={() => setMobileOpen(false)}
+            />
+            <BottomNavLink
+              href="/min-side/bestillinger"
+              label="Ordre"
+              icon={<OrderIcon />}
+              isActive={(p) => p.startsWith("/min-side/bestillinger")}
+              pathname={pathname}
+              onClick={() => setMobileOpen(false)}
+            />
+          </div>
+        </nav>
       </div>
     </div>
   );
@@ -180,6 +223,71 @@ function CloseIcon() {
     <svg width="18" height="18" viewBox="0 0 24 24" fill="none" aria-hidden="true">
       <path d="M6 6L18 18" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" />
       <path d="M18 6L6 18" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" />
+    </svg>
+  );
+}
+
+type BottomNavLinkProps = {
+  href: string;
+  label: string;
+  icon: React.ReactNode;
+  isActive: (pathname: string) => boolean;
+  pathname: string;
+  onClick: () => void;
+};
+
+function BottomNavLink({ href, label, icon, isActive, pathname, onClick }: BottomNavLinkProps) {
+  const active = isActive(pathname);
+  return (
+    <Link
+      href={href}
+      onClick={onClick}
+      className={`flex flex-col items-center gap-0.5 py-2.5 text-[10px] font-semibold transition ${
+        active ? "text-[#27a866]" : "text-emerald-100/55 hover:text-emerald-100"
+      }`}
+    >
+      <span className={`flex h-6 w-6 items-center justify-center ${
+        active ? "text-[#27a866]" : "text-emerald-100/55"
+      }`}>{icon}</span>
+      {label}
+    </Link>
+  );
+}
+
+function StoreIcon() {
+  return (
+    <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+      <path d="M3 9l9-7 9 7v11a2 2 0 01-2 2H5a2 2 0 01-2-2z" />
+      <polyline points="9 22 9 12 15 12 15 22" />
+    </svg>
+  );
+}
+
+function HomeIcon() {
+  return (
+    <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+      <rect x="3" y="3" width="7" height="7" />
+      <rect x="14" y="3" width="7" height="7" />
+      <rect x="14" y="14" width="7" height="7" />
+      <rect x="3" y="14" width="7" height="7" />
+    </svg>
+  );
+}
+
+function ListIcon() {
+  return (
+    <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" aria-hidden="true">
+      <path d="M9 6h11M9 12h11M9 18h11M4 6h.01M4 12h.01M4 18h.01" />
+    </svg>
+  );
+}
+
+function OrderIcon() {
+  return (
+    <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+      <path d="M6 2L3 6v14a2 2 0 002 2h14a2 2 0 002-2V6l-3-4z" />
+      <line x1="3" y1="6" x2="21" y2="6" />
+      <path d="M16 10a4 4 0 01-8 0" />
     </svg>
   );
 }

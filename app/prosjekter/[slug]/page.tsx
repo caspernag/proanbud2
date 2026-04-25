@@ -1,4 +1,5 @@
 import { redirect } from "next/navigation";
+import { Suspense } from "react";
 
 type ProjectPageProps = {
   params: Promise<{
@@ -7,7 +8,7 @@ type ProjectPageProps = {
   searchParams: Promise<Record<string, string | string[] | undefined>>;
 };
 
-export default async function ProjectPage({ params, searchParams }: ProjectPageProps) {
+async function RedirectContent({ params, searchParams }: ProjectPageProps) {
   const { slug } = await params;
   const resolvedSearchParams = await searchParams;
   const nextParams = new URLSearchParams();
@@ -30,4 +31,13 @@ export default async function ProjectPage({ params, searchParams }: ProjectPageP
     : `/min-side/materiallister/${slug}`;
 
   redirect(target);
+  return null;
+}
+
+export default function ProjectPage(props: ProjectPageProps) {
+  return (
+    <Suspense fallback={null}>
+      <RedirectContent {...props} />
+    </Suspense>
+  );
 }

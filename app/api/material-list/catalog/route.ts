@@ -18,7 +18,6 @@ type CatalogSearchEntry = {
   category: string;
 };
 
-export const runtime = "nodejs";
 
 export async function GET(request: Request) {
   const requestUrl = new URL(request.url);

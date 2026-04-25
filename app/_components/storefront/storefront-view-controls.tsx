@@ -59,7 +59,7 @@ export function StorefrontViewControls({
         </select>
       </div>
 
-      <div className="flex items-center gap-1 rounded-full border border-stone-300 bg-white p-0.5" role="group" aria-label="Kolonner">
+      <div className="hidden items-center gap-1 rounded-full border border-stone-300 bg-white p-0.5 lg:flex" role="group" aria-label="Kolonner">
         {[4, 5, 6].map((value) => {
           const active = cols === value;
           return (

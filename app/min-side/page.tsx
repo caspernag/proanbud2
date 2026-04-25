@@ -136,7 +136,7 @@ export default async function MinSideOverviewPage() {
             <h1 className="display-font mt-2.5 text-3xl leading-tight text-white sm:text-4xl">
               {greeting(user?.email ?? null)}
             </h1>
-            <p className="mt-2 max-w-xl text-sm leading-6 text-emerald-50/80">
+            <p className="mt-2 hidden max-w-xl text-sm leading-6 text-emerald-50/80 sm:block">
               Generer materiallister med AI og bestill til partnerpris gjennom Proanbud.
             </p>
 
@@ -146,18 +146,18 @@ export default async function MinSideOverviewPage() {
                 className="inline-flex h-10 items-center justify-center gap-2 rounded-[6px] bg-[#27a866] px-4 text-sm font-semibold text-white shadow-[0_12px_28px_rgba(10,74,45,0.4)] transition hover:bg-[#2eb872]"
               >
                 <PlusCircle className="h-4 w-4" />
-                Ny materialliste med AI
+                Ny materialliste
               </Link>
               <Link
                 href="/min-side/materiallister"
-                className="inline-flex h-10 items-center justify-center gap-1.5 rounded-[6px] border border-white/25 bg-white/5 px-3.5 text-sm font-semibold text-white transition hover:bg-white/10"
+                className="hidden h-10 items-center justify-center gap-1.5 rounded-[6px] border border-white/25 bg-white/5 px-3.5 text-sm font-semibold text-white transition hover:bg-white/10 sm:inline-flex"
               >
                 Mine lister
                 <ArrowUpRight className="h-3.5 w-3.5" />
               </Link>
               <Link
                 href="/min-side/bestillinger"
-                className="inline-flex h-10 items-center justify-center gap-1.5 rounded-[6px] border border-white/25 bg-white/5 px-3.5 text-sm font-semibold text-white transition hover:bg-white/10"
+                className="hidden h-10 items-center justify-center gap-1.5 rounded-[6px] border border-white/25 bg-white/5 px-3.5 text-sm font-semibold text-white transition hover:bg-white/10 sm:inline-flex"
               >
                 Bestillinger
                 <ArrowUpRight className="h-3.5 w-3.5" />
@@ -174,8 +174,8 @@ export default async function MinSideOverviewPage() {
         </div>
       </section>
 
-      {/* STATUS METRIC TILES */}
-      <section className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
+      {/* STATUS METRIC TILES – hidden on mobile, shown on sm+ */}
+      <section className="hidden gap-3 sm:grid sm:grid-cols-2 xl:grid-cols-4">
         <MetricCard
           icon={<Sparkles className="h-4 w-4" />}
           label="AI-materiallister"
@@ -208,7 +208,8 @@ export default async function MinSideOverviewPage() {
 
       {/* CHART + STATUS */}
       <section className="grid gap-3 xl:grid-cols-[1.5fr_1fr]">
-        <article className="rounded-2xl border border-stone-200 bg-white p-4 shadow-[0_10px_28px_rgba(13,34,22,0.05)] sm:p-5">
+        {/* Bar chart – hidden on mobile */}
+        <article className="hidden rounded-2xl border border-stone-200 bg-white p-4 shadow-[0_10px_28px_rgba(13,34,22,0.05)] sm:block sm:p-5">
           <div className="mb-4 flex items-end justify-between gap-3">
             <div>
               <p className="text-[10px] font-semibold uppercase tracking-[0.14em] text-stone-500">Aktivitet</p>
@@ -283,7 +284,7 @@ export default async function MinSideOverviewPage() {
               >
                 <div className="min-w-0">
                   <p className="truncate text-sm font-semibold text-stone-900">{entry.materialList.title}</p>
-                  <p className="mt-0.5 truncate text-[11px] text-stone-500">
+                  <p className="mt-0.5 hidden truncate text-[11px] text-stone-500 sm:block">
                     {entry.materialList.location || "Uten lokasjon"} · {entry.lineCount} linjer
                   </p>
                 </div>
@@ -336,7 +337,7 @@ export default async function MinSideOverviewPage() {
               >
                 <div className="min-w-0">
                   <p className="truncate text-sm font-semibold text-stone-900">#{order.id.slice(0, 8)}</p>
-                  <p className="mt-0.5 text-[11px] text-stone-500">{formatDate(order.created_at)}</p>
+                  <p className="mt-0.5 hidden text-[11px] text-stone-500 sm:block">{formatDate(order.created_at)}</p>
                 </div>
                 <div className="flex items-center gap-2.5">
                   <p className="text-sm font-semibold tabular-nums text-stone-900">{formatCurrency(order.total_nok)}</p>

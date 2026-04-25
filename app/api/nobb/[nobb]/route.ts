@@ -2,7 +2,6 @@ import { NextResponse } from "next/server";
 
 import { getNobbDetails } from "@/lib/nobb-details";
 
-export const runtime = "nodejs";
 
 type RouteContext = {
   params: Promise<{

@@ -1,4 +1,4 @@
-import type { Metadata } from "next";
+import type { Metadata, Viewport } from "next";
 import { Suspense } from "react";
 import { Sora, Space_Grotesk } from "next/font/google";
 import { GlobalNav } from "@/app/_components/global-nav";
@@ -23,6 +23,11 @@ export const metadata: Metadata = {
   },
   description:
     "Proanbud gir privatkunder AI-materiallister, partnerpris på byggevarer og bestilling gjennom én innkjøpskanal.",
+};
+
+export const viewport: Viewport = {
+  width: "device-width",
+  initialScale: 1,
 };
 
 export default async function RootLayout({

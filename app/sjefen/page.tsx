@@ -1,16 +1,24 @@
 import { redirect } from "next/navigation";
+import { Suspense } from "react";
 
 import { isAdminUser } from "@/lib/admin-auth";
 import { hasSupabaseEnv } from "@/lib/env";
 import { AdminLoginForm } from "./_components/admin-login-form";
 
-export default async function SjefenPage() {
+async function AdminRedirectGuard() {
   if (await isAdminUser()) {
     redirect("/sjefen/dashboard");
   }
+  return null;
+}
 
+export default async function SjefenPage() {
   return (
     <main className="min-h-screen bg-stone-50 flex items-center justify-center px-4">
+      <Suspense fallback={null}>
+        <AdminRedirectGuard />
+      </Suspense>
+
       <div className="w-full max-w-sm">
         {/* Logo / wordmark */}
         <div className="mb-10 text-center">

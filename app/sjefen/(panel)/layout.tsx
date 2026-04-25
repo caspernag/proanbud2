@@ -1,4 +1,4 @@
-import { type ReactNode } from "react";
+import { type ReactNode, Suspense } from "react";
 import Link from "next/link";
 
 import { AdminSignOutButton } from "../_components/admin-sign-out-button";
@@ -95,7 +95,9 @@ export default function SjefenPanelLayout({ children }: { children: ReactNode })
 
       {/* Main content */}
       <main className="flex-1 overflow-auto">
-        {children}
+        <Suspense fallback={null}>
+          {children}
+        </Suspense>
       </main>
     </div>
   );

@@ -1,5 +1,7 @@
 import { createClient } from "@supabase/supabase-js";
 
+import { cacheLife } from "next/cache";
+
 import { env, hasSupabaseEnv } from "@/lib/env";
 import { createSupabaseAdminClient } from "@/lib/supabase/admin";
 
@@ -11,15 +13,9 @@ export type SupplierMarkup = {
   markup_fixed: number;
 };
 
-const MARKUP_CACHE_TTL_MS = 60 * 1000;
-
-let cachedMarkups: { expiresAt: number; rows: SupplierMarkup[] } | null = null;
-
 export async function getSupplierMarkups(): Promise<SupplierMarkup[]> {
-  const now = Date.now();
-  if (cachedMarkups && cachedMarkups.expiresAt > now) {
-    return cachedMarkups.rows;
-  }
+  "use cache";
+  cacheLife("minutes");
 
   try {
     const adminClient = createSupabaseAdminClient();
@@ -45,18 +41,11 @@ export async function getSupplierMarkups(): Promise<SupplierMarkup[]> {
       return [];
     }
 
-    const rows = (data ?? []).map((row) => ({
+    return (data ?? []).map((row) => ({
       supplier_name: String(row.supplier_name ?? "").trim(),
       markup_percentage: toFiniteNumber(row.markup_percentage),
       markup_fixed: toFiniteNumber(row.markup_fixed),
     }));
-
-    cachedMarkups = {
-      expiresAt: now + MARKUP_CACHE_TTL_MS,
-      rows,
-    };
-
-    return rows;
   } catch (error) {
     console.error("Failed to get markups", error);
     return [];

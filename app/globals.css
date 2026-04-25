@@ -42,6 +42,12 @@ a {
   text-decoration: none;
 }
 
+img,
+video,
+iframe {
+  max-inline-size: 100%;
+}
+
 a[href],
 button {
   cursor: pointer;

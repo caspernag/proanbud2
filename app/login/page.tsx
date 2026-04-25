@@ -1,6 +1,7 @@
 import Image from "next/image";
 import Link from "next/link";
 import { redirect } from "next/navigation";
+import { Suspense } from "react";
 
 import { LoginForm } from "@/app/_components/login-form";
 import { Card, CardContent, CardDescription, CardFooter, CardHeader, CardTitle } from "@/components/ui/card";
@@ -14,9 +15,7 @@ type LoginPageProps = {
   }>;
 };
 
-export default async function LoginPage({ searchParams }: LoginPageProps) {
-  const resolvedSearchParams = await searchParams;
-  const nextPath = sanitizeNextPath(resolvedSearchParams.next);
+async function AuthRedirectGuard({ nextPath }: { nextPath: string }) {
   const supabase = await createSupabaseServerClient();
   const {
     data: { user },
@@ -26,6 +25,22 @@ export default async function LoginPage({ searchParams }: LoginPageProps) {
     redirect(nextPath);
   }
 
+  return null;
+}
+
+async function LoginFormContent({ searchParams }: LoginPageProps) {
+  const resolvedSearchParams = await searchParams;
+  const nextPath = sanitizeNextPath(resolvedSearchParams.next);
+
+  return (
+    <>
+      <AuthRedirectGuard nextPath={nextPath} />
+      <LoginForm nextPath={nextPath} supabaseEnabled={hasSupabaseEnv()} />
+    </>
+  );
+}
+
+export default function LoginPage({ searchParams }: LoginPageProps) {
   return (
     <main className="relative isolate flex min-h-screen w-full items-center justify-center overflow-hidden px-3 py-8">
       <div
@@ -48,7 +63,9 @@ export default async function LoginPage({ searchParams }: LoginPageProps) {
           </CardHeader>
 
           <CardContent className="pt-0">
-            <LoginForm nextPath={nextPath} supabaseEnabled={hasSupabaseEnv()} />
+            <Suspense fallback={null}>
+              <LoginFormContent searchParams={searchParams} />
+            </Suspense>
           </CardContent>
 
           <CardFooter className="border-t border-stone-200 pt-3 text-xs text-stone-600">

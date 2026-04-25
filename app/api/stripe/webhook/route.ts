@@ -6,7 +6,6 @@ import { getPriceListProducts } from "@/lib/price-lists";
 import { getStripe } from "@/lib/stripe";
 import { createSupabaseAdminClient } from "@/lib/supabase/admin";
 
-export const runtime = "nodejs";
 
 type MaterialOrderStatus = "draft" | "pending_payment" | "paid" | "submitted" | "cancelled" | "failed";
 type ShopOrderStatus = "draft" | "pending_payment" | "paid" | "fulfilled" | "cancelled" | "failed";

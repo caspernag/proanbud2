@@ -2,6 +2,8 @@ import "server-only";
 
 import OpenAI from "openai";
 
+import { cacheLife } from "next/cache";
+
 import { env, hasOpenAiEnv } from "@/lib/env";
 import { toVatInclusiveNok } from "@/lib/material-order";
 import { applyMarkup, getSupplierMarkups, type SupplierMarkup } from "@/lib/price-markup";
@@ -15,85 +17,46 @@ import type {
 } from "@/lib/storefront-types";
 import { slugify } from "@/lib/utils";
 
-const STOREFRONT_CACHE_TTL_MS = 10 * 60 * 1000;
 const STOREFRONT_DEFAULT_PAGE_SIZE = 24;
 
-let storefrontCache: {
-  expiresAt: number;
-  products: StorefrontProduct[];
-  source: "vector_store" | "price_lists";
-  vectorStoreId: string | null;
-} | null = null;
-let storefrontInFlight: Promise<{
-  products: StorefrontProduct[];
-  source: "vector_store" | "price_lists";
-  vectorStoreId: string | null;
-}> | null = null;
-
 export async function getStorefrontProducts() {
-  const cached = storefrontCache;
+  "use cache";
+  cacheLife("minutes");
 
-  if (cached && cached.expiresAt > Date.now()) {
-    return cached;
-  }
+  const [fromVectorStore, markups, priceListProducts] = await Promise.all([
+    loadStorefrontProductsFromVectorStore(),
+    getSupplierMarkups(),
+    getPriceListProducts(),
+  ]);
 
-  if (storefrontInFlight) {
-    return storefrontInFlight;
-  }
+  if (fromVectorStore.products.length > 0) {
+    const enriched = applyPriceListCategoryOverrides(fromVectorStore.products, priceListProducts);
 
-  storefrontInFlight = (async () => {
-    const [fromVectorStore, markups, priceListProducts] = await Promise.all([
-      loadStorefrontProductsFromVectorStore(),
-      getSupplierMarkups(),
-      getPriceListProducts(),
-    ]);
+    // Merge: add any price list products whose NOBB isn't already in the
+    // vector store. This ensures the full catalog is always visible even
+    // when the vector store index is stale or partially uploaded.
+    const vectorStoreNobbs = new Set(enriched.map((p) => p.nobbNumber));
+    const missingFromVectorStore = normalizePriceListProducts(
+      priceListProducts.filter((p) => !vectorStoreNobbs.has(p.nobbNumber.replace(/\D/g, ""))),
+      "price_lists",
+    );
+    const merged = dedupeStorefrontProducts([...enriched, ...missingFromVectorStore]);
 
-    if (fromVectorStore.products.length > 0) {
-      const enriched = applyPriceListCategoryOverrides(fromVectorStore.products, priceListProducts);
-
-      // Merge: add any price list products whose NOBB isn't already in the
-      // vector store. This ensures the full catalog is always visible even
-      // when the vector store index is stale or partially uploaded.
-      const vectorStoreNobbs = new Set(enriched.map((p) => p.nobbNumber));
-      const missingFromVectorStore = normalizePriceListProducts(
-        priceListProducts.filter((p) => !vectorStoreNobbs.has(p.nobbNumber.replace(/\D/g, ""))),
-        "price_lists",
-      );
-      const merged = dedupeStorefrontProducts([...enriched, ...missingFromVectorStore]);
-
-      const pricedResult = {
-        ...fromVectorStore,
-        products: applyStorefrontPricing(merged, markups),
-      };
-      storefrontCache = {
-        expiresAt: Date.now() + STOREFRONT_CACHE_TTL_MS,
-        ...pricedResult,
-      };
-      return pricedResult;
-    }
-
-    const fallbackProducts = priceListProducts;
-    const normalizedFallbackProducts = normalizePriceListProducts(fallbackProducts, "price_lists");
-    const dedupedFallbackProducts = dedupeStorefrontProducts(normalizedFallbackProducts);
-    const fallbackResult = {
-      products: applyStorefrontPricing(sortStorefrontProducts(dedupedFallbackProducts, "newest"), markups),
-      source: "price_lists" as const,
-      vectorStoreId: null,
+    return {
+      ...fromVectorStore,
+      products: applyStorefrontPricing(merged, markups),
     };
-
-    storefrontCache = {
-      expiresAt: Date.now() + STOREFRONT_CACHE_TTL_MS,
-      ...fallbackResult,
-    };
-
-    return fallbackResult;
-  })();
-
-  try {
-    return await storefrontInFlight;
-  } finally {
-    storefrontInFlight = null;
   }
+
+  const fallbackProducts = priceListProducts;
+  const normalizedFallbackProducts = normalizePriceListProducts(fallbackProducts, "price_lists");
+  const dedupedFallbackProducts = dedupeStorefrontProducts(normalizedFallbackProducts);
+
+  return {
+    products: applyStorefrontPricing(sortStorefrontProducts(dedupedFallbackProducts, "newest"), markups),
+    source: "price_lists" as const,
+    vectorStoreId: null,
+  };
 }
 
 export async function queryStorefrontProducts(query: StorefrontProductQuery): Promise<StorefrontProductQueryResult> {

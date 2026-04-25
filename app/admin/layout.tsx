@@ -1,4 +1,4 @@
-import { ReactNode } from "react";
+import { ReactNode, Suspense } from "react";
 import Link from "next/link";
 
 export default function AdminLayout({ children }: { children: ReactNode }) {
@@ -12,7 +12,9 @@ export default function AdminLayout({ children }: { children: ReactNode }) {
         </nav>
       </header>
       <main className="mx-auto w-full max-w-[1500px] flex-1 p-6">
-        {children}
+        <Suspense fallback={null}>
+          {children}
+        </Suspense>
       </main>
     </div>
   );

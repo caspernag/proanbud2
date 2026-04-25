@@ -8,16 +8,18 @@ export function AddToCartButton({
   productId,
   quantity = 1,
   tone = "primary",
+  fullWidth = false,
 }: {
   productId: string;
   quantity?: number;
   tone?: "primary" | "secondary";
+  fullWidth?: boolean;
 }) {
   const { addItem } = useStorefront();
   const [recentlyAdded, setRecentlyAdded] = useState(false);
 
   const base =
-    "inline-flex h-9 items-center justify-center gap-1.5 rounded-full px-3.5 text-[13px] font-semibold transition active:scale-[0.97]";
+    `inline-flex h-9 items-center justify-center gap-1.5 rounded-full px-3.5 text-[13px] font-semibold whitespace-nowrap transition active:scale-[0.97] ${fullWidth ? "w-full" : ""}`;
   const palette =
     tone === "primary"
       ? recentlyAdded

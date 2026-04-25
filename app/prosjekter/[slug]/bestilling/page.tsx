@@ -1,4 +1,5 @@
 import { redirect } from "next/navigation";
+import { Suspense } from "react";
 
 type MaterialOrderPageProps = {
   params: Promise<{
@@ -7,7 +8,7 @@ type MaterialOrderPageProps = {
   searchParams: Promise<Record<string, string | string[] | undefined>>;
 };
 
-export default async function MaterialOrderPage({ params, searchParams }: MaterialOrderPageProps) {
+async function RedirectContent({ params, searchParams }: MaterialOrderPageProps) {
   const { slug } = await params;
   const resolvedSearchParams = await searchParams;
   const nextParams = new URLSearchParams();
@@ -30,4 +31,13 @@ export default async function MaterialOrderPage({ params, searchParams }: Materi
     : `/min-side/materiallister/${slug}/bestilling`;
 
   redirect(target);
+  return null;
+}
+
+export default function MaterialOrderPage(props: MaterialOrderPageProps) {
+  return (
+    <Suspense fallback={null}>
+      <RedirectContent {...props} />
+    </Suspense>
+  );
 }
