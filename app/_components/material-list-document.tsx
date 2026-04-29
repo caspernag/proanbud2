@@ -27,6 +27,7 @@ type MaterialRow = {
   imageUrl?: string;
   supplierName?: string;
   unitPriceNok?: number;
+  category?: string;
   source: "generated" | "catalog" | "custom" | "web";
   customEditable: boolean;
 };
@@ -138,6 +139,7 @@ export function MaterialListDocument({
   const [nobbLoading, setNobbLoading] = useState(false);
   const [nobbError, setNobbError] = useState<string | null>(null);
   const [saveState, setSaveState] = useState<"idle" | "saving" | "saved" | "error">("idle");
+  const [alternativesRowId, setAlternativesRowId] = useState<string | null>(null);
   const hasHydratedForSaveRef = useRef(false);
   const hasHydratedFromSessionRef = useRef(false);
   const latestDraftSectionsRef = useRef<DocumentSection[]>(draftSections);
@@ -464,6 +466,48 @@ export function MaterialListDocument({
     );
   }
 
+  function swapToAlternative(
+    sectionIndex: number,
+    itemIndex: number,
+    alternative: MaterialCatalogEntry,
+  ) {
+    if (readOnly) {
+      return;
+    }
+
+    setDraftSections((current) =>
+      current.map((section, currentSectionIndex) => {
+        if (currentSectionIndex !== sectionIndex) {
+          return section;
+        }
+
+        return {
+          ...section,
+          items: section.items.map((row, currentItemIndex) => {
+            if (currentItemIndex !== itemIndex) {
+              return row;
+            }
+
+            return {
+              ...row,
+              productName: alternative.productName,
+              nobbNumber: alternative.nobbNumber,
+              supplierName: alternative.supplierName,
+              unitPriceNok: alternative.unitPriceNok,
+              category: alternative.category,
+              imageUrl: undefined,
+              productUrl: undefined,
+              source: "catalog",
+              customEditable: false,
+            };
+          }),
+        };
+      }),
+    );
+
+    setAlternativesRowId(null);
+  }
+
   function addCatalogProduct() {
     if (readOnly) {
       return;
@@ -502,6 +546,7 @@ export function MaterialListDocument({
           nobbNumber: selectedEntry.nobbNumber,
           supplierName: selectedEntry.supplierName,
           unitPriceNok: selectedEntry.unitPriceNok,
+          category: selectedEntry.category,
           source: "catalog",
           customEditable: false,
         });
@@ -670,175 +715,250 @@ export function MaterialListDocument({
   }
 
   return (
-    <div className="overflow-hidden border-0 border-stone-300 bg-white">
-      <div className="relative flex flex-row gap-2 border-b border-stone-300 bg-stone-50 px-3 py-2.5">
+    <div className="overflow-hidden bg-white">
+      <div className="relative flex items-center gap-2 border-b border-stone-200 bg-white px-4 py-2.5">
         {!readOnly ? (
           <button
             type="button"
             onClick={() => setAddMenuOpen((current) => !current)}
-            className="h-9 w-full rounded-lg border border-stone-900 bg-stone-900 px-3 text-sm font-semibold text-white transition hover:bg-stone-800 sm:w-auto"
+            className="inline-flex h-9 items-center gap-1.5 rounded-sm border border-stone-900 bg-stone-900 px-3 text-[13px] font-semibold text-white transition hover:bg-stone-800"
           >
-            LEGG TIL
+            <PlusIcon />
+            Legg til produkt
           </button>
         ) : null}
-        <p className="mt-2 text-[11px] text-stone-500 sm:hidden">
-          Tips: sveip sideveis i tabellen for å se alle kolonner.
-        </p>
+        <div className="ml-auto flex items-center gap-2 text-[11px] text-stone-500">
+          {saveState === "saving" ? <span>Lagrer …</span> : null}
+          {saveState === "saved" ? <span className="text-emerald-700">Lagret</span> : null}
+          {saveState === "error" ? <span className="text-rose-700">Lagring feilet</span> : null}
+        </div>
 
         {!readOnly && addMenuOpen ? (
-          <>
+          <div
+            className="fixed inset-0 z-[2147483000] flex items-start justify-center overflow-y-auto bg-stone-900/50 p-4 backdrop-blur-[2px] sm:items-center"
+            onClick={() => setAddMenuOpen(false)}
+            role="dialog"
+            aria-modal="true"
+            aria-label="Legg til produkt"
+          >
             <div
-              className="fixed inset-0 z-[2147483000]"
-              onClick={() => setAddMenuOpen(false)}
-              aria-hidden="true"
-            />
-
-            <div className="absolute inset-x-2 top-[calc(100%+0.35rem)] z-[2147483001] border border-stone-300 bg-white p-3 shadow-xl sm:left-auto sm:right-3 sm:w-full sm:max-w-xl">
-            <div className="mb-2 inline-flex border border-stone-300">
-              <button
-                type="button"
-                onClick={() => setAddMode("catalog")}
-                className={`px-3 py-1.5 text-sm font-semibold ${
-                  addMode === "catalog" ? "bg-stone-900 text-white" : "bg-white text-stone-700"
-                }`}
-              >
-                Fra katalog
-              </button>
-              <button
-                type="button"
-                onClick={() => setAddMode("web")}
-                className={`px-3 py-1.5 text-sm font-semibold ${
-                  addMode === "web" ? "bg-stone-900 text-white" : "bg-white text-stone-700"
-                }`}
-              >
-                Fra nett
-              </button>
-            </div>
-
-            {addMode === "catalog" ? (
-              <div className="space-y-2">
-                <p className="text-xs text-stone-600">
-                  Produktene under hentes fra prislister (NOBB-baserte varer).
-                </p>
-                <div className="grid gap-2 sm:grid-cols-[minmax(0,1fr)_190px]">
-                  <input
-                    value={catalogSearchTerm}
-                    onChange={(event) => setCatalogSearchTerm(event.target.value)}
-                    placeholder="Søk på produkt, NOBB eller leverandør"
-                    className="h-9 w-full rounded-sm border border-stone-300 bg-white px-2 text-sm text-stone-900 outline-none focus:border-stone-900"
-                  />
-                  <select
-                    value={catalogCategoryFilter}
-                    onChange={(event) => setCatalogCategoryFilter(event.target.value)}
-                    className="h-9 w-full rounded-sm border border-stone-300 bg-white px-2 text-sm text-stone-900 outline-none focus:border-stone-900"
-                  >
-                    <option value={CATALOG_FILTER_ALL}>Alle kategorier</option>
-                    {catalogCategoryOptions.map((category) => (
-                      <option key={category} value={category}>
-                        {category}
-                      </option>
-                    ))}
-                  </select>
+              className="relative my-4 w-full max-w-3xl overflow-hidden rounded-lg border border-stone-200 bg-white shadow-2xl"
+              onClick={(event) => event.stopPropagation()}
+            >
+              {/* Header */}
+              <div className="flex items-center justify-between gap-3 border-b border-stone-200 px-5 py-3.5">
+                <div>
+                  <p className="text-[10px] font-semibold uppercase tracking-[0.14em] text-stone-500">
+                    Legg til produkt
+                  </p>
+                  <h3 className="mt-0.5 text-[15px] font-semibold text-stone-900">
+                    Søk i katalogen eller importer fra en lenke
+                  </h3>
                 </div>
-                <p className="text-[11px] text-stone-500">
-                  Viser {filteredCatalogEntries.length} av {catalogEntries.length} produkter.
-                </p>
-                {filteredCatalogEntries.length > 0 ? (
-                  <div className="rounded-sm border border-stone-300 bg-white">
-                    <div className="max-h-56 overflow-y-auto">
-                      {filteredCatalogEntries.map((entry) => {
-                        const isSelected = selectedCatalogEntryId === entry.id;
+                <button
+                  type="button"
+                  onClick={() => setAddMenuOpen(false)}
+                  className="inline-flex h-8 w-8 items-center justify-center rounded-sm text-stone-400 transition hover:bg-stone-100 hover:text-stone-700"
+                  aria-label="Lukk"
+                >
+                  <CloseIcon />
+                </button>
+              </div>
 
-                        return (
-                          <button
-                            key={entry.id}
-                            type="button"
-                            onClick={() => setSelectedCatalogEntryId(entry.id)}
-                            className={`flex w-full items-start justify-between gap-3 border-b border-stone-200 px-2.5 py-2 text-left transition last:border-b-0 ${
-                              isSelected
-                                ? "bg-stone-900 text-white"
-                                : "bg-white text-stone-800 hover:bg-stone-50"
-                            }`}
-                          >
-                            <span className="min-w-0 text-sm">
-                              <span className="line-clamp-1 font-medium">{entry.productName}</span>
-                              <span
-                                className={`mt-0.5 block text-[11px] ${
-                                  isSelected ? "text-stone-200" : "text-stone-500"
+              {/* Tabs */}
+              <div className="flex gap-1 border-b border-stone-200 bg-stone-50/60 px-5 pt-3">
+                <ModalTab active={addMode === "catalog"} onClick={() => setAddMode("catalog")}>
+                  <CatalogIcon /> Fra katalog
+                </ModalTab>
+                <ModalTab active={addMode === "web"} onClick={() => setAddMode("web")}>
+                  <LinkIcon /> Fra nettlenke
+                </ModalTab>
+              </div>
+
+              {addMode === "catalog" ? (
+                <div className="flex flex-col">
+                  {/* Search & filter */}
+                  <div className="grid gap-2 border-b border-stone-200 px-5 py-3 sm:grid-cols-[minmax(0,1fr)_220px]">
+                    <div className="relative">
+                      <span className="pointer-events-none absolute inset-y-0 left-3 flex items-center text-stone-400" aria-hidden>
+                        <SearchIcon />
+                      </span>
+                      <input
+                        autoFocus
+                        value={catalogSearchTerm}
+                        onChange={(event) => setCatalogSearchTerm(event.target.value)}
+                        placeholder="Søk på produkt, NOBB eller leverandør…"
+                        className="h-10 w-full rounded-sm border border-stone-200 bg-white pl-9 pr-3 text-[13px] text-stone-900 outline-none focus:border-stone-900"
+                      />
+                    </div>
+                    <select
+                      value={catalogCategoryFilter}
+                      onChange={(event) => setCatalogCategoryFilter(event.target.value)}
+                      className="h-10 w-full rounded-sm border border-stone-200 bg-white px-2.5 text-[13px] text-stone-900 outline-none focus:border-stone-900"
+                    >
+                      <option value={CATALOG_FILTER_ALL}>Alle kategorier</option>
+                      {catalogCategoryOptions.map((category) => (
+                        <option key={category} value={category}>
+                          {category}
+                        </option>
+                      ))}
+                    </select>
+                  </div>
+
+                  {/* Product grid */}
+                  <div className="max-h-[55vh] min-h-[300px] overflow-y-auto px-3 py-3 sm:px-4">
+                    {filteredCatalogEntries.length > 0 ? (
+                      <ul className="grid grid-cols-1 gap-2 sm:grid-cols-2">
+                        {filteredCatalogEntries.slice(0, 80).map((entry) => {
+                          const isSelected = selectedCatalogEntryId === entry.id;
+                          const imgUrl = entry.nobbNumber ? buildNobbImageUrl(entry.nobbNumber, "SQUARE") : "";
+
+                          return (
+                            <li key={entry.id}>
+                              <button
+                                type="button"
+                                onClick={() => setSelectedCatalogEntryId(entry.id)}
+                                className={`group flex w-full items-start gap-3 rounded-md border p-2.5 text-left transition ${
+                                  isSelected
+                                    ? "border-stone-900 bg-stone-900/[0.03] ring-2 ring-stone-900"
+                                    : "border-stone-200 bg-white hover:border-stone-400 hover:bg-stone-50"
                                 }`}
                               >
-                                NOBB {entry.nobbNumber} · {entry.sectionTitle}
-                              </span>
-                            </span>
-                            <span
-                              className={`shrink-0 rounded-sm border px-1.5 py-0.5 text-[10px] font-semibold uppercase tracking-[0.06em] ${
-                                isSelected
-                                  ? "border-stone-500 text-stone-200"
-                                  : "border-stone-300 text-stone-500"
-                              }`}
-                            >
-                              {entry.category}
-                            </span>
-                          </button>
-                        );
-                      })}
+                                <div className="h-14 w-14 shrink-0 overflow-hidden rounded-sm border border-stone-200 bg-stone-50">
+                                  {imgUrl ? (
+                                    <img
+                                      src={imgUrl}
+                                      alt={entry.productName}
+                                      loading="lazy"
+                                      className="h-full w-full object-contain"
+                                    />
+                                  ) : (
+                                    <div className="flex h-full w-full items-center justify-center text-[9px] font-semibold uppercase text-stone-400">
+                                      IMG
+                                    </div>
+                                  )}
+                                </div>
+                                <div className="min-w-0 flex-1">
+                                  <p className="line-clamp-2 text-[13px] font-medium leading-tight text-stone-900">
+                                    {entry.productName}
+                                  </p>
+                                  <p className="mt-1 truncate text-[11px] text-stone-500">
+                                    NOBB {entry.nobbNumber} · {entry.supplierName}
+                                  </p>
+                                  <div className="mt-1.5 flex items-center justify-between gap-2">
+                                    <span className="rounded-full bg-stone-100 px-2 py-0.5 text-[10px] font-semibold text-stone-600">
+                                      {entry.category}
+                                    </span>
+                                    <span className="text-[12px] font-semibold text-stone-900">
+                                      {entry.unitPriceNok > 0 ? formatCurrency(entry.unitPriceNok) : "—"}
+                                    </span>
+                                  </div>
+                                </div>
+                              </button>
+                            </li>
+                          );
+                        })}
+                      </ul>
+                    ) : (
+                      <div className="flex h-[260px] flex-col items-center justify-center gap-2 rounded-md border border-dashed border-stone-200 bg-stone-50/60 px-4 text-center">
+                        <p className="text-[13px] font-medium text-stone-700">Ingen treff</p>
+                        <p className="text-[12px] text-stone-500">Prøv et annet søk eller velg en annen kategori.</p>
+                      </div>
+                    )}
+                    {filteredCatalogEntries.length > 80 ? (
+                      <p className="pt-2 text-center text-[11px] text-stone-500">
+                        Viser de 80 mest relevante. Forfin søket for å se flere.
+                      </p>
+                    ) : null}
+                  </div>
+
+                  {/* Footer */}
+                  <div className="flex items-center justify-between gap-3 border-t border-stone-200 bg-stone-50/60 px-5 py-3">
+                    <p className="min-w-0 truncate text-[12px] text-stone-600">
+                      {selectedCatalogEntry ? (
+                        <>
+                          <span className="font-semibold text-stone-900">Valgt:</span>{" "}
+                          {selectedCatalogEntry.productName}
+                        </>
+                      ) : (
+                        <span className="text-stone-500">Velg et produkt for å legge det til</span>
+                      )}
+                    </p>
+                    <div className="flex items-center gap-2">
+                      <button
+                        type="button"
+                        onClick={() => setAddMenuOpen(false)}
+                        className="inline-flex h-9 items-center rounded-sm border border-stone-200 bg-white px-3 text-[13px] font-semibold text-stone-700 transition hover:border-stone-900 hover:text-stone-900"
+                      >
+                        Avbryt
+                      </button>
+                      <button
+                        type="button"
+                        onClick={addCatalogProduct}
+                        disabled={!selectedCatalogEntryId || filteredCatalogEntries.length === 0}
+                        className="inline-flex h-9 items-center gap-1.5 rounded-sm border border-stone-900 bg-stone-900 px-3.5 text-[13px] font-semibold text-white transition hover:bg-stone-800 disabled:cursor-not-allowed disabled:border-stone-300 disabled:bg-stone-300"
+                      >
+                        <PlusIcon /> Legg til
+                      </button>
                     </div>
                   </div>
-                ) : (
-                  <p className="rounded-sm border border-dashed border-stone-300 px-3 py-2 text-sm text-stone-500">
-                    Ingen treff med valgt søk/filter.
-                  </p>
-                )}
+                </div>
+              ) : (
+                <div className="flex flex-col">
+                  <div className="space-y-3 px-5 py-5">
+                    <div>
+                      <label className="text-[11px] font-semibold uppercase tracking-[0.12em] text-stone-500">
+                        Produktlenke
+                      </label>
+                      <div className="relative mt-1.5">
+                        <span className="pointer-events-none absolute inset-y-0 left-3 flex items-center text-stone-400" aria-hidden>
+                          <LinkIcon />
+                        </span>
+                        <input
+                          autoFocus
+                          value={webProductDraft.url}
+                          onChange={(event) =>
+                            setWebProductDraft((current) => ({
+                              ...current,
+                              url: event.target.value,
+                              error: "",
+                            }))
+                          }
+                          placeholder="https://"
+                          className="h-10 w-full rounded-sm border border-stone-200 bg-white pl-9 pr-3 text-[13px] text-stone-900 outline-none focus:border-stone-900"
+                        />
+                      </div>
+                      <p className="mt-2 text-[12px] text-stone-500">
+                        Lim inn lenken til et produkt fra en byggevareforhandler. AI analyserer siden og foreslår oppføringen.
+                      </p>
+                    </div>
 
-                {selectedCatalogEntry ? (
-                  <p className="rounded-sm border border-stone-200 bg-stone-50 px-2.5 py-2 text-[11px] text-stone-600">
-                    Valgt: {selectedCatalogEntry.productName} · NOBB {selectedCatalogEntry.nobbNumber}
-                  </p>
-                ) : null}
-                <button
-                  type="button"
-                  onClick={addCatalogProduct}
-                  disabled={!selectedCatalogEntryId || filteredCatalogEntries.length === 0}
-                  className="h-9 rounded-sm border border-stone-900 bg-stone-900 px-3 text-sm font-semibold text-white transition hover:bg-stone-800 disabled:cursor-not-allowed disabled:border-stone-400 disabled:bg-stone-400"
-                >
-                  Legg til fra katalog
-                </button>
-              </div>
-            ) : (
-              <div className="space-y-2">
-                <p className="text-xs text-stone-600">
-                  Lim inn produktlenke. Deretter analyseres nettsiden i egen dialog med AI.
-                </p>
-                <input
-                  value={webProductDraft.url}
-                  onChange={(event) =>
-                    setWebProductDraft((current) => ({
-                      ...current,
-                      url: event.target.value,
-                      error: "",
-                    }))
-                  }
-                  placeholder="https://..."
-                  className="h-9 w-full border border-stone-300 bg-white px-2 text-sm text-stone-900 outline-none focus:border-stone-900"
-                />
-
-                {webProductDraft.error ? (
-                  <p className="rounded-sm border border-rose-200 bg-rose-50 px-2.5 py-2 text-xs text-rose-700">
-                    {webProductDraft.error}
-                  </p>
-                ) : null}
-
-                <button
-                  type="button"
-                  onClick={() => void analyzeWebProduct()}
-                  className="h-9 border border-stone-900 bg-stone-900 px-3 text-sm font-semibold text-white transition hover:bg-stone-800"
-                >
-                  Analyser produktlenke
-                </button>
-              </div>
-            )}
+                    {webProductDraft.error ? (
+                      <p className="rounded-sm border border-rose-200 bg-rose-50 px-3 py-2 text-[12px] text-rose-700">
+                        {webProductDraft.error}
+                      </p>
+                    ) : null}
+                  </div>
+                  <div className="flex items-center justify-end gap-2 border-t border-stone-200 bg-stone-50/60 px-5 py-3">
+                    <button
+                      type="button"
+                      onClick={() => setAddMenuOpen(false)}
+                      className="inline-flex h-9 items-center rounded-sm border border-stone-200 bg-white px-3 text-[13px] font-semibold text-stone-700 transition hover:border-stone-900 hover:text-stone-900"
+                    >
+                      Avbryt
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => void analyzeWebProduct()}
+                      className="inline-flex h-9 items-center gap-1.5 rounded-sm border border-stone-900 bg-stone-900 px-3.5 text-[13px] font-semibold text-white transition hover:bg-stone-800"
+                    >
+                      Analyser lenke
+                    </button>
+                  </div>
+                </div>
+              )}
             </div>
-          </>
+          </div>
         ) : null}
       </div>
 
@@ -847,15 +967,25 @@ export function MaterialListDocument({
         const isDropTarget = dragOverSectionIndex === sectionIndex;
 
         return (
-          <section key={section.title} className={sectionIndex > 0 ? "border-t border-stone-300" : undefined}>
+          <section key={section.title} className={sectionIndex > 0 ? "border-t border-stone-200" : undefined}>
             <button
               type="button"
               onClick={() => toggleSection(sectionIndex)}
-              className="flex w-full items-center justify-between gap-3 border-b border-stone-300 bg-stone-100 px-3 py-2 text-left transition hover:bg-stone-200"
+              className="flex w-full items-center gap-3 border-b border-stone-200 bg-white px-4 py-2.5 text-left transition hover:bg-stone-50"
             >
-              <p className="pr-2 text-sm font-semibold text-stone-900">{section.title}</p>
-              <span className={`text-xs font-semibold text-stone-600 transition ${isOpen ? "rotate-180" : ""}`}>
-                ▼
+              <span
+                className={`inline-flex h-5 w-5 items-center justify-center rounded-sm bg-stone-100 text-stone-600 transition ${
+                  isOpen ? "rotate-180" : ""
+                }`}
+                aria-hidden
+              >
+                <ChevronIcon />
+              </span>
+              <p className="flex-1 text-[11px] font-semibold uppercase tracking-[0.12em] text-stone-700">
+                {section.title}
+              </p>
+              <span className="rounded-full bg-stone-100 px-2 py-0.5 text-[10px] font-semibold text-stone-600">
+                {section.items.length}
               </span>
             </button>
 
@@ -881,39 +1011,43 @@ export function MaterialListDocument({
                 }}
               >
                 <div className="overflow-x-auto">
-                  <table className="w-full min-w-[700px] border-collapse text-[13px]">
+                  <table className="w-full min-w-[640px] border-collapse text-[13px]">
                     <colgroup>
-                      <col className="w-[50%]" />
-                      <col className="w-[14%]" />
-                      <col className="w-[36%]" />
+                      <col className="w-[58%]" />
+                      <col className="w-[18%]" />
+                      <col className="w-[24%]" />
                     </colgroup>
                     <thead>
-                      <tr className="bg-stone-50 text-[10px] font-semibold uppercase tracking-[0.1em] text-stone-600">
-                        <th className="border border-stone-300 px-2.5 py-1.5 text-left">Produktnavn</th>
-                        <th className="border border-stone-300 px-2.5 py-1.5 text-left">Mengde</th>
-                        <th className="border border-stone-300 px-2.5 py-1.5 text-left">Kommentar</th>
+                      <tr className="text-[10px] font-semibold uppercase tracking-[0.12em] text-stone-500">
+                        <th className="border-b border-stone-200 px-3 py-2 text-left">Produkt</th>
+                        <th className="border-b border-stone-200 px-3 py-2 text-left">Mengde</th>
+                        <th className="border-b border-stone-200 px-3 py-2 text-right" aria-label="Handlinger" />
                       </tr>
                     </thead>
                     <tbody>
                       {section.items.length > 0 ? (
-                        section.items.map((row, itemIndex) => (
-                          <tr
-                            key={row.id}
-                            draggable={!readOnly}
-                            onDragStart={() => {
-                              if (!readOnly) {
-                                setDragSource({ sectionIndex, itemIndex });
-                              }
-                            }}
-                            onDragEnd={() => {
-                              setDragSource(null);
-                              setDragOverSectionIndex(null);
-                            }}
-                            className={`${readOnly ? "" : "cursor-move"} border-b border-stone-200 align-top`}
-                          >
-                            <td className="border border-stone-300 px-2.5 py-1.5 align-top">
-                              <div className="flex items-start justify-between gap-2">
-                                <div className="flex min-w-0 flex-1 items-start gap-2.5">
+                        section.items.flatMap((row, itemIndex) => {
+                          const isExpanded = alternativesRowId === row.id;
+
+                          const baseRow = (
+                            <tr
+                              key={row.id}
+                              draggable={!readOnly}
+                              onDragStart={() => {
+                                if (!readOnly) {
+                                  setDragSource({ sectionIndex, itemIndex });
+                                }
+                              }}
+                              onDragEnd={() => {
+                                setDragSource(null);
+                                setDragOverSectionIndex(null);
+                              }}
+                              className={`${readOnly ? "" : "cursor-move"} ${
+                                isExpanded ? "bg-stone-50/60" : "bg-white hover:bg-stone-50/40"
+                              } align-top transition-colors`}
+                            >
+                              <td className="border-b border-stone-100 px-3 py-2.5 align-top">
+                                <div className="flex min-w-0 items-start gap-3">
                                   <NobbProductThumbnail
                                     nobbNumber={row.nobbNumber}
                                     imageUrl={row.imageUrl}
@@ -929,7 +1063,7 @@ export function MaterialListDocument({
                                         onChange={(event) =>
                                           updateCustomField(sectionIndex, itemIndex, "productName", event.target.value)
                                         }
-                                        className="h-8 w-full rounded-sm border border-stone-300 bg-white px-2 text-[13px] text-stone-900 outline-none focus:border-stone-900"
+                                        className="h-8 w-full rounded-sm border border-stone-300 bg-white px-2 text-[13px] font-medium text-stone-900 outline-none focus:border-stone-900"
                                       />
                                     ) : (
                                       <>
@@ -939,7 +1073,7 @@ export function MaterialListDocument({
                                             target="_blank"
                                             rel="noreferrer"
                                             title={row.productName}
-                                            className="block w-full truncate text-left text-[13px] text-stone-900 underline underline-offset-2 hover:text-[var(--danger)]"
+                                            className="block w-full truncate text-left text-[13px] font-medium text-stone-900 hover:text-stone-600"
                                           >
                                             {row.productName}
                                           </a>
@@ -949,82 +1083,131 @@ export function MaterialListDocument({
                                             target="_blank"
                                             rel="noreferrer"
                                             title={row.productName}
-                                            className="block w-full truncate text-left text-[13px] text-stone-900 underline underline-offset-2 hover:text-[var(--danger)]"
+                                            className="block w-full truncate text-left text-[13px] font-medium text-stone-900 hover:text-stone-600"
                                           >
                                             {row.productName}
                                           </a>
                                         ) : (
-                                          <p title={row.productName} className="truncate text-[13px] text-stone-900">
+                                          <p title={row.productName} className="truncate text-[13px] font-medium text-stone-900">
                                             {row.productName}
                                           </p>
                                         )}
                                       </>
                                     )}
-                                    <p className="mt-0.5 truncate text-[10px] text-stone-500">
-                                      {row.nobbNumber ? `NOBB ${row.nobbNumber}` : "Ingen NOBB"} ·{" "}
-                                      {row.supplierName ?? "Prosjektdata"}
+                                    <p className="mt-0.5 truncate text-[11px] text-stone-500">
+                                      {row.nobbNumber ? `NOBB ${row.nobbNumber}` : "Ingen NOBB"}
+                                      {row.supplierName ? ` · ${row.supplierName}` : ""}
+                                      {typeof row.unitPriceNok === "number" && row.unitPriceNok > 0
+                                        ? ` · ${formatCurrency(row.unitPriceNok)}`
+                                        : ""}
                                     </p>
+                                    <CommentLine
+                                      comment={row.comment}
+                                      readOnly={readOnly}
+                                      onClick={() =>
+                                        setCommentDialog({
+                                          sectionIndex,
+                                          itemIndex,
+                                          sectionTitle: section.title,
+                                          row,
+                                          comment: row.comment,
+                                        })
+                                      }
+                                    />
                                   </div>
                                 </div>
-                                {!readOnly ? (
+                              </td>
+                              <td className="border-b border-stone-100 px-3 py-2.5 align-top">
+                                <div className="flex min-h-8 min-w-[110px] items-center gap-1.5">
+                                  {(allowQuantityEdit || row.customEditable) && !readOnly ? (
+                                    <input
+                                      value={row.quantity}
+                                      onChange={(event) => updateQuantity(sectionIndex, itemIndex, event.target.value)}
+                                      className="h-8 w-full rounded-sm border border-stone-300 bg-white px-2 text-[13px] text-stone-900 outline-none focus:border-stone-900"
+                                    />
+                                  ) : (
+                                    <span className="truncate text-[13px] font-medium text-stone-900" title={row.quantity}>
+                                      {row.quantity}
+                                    </span>
+                                  )}
                                   <button
                                     type="button"
-                                    onClick={() => removeRow(sectionIndex, itemIndex)}
-                                    className="h-7 rounded-sm border border-stone-300 bg-white px-2 text-[11px] font-semibold text-stone-700 transition hover:border-[var(--danger)] hover:text-[var(--danger)]"
+                                    onClick={() => setQuantityDialog({ sectionTitle: section.title, row })}
+                                    className="inline-flex h-6 w-6 shrink-0 items-center justify-center rounded-sm text-stone-400 transition hover:bg-stone-100 hover:text-stone-700"
+                                    title="Begrunnelse for mengdeberegning"
+                                    aria-label="Vis begrunnelse for mengde"
                                   >
-                                    Fjern
+                                    <InfoIcon />
                                   </button>
-                                ) : null}
-                              </div>
-                            </td>
-                            <td className="border border-stone-300 px-2.5 py-1.5 align-top">
-                              <div className="flex min-h-8 min-w-[120px] items-center gap-1.5">
-                                {(allowQuantityEdit || row.customEditable) && !readOnly ? (
-                                  <input
-                                    value={row.quantity}
-                                    onChange={(event) => updateQuantity(sectionIndex, itemIndex, event.target.value)}
-                                    className="h-8 w-full rounded-sm border border-stone-300 bg-white px-2 text-[13px] text-stone-900 outline-none focus:border-stone-900"
-                                  />
-                                ) : (
-                                  <span className="truncate text-[13px] text-stone-900" title={row.quantity}>
-                                    {row.quantity}
-                                  </span>
-                                )}
-                                <button
-                                  type="button"
-                                  onClick={() => setQuantityDialog({ sectionTitle: section.title, row })}
-                                  className="inline-flex h-6 w-6 shrink-0 items-center justify-center rounded-sm border border-stone-300 text-stone-600 transition hover:border-stone-900 hover:text-stone-900"
-                                  title="Begrunnelse for mengdeberegning"
-                                  aria-label="Vis begrunnelse for mengde"
-                                >
-                                  <InfoIcon />
-                                </button>
-                              </div>
-                            </td>
-                            <td className="border border-stone-300 px-2.5 py-1.5 align-top">
-                              <button
-                                type="button"
-                                onClick={() =>
-                                  setCommentDialog({
-                                    sectionIndex,
-                                    itemIndex,
-                                    sectionTitle: section.title,
-                                    row,
-                                    comment: row.comment,
-                                  })
-                                }
-                                className="min-h-8 min-w-[220px] py-1 text-left text-[13px] text-stone-700 underline decoration-dotted underline-offset-2 transition hover:text-stone-900"
-                                title={row.comment ? "Vis full kommentar" : "Legg til kommentar"}
-                              >
-                                {row.comment || (!readOnly ? "Legg til kommentar" : "-")}
-                              </button>
-                            </td>
-                          </tr>
-                        ))
+                                </div>
+                              </td>
+                              <td className="border-b border-stone-100 px-3 py-2.5 align-top">
+                                <div className="flex items-center justify-end gap-1">
+                                  {!readOnly ? (
+                                    <button
+                                      type="button"
+                                      onClick={() =>
+                                        setAlternativesRowId((current) =>
+                                          current === row.id ? null : row.id,
+                                        )
+                                      }
+                                      className={`inline-flex h-8 items-center gap-1.5 rounded-sm border px-2.5 text-[11px] font-semibold transition ${
+                                        isExpanded
+                                          ? "border-stone-900 bg-stone-900 text-white"
+                                          : "border-stone-300 bg-white text-stone-700 hover:border-stone-900 hover:text-stone-900"
+                                      }`}
+                                      title="Se alternative produkter i samme kategori"
+                                      aria-expanded={isExpanded}
+                                    >
+                                      <SwapIcon />
+                                      <span className="hidden sm:inline">Alternativer</span>
+                                    </button>
+                                  ) : null}
+                                  {!readOnly ? (
+                                    <button
+                                      type="button"
+                                      onClick={() => removeRow(sectionIndex, itemIndex)}
+                                      className="inline-flex h-8 w-8 items-center justify-center rounded-sm border border-transparent text-stone-400 transition hover:border-rose-200 hover:bg-rose-50 hover:text-rose-600"
+                                      title="Fjern produkt"
+                                      aria-label="Fjern produkt"
+                                    >
+                                      <TrashIcon />
+                                    </button>
+                                  ) : null}
+                                </div>
+                              </td>
+                            </tr>
+                          );
+
+                          if (!isExpanded) {
+                            return [baseRow];
+                          }
+
+                          const expandedRow = (
+                            <tr key={`${row.id}-alts`} className="bg-stone-50">
+                              <td colSpan={3} className="border-b border-stone-200 px-3 py-3">
+                                <AlternativesPanel
+                                  current={row}
+                                  sectionTitle={section.title}
+                                  catalogEntries={catalogEntries}
+                                  onClose={() => setAlternativesRowId(null)}
+                                  onSelect={(entry) =>
+                                    swapToAlternative(sectionIndex, itemIndex, entry)
+                                  }
+                                  onPreviewImage={(preview) =>
+                                    setImagePreviewDialog(preview)
+                                  }
+                                />
+                              </td>
+                            </tr>
+                          );
+
+                          return [baseRow, expandedRow];
+                        })
                       ) : (
                         <tr>
-                          <td colSpan={3} className="border border-stone-300 px-2 py-2 text-sm text-stone-500">
-                            Ingen produkter i kategorien. Dra produkter hit eller bruk LEGG TIL.
+                          <td colSpan={3} className="px-3 py-4 text-center text-sm text-stone-500">
+                            Ingen produkter i kategorien. Dra produkter hit eller bruk Legg til.
                           </td>
                         </tr>
                       )}
@@ -1455,6 +1638,109 @@ function buildNobbImageUrl(nobbNumber: string, imageSize: "SQUARE" | "ORIGINAL")
   return `https://export.byggtjeneste.no/api/v1/media/images/items/${encodeURIComponent(nobbNumber)}/${imageSize}`;
 }
 
+function findAlternatives(
+  row: MaterialRow,
+  sectionTitle: string,
+  catalogEntries: MaterialCatalogEntry[],
+  options?: { searchTerm?: string; limit?: number },
+) {
+  const searchTerm = (options?.searchTerm ?? "").trim().toLowerCase();
+  const limit = options?.limit ?? 30;
+
+  const rowCategory = (row.category ?? "").trim().toLowerCase();
+  const sectionKey = sectionTitle.trim().toLowerCase();
+  const rowTokens = extractProductTokens(row.productName);
+  const primaryToken = rowTokens[0] ?? "";
+
+  const sameCategory = catalogEntries.filter((entry) => {
+    if (row.nobbNumber && entry.nobbNumber === row.nobbNumber) {
+      return false;
+    }
+
+    if (rowCategory) {
+      return entry.category.trim().toLowerCase() === rowCategory;
+    }
+
+    return entry.sectionTitle.trim().toLowerCase() === sectionKey;
+  });
+
+  const scored = sameCategory
+    .map((entry) => {
+      const entryTokens = extractProductTokens(entry.productName);
+      const overlap = rowTokens.filter((token) => entryTokens.includes(token)).length;
+      const matchesPrimary = primaryToken.length > 0 && entryTokens.includes(primaryToken);
+
+      return { entry, score: overlap, matchesPrimary, entryTokens };
+    })
+    // Require sharing the leading product-type token when one exists.
+    // Falls back to overlap > 0 when no primary token could be derived.
+    .filter((candidate) => {
+      if (primaryToken) {
+        return candidate.matchesPrimary;
+      }
+      return candidate.score > 0;
+    });
+
+  const filtered = searchTerm
+    ? scored.filter(({ entry }) => {
+        const haystack = [
+          entry.productName,
+          entry.nobbNumber,
+          entry.supplierName,
+          entry.category,
+        ]
+          .join(" ")
+          .toLowerCase();
+        return haystack.includes(searchTerm);
+      })
+    : scored;
+
+  return filtered
+    .sort((a, b) => {
+      if (b.score !== a.score) {
+        return b.score - a.score;
+      }
+      const priceA = Number.isFinite(a.entry.unitPriceNok) ? a.entry.unitPriceNok : Number.POSITIVE_INFINITY;
+      const priceB = Number.isFinite(b.entry.unitPriceNok) ? b.entry.unitPriceNok : Number.POSITIVE_INFINITY;
+      return priceA - priceB;
+    })
+    .slice(0, limit)
+    .map(({ entry }) => entry);
+}
+
+const PRODUCT_STOPWORDS = new Set([
+  "med",
+  "uten",
+  "for",
+  "til",
+  "som",
+  "stk",
+  "pak",
+  "set",
+  "ubh",
+  "obh",
+  "ny",
+  "gr",
+  "lm",
+  "tk",
+]);
+
+function extractProductTokens(productName: string) {
+  return productName
+    .toLowerCase()
+    .split(/[^a-z0-9æøå]+/i)
+    .map((token) => token.trim())
+    .filter((token) => {
+      if (token.length < 3) return false;
+      if (/^\d+$/.test(token)) return false;
+      // Drop dimension-like tokens such as "1x25m", "120x30", "18mm"
+      if (/^\d+[a-z]/i.test(token)) return false;
+      if (/^[a-z]\d+/i.test(token)) return false;
+      if (PRODUCT_STOPWORDS.has(token)) return false;
+      return true;
+    });
+}
+
 function mapSectionsToDocument(
   sections: MaterialSection[],
   catalogEntries: MaterialCatalogEntry[],
@@ -1488,6 +1774,7 @@ function mapSectionsToDocument(
         ...(item.imageUrl ? { imageUrl: item.imageUrl } : {}),
         supplierName: item.supplierName || catalogMatch?.supplierName,
         unitPriceNok: item.unitPriceNok ?? catalogMatch?.unitPriceNok,
+        category: catalogMatch?.category,
         source: hasWebMetadata ? "web" : "generated",
         customEditable: hasWebMetadata || hasCustomSection,
       };
@@ -1646,5 +1933,273 @@ function InfoIcon() {
       <circle cx="10" cy="6" r="1" fill="currentColor" />
       <path d="M10 8.8V13" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" />
     </svg>
+  );
+}
+
+function SwapIcon() {
+  return (
+    <svg viewBox="0 0 20 20" fill="none" aria-hidden="true" className="h-3.5 w-3.5">
+      <path d="M5 7h10l-2.5-2.5" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round" />
+      <path d="M15 13H5l2.5 2.5" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round" />
+    </svg>
+  );
+}
+
+function TrashIcon() {
+  return (
+    <svg viewBox="0 0 20 20" fill="none" aria-hidden="true" className="h-4 w-4">
+      <path d="M4 6h12M8.5 6V4.5h3V6M6.5 6v9.5a1 1 0 0 0 1 1h5a1 1 0 0 0 1-1V6" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round" />
+    </svg>
+  );
+}
+
+function PlusIcon() {
+  return (
+    <svg viewBox="0 0 20 20" fill="none" aria-hidden="true" className="h-3.5 w-3.5">
+      <path d="M10 4v12M4 10h12" stroke="currentColor" strokeWidth="2" strokeLinecap="round" />
+    </svg>
+  );
+}
+
+function ChevronIcon() {
+  return (
+    <svg viewBox="0 0 20 20" fill="none" aria-hidden="true" className="h-3 w-3">
+      <path d="M5 8l5 5 5-5" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" />
+    </svg>
+  );
+}
+
+function CommentLine({
+  comment,
+  readOnly,
+  onClick,
+}: {
+  comment: string;
+  readOnly: boolean;
+  onClick: () => void;
+}) {
+  if (!comment && readOnly) {
+    return null;
+  }
+
+  if (!comment) {
+    return (
+      <button
+        type="button"
+        onClick={onClick}
+        className="mt-1 inline-flex items-center gap-1 text-[11px] text-stone-400 transition hover:text-stone-700"
+      >
+        <span aria-hidden>＋</span>
+        <span>Legg til kommentar</span>
+      </button>
+    );
+  }
+
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      title={comment}
+      disabled={readOnly}
+      className="mt-1 flex max-w-full items-start gap-1.5 text-left text-[11px] leading-4 text-stone-600 transition hover:text-stone-900 disabled:cursor-default disabled:hover:text-stone-600"
+    >
+      <span aria-hidden className="mt-0.5 inline-block h-1 w-1 shrink-0 rounded-full bg-amber-500" />
+      <span className="line-clamp-2">{comment}</span>
+    </button>
+  );
+}
+
+function AlternativesPanel({
+  current,
+  sectionTitle,
+  catalogEntries,
+  onClose,
+  onSelect,
+  onPreviewImage,
+}: {
+  current: MaterialRow;
+  sectionTitle: string;
+  catalogEntries: MaterialCatalogEntry[];
+  onClose: () => void;
+  onSelect: (entry: MaterialCatalogEntry) => void;
+  onPreviewImage: (preview: ImagePreviewDialogState) => void;
+}) {
+  const [searchTerm, setSearchTerm] = useState("");
+
+  const alternatives = useMemo(
+    () =>
+      findAlternatives(current, sectionTitle, catalogEntries, {
+        searchTerm,
+        limit: 30,
+      }),
+    [catalogEntries, current, sectionTitle, searchTerm],
+  );
+
+  const headerLabel = current.category || sectionTitle || "Lignende produkter";
+
+  return (
+    <div className="rounded-md border border-stone-200 bg-white shadow-sm">
+      <div className="flex items-start justify-between gap-3 border-b border-stone-100 px-3 py-2.5">
+        <div className="min-w-0">
+          <p className="text-[10px] font-semibold uppercase tracking-[0.12em] text-stone-500">
+            Lignende produkter
+          </p>
+          <p className="mt-0.5 truncate text-[12px] text-stone-700">
+            <span className="font-medium">{headerLabel}</span>
+          </p>
+        </div>
+        <button
+          type="button"
+          onClick={onClose}
+          className="inline-flex h-7 items-center rounded-sm border border-stone-200 bg-white px-2 text-[11px] font-semibold text-stone-600 transition hover:border-stone-900 hover:text-stone-900"
+        >
+          Lukk
+        </button>
+      </div>
+      <div className="border-b border-stone-100 px-3 py-2">
+        <div className="relative">
+          <span className="pointer-events-none absolute inset-y-0 left-2.5 flex items-center text-stone-400" aria-hidden>
+            <SearchIcon />
+          </span>
+          <input
+            value={searchTerm}
+            onChange={(event) => setSearchTerm(event.target.value)}
+            placeholder="Søk blant alternativer (navn, NOBB, leverandør)…"
+            className="h-9 w-full rounded-sm border border-stone-200 bg-white pl-8 pr-2 text-[13px] text-stone-900 outline-none focus:border-stone-900"
+          />
+        </div>
+      </div>
+      {alternatives.length === 0 ? (
+        <p className="px-3 py-4 text-center text-[12px] text-stone-500">
+          {searchTerm
+            ? `Ingen treff for «${searchTerm}».`
+            : `Fant ingen lignende produkter${current.category ? ` i kategorien «${current.category}»` : ""}.`}
+        </p>
+      ) : (
+        <ul className="max-h-[420px] divide-y divide-stone-100 overflow-y-auto">
+          {alternatives.map((entry) => {
+            const imgUrl = entry.nobbNumber ? buildNobbImageUrl(entry.nobbNumber, "SQUARE") : "";
+            const isCurrent = entry.nobbNumber === current.nobbNumber;
+            return (
+              <li
+                key={entry.id}
+                className="flex items-center gap-3 px-3 py-2 transition hover:bg-stone-50"
+              >
+                <button
+                  type="button"
+                  onClick={() =>
+                    onPreviewImage({
+                      productName: entry.productName,
+                      imageUrl: entry.nobbNumber ? buildNobbImageUrl(entry.nobbNumber, "ORIGINAL") : imgUrl,
+                      ...(entry.nobbNumber ? { nobbNumber: entry.nobbNumber } : {}),
+                    })
+                  }
+                  className="h-12 w-12 shrink-0 overflow-hidden rounded-sm border border-stone-200 bg-stone-50"
+                  title="Vis bilde"
+                  aria-label={`Vis bilde av ${entry.productName}`}
+                >
+                  {imgUrl ? (
+                    <img
+                      src={imgUrl}
+                      alt={entry.productName}
+                      loading="lazy"
+                      className="h-full w-full object-contain"
+                    />
+                  ) : (
+                    <div className="flex h-full w-full items-center justify-center text-[9px] font-semibold uppercase text-stone-400">
+                      IMG
+                    </div>
+                  )}
+                </button>
+                <div className="min-w-0 flex-1">
+                  <p className="truncate text-[13px] font-medium text-stone-900" title={entry.productName}>
+                    {entry.productName}
+                  </p>
+                  <p className="mt-0.5 truncate text-[11px] text-stone-500">
+                    NOBB {entry.nobbNumber} · {entry.supplierName}
+                  </p>
+                </div>
+                <div className="hidden text-right sm:block">
+                  <p className="text-[13px] font-semibold text-stone-900">
+                    {entry.unitPriceNok > 0 ? formatCurrency(entry.unitPriceNok) : "—"}
+                  </p>
+                  <p className="text-[10px] uppercase tracking-[0.1em] text-stone-400">stk-pris</p>
+                </div>
+                <button
+                  type="button"
+                  onClick={() => onSelect(entry)}
+                  disabled={isCurrent}
+                  className="inline-flex h-8 shrink-0 items-center rounded-sm border border-stone-900 bg-stone-900 px-2.5 text-[11px] font-semibold text-white transition hover:bg-stone-800 disabled:cursor-not-allowed disabled:border-stone-300 disabled:bg-stone-300"
+                >
+                  Bytt til denne
+                </button>
+              </li>
+            );
+          })}
+        </ul>
+      )}
+    </div>
+  );
+}
+
+function SearchIcon() {
+  return (
+    <svg viewBox="0 0 20 20" fill="none" aria-hidden="true" className="h-4 w-4">
+      <circle cx="9" cy="9" r="5.5" stroke="currentColor" strokeWidth="1.6" />
+      <path d="M13.5 13.5L17 17" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" />
+    </svg>
+  );
+}
+
+function CloseIcon() {
+  return (
+    <svg viewBox="0 0 20 20" fill="none" aria-hidden="true" className="h-4 w-4">
+      <path d="M5 5l10 10M15 5L5 15" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" />
+    </svg>
+  );
+}
+
+function CatalogIcon() {
+  return (
+    <svg viewBox="0 0 20 20" fill="none" aria-hidden="true" className="h-3.5 w-3.5">
+      <rect x="3" y="3.5" width="14" height="13" rx="1.5" stroke="currentColor" strokeWidth="1.6" />
+      <path d="M7 7h6M7 10h6M7 13h4" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" />
+    </svg>
+  );
+}
+
+function LinkIcon() {
+  return (
+    <svg viewBox="0 0 20 20" fill="none" aria-hidden="true" className="h-3.5 w-3.5">
+      <path d="M8 12l4-4M9 6h3a3 3 0 0 1 0 6h-1M11 14H8a3 3 0 0 1 0-6h1" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round" />
+    </svg>
+  );
+}
+
+function ModalTab({
+  active,
+  onClick,
+  children,
+}: {
+  active: boolean;
+  onClick: () => void;
+  children: React.ReactNode;
+}) {
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      className={`relative inline-flex items-center gap-1.5 px-3 pb-2.5 pt-1.5 text-[12px] font-semibold transition ${
+        active ? "text-stone-900" : "text-stone-500 hover:text-stone-800"
+      }`}
+    >
+      {children}
+      <span
+        className={`absolute inset-x-0 bottom-0 h-[2px] transition ${
+          active ? "bg-stone-900" : "bg-transparent"
+        }`}
+        aria-hidden
+      />
+    </button>
   );
 }

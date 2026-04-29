@@ -4,6 +4,8 @@ import { type FormEvent, type KeyboardEvent as ReactKeyboardEvent, useCallback, 
 import { useFormStatus } from "react-dom";
 import { CirclePlus } from "lucide-react";
 
+import { PENDING_MATERIAL_LIST_PRODUCTS_KEY } from "@/app/_components/storefront/add-to-material-list-button";
+
 type NewProjectDialogProps = {
   action: (formData: FormData) => void | Promise<void>;
   initialOpen?: boolean;
@@ -1099,6 +1101,40 @@ function DesiredProductsField() {
   const [webMessageTone, setWebMessageTone] = useState<"idle" | "success" | "error">("idle");
 
   const serializedDesiredProducts = useMemo(() => JSON.stringify(desiredProducts), [desiredProducts]);
+
+  useEffect(() => {
+    try {
+      const raw = window.sessionStorage.getItem(PENDING_MATERIAL_LIST_PRODUCTS_KEY);
+      if (!raw) return;
+
+      const parsed = JSON.parse(raw);
+      if (!Array.isArray(parsed)) return;
+
+      const pendingProducts = parsed
+        .filter((entry): entry is Omit<DesiredProductDraft, "id"> => {
+          return Boolean(
+            entry &&
+              typeof entry === "object" &&
+              (entry as DesiredProductDraft).source === "catalog" &&
+              typeof (entry as DesiredProductDraft).productName === "string" &&
+              typeof (entry as DesiredProductDraft).quantity === "string",
+          );
+        })
+        .map((entry) => ({
+          ...entry,
+          id: `catalog-${entry.nobbNumber || crypto.randomUUID()}`,
+        }));
+
+      if (pendingProducts.length > 0) {
+        setDesiredProducts((current) => [...pendingProducts, ...current]);
+        setActiveTab("catalog");
+      }
+
+      window.sessionStorage.removeItem(PENDING_MATERIAL_LIST_PRODUCTS_KEY);
+    } catch {
+      // Ignore malformed staged products; the dialog remains usable.
+    }
+  }, []);
 
   useEffect(() => {
     const needle = catalogQuery.trim();

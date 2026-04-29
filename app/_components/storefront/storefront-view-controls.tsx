@@ -8,9 +8,11 @@ import type { StorefrontSortOption } from "@/lib/storefront-types";
 export function StorefrontViewControls({
   initialSort,
   initialCols,
+  initialInStockOnly = false,
 }: {
   initialSort: StorefrontSortOption;
   initialCols: number;
+  initialInStockOnly?: boolean;
 }) {
   const pathname = usePathname();
   const router = useRouter();
@@ -18,8 +20,10 @@ export function StorefrontViewControls({
   const [isPending, startTransition] = useTransition();
   const sort = normalizeSortOption(searchParams.get("sort") ?? initialSort);
   const cols = normalizeGridColumns(searchParams.get("cols") ?? String(initialCols));
+  const inStockParam = searchParams.get("inStock");
+  const inStockOnly = inStockParam === null ? initialInStockOnly : inStockParam === "1";
 
-  function updateViewParam(key: "sort" | "cols", value: string) {
+  function updateViewParam(key: "sort" | "cols" | "inStock", value: string) {
     const nextParams = new URLSearchParams(searchParams.toString());
 
     if (value.trim().length > 0) {
@@ -40,6 +44,18 @@ export function StorefrontViewControls({
 
   return (
     <div className="flex flex-wrap items-center gap-3">
+      <label className="inline-flex h-9 cursor-pointer items-center gap-2 rounded-full border border-stone-300 bg-white px-3 text-sm font-semibold text-stone-700 transition hover:border-[#15452d] hover:text-[#15452d] has-disabled:cursor-wait has-disabled:bg-stone-50">
+        <input
+          type="checkbox"
+          checked={inStockOnly}
+          disabled={isPending}
+          onChange={(event) => updateViewParam("inStock", event.currentTarget.checked ? "1" : "")}
+          className="peer sr-only"
+        />
+        <span className="relative h-4 w-7 rounded-full bg-stone-300 transition after:absolute after:left-0.5 after:top-0.5 after:h-3 after:w-3 after:rounded-full after:bg-white after:shadow after:transition peer-checked:bg-[#15452d] peer-checked:after:translate-x-3 peer-focus-visible:outline peer-focus-visible:outline-2 peer-focus-visible:outline-offset-2 peer-focus-visible:outline-[#15452d]" />
+        <span>Vis kun på lager</span>
+      </label>
+
       <div className="flex items-center gap-2">
         <label htmlFor="sort" className="text-[11px] font-semibold uppercase tracking-[0.14em] text-stone-500">
           Sorter

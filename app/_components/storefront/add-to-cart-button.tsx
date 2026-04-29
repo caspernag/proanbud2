@@ -19,12 +19,12 @@ export function AddToCartButton({
   const [recentlyAdded, setRecentlyAdded] = useState(false);
 
   const base =
-    `inline-flex h-9 items-center justify-center gap-1.5 rounded-full px-3.5 text-[13px] font-semibold whitespace-nowrap transition active:scale-[0.97] ${fullWidth ? "w-full" : ""}`;
+    `inline-flex h-10 items-center justify-center gap-1.5 rounded-md px-3.5 text-[13px] font-semibold whitespace-nowrap shadow-sm transition active:scale-[0.98] ${fullWidth ? "w-full" : ""}`;
   const palette =
     tone === "primary"
       ? recentlyAdded
-        ? "bg-emerald-600 text-white shadow-[0_6px_16px_rgba(22,101,52,0.35)]"
-        : "bg-[#15452d] text-white shadow-[0_6px_16px_rgba(21,69,45,0.25)] hover:bg-[#0f321f]"
+        ? "bg-emerald-600 text-white"
+        : "bg-[#15452d] text-white hover:bg-[#0f321f]"
       : "border border-stone-300 bg-white text-stone-800 hover:border-[#15452d] hover:text-[#15452d]";
 
   return (

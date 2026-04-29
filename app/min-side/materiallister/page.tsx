@@ -190,7 +190,7 @@ function MaterialListCard({ row }: { row: Row }) {
         </Link>
         <Link
           href={orderHref}
-          className="inline-flex h-8 flex-1 items-center justify-center gap-1.5 rounded-md bg-[#0f271b] px-3 text-xs font-semibold text-white transition hover:bg-[#143527]"
+          className="inline-flex h-8 flex-1 items-center justify-center gap-1.5 rounded-md bg-[#0f271b] px-3 text-xs font-semibold text-white! transition hover:bg-[#143527]"
         >
           Bestill
           <ArrowUpRight className="h-3 w-3" />

@@ -4,7 +4,9 @@ import Image from "next/image";
 import Link from "next/link";
 import { usePathname, useSearchParams } from "next/navigation";
 
+import { StoreSelector } from "@/app/_components/storefront/store-selector";
 import { useStorefront } from "@/app/_components/storefront/storefront-provider";
+import type { StorefrontStoreOption } from "@/lib/storefront-store-selection";
 
 // Ekte kategorier fra prislistens Varekategori-felt. Bruker /?category=... (filter),
 // ikke /?q=... (søk). Filteret gjør case-insensitive includes-match, så korte navn
@@ -21,7 +23,13 @@ const TOP_CATEGORIES: Array<{ label: string; href: string; highlight?: boolean }
   { label: "Kledning", href: "/?category=Kledning" },
 ];
 
-export function StorefrontHeader() {
+export function StorefrontHeader({
+  stores,
+  selectedStoreId,
+}: {
+  stores: StorefrontStoreOption[];
+  selectedStoreId: string;
+}) {
   const pathname = usePathname();
   const searchParams = useSearchParams();
   const { totalQuantity } = useStorefront();
@@ -75,21 +83,6 @@ export function StorefrontHeader() {
           </span>
         </Link>
 
-        <Link
-          href="/min-side"
-          className="order-3 ml-auto hidden h-10 items-center rounded-md px-3 text-sm font-semibold text-stone-700 transition hover:bg-stone-100 hover:text-[#15452d] lg:inline-flex lg:ml-0"
-        >
-          Min side
-        </Link>
-
-        <Link
-          href="/min-side"
-          aria-label="Min side"
-          className="order-2 ml-auto inline-flex h-10 w-10 shrink-0 items-center justify-center rounded-md border border-stone-300 bg-white text-stone-600 transition hover:border-[#15452d] hover:text-[#15452d] sm:hidden"
-        >
-          <UserIcon />
-        </Link>
-
         <form
           action="/"
           className="order-4 flex min-w-0 flex-1 basis-full items-stretch overflow-hidden rounded-md border border-stone-300 bg-white shadow-sm focus-within:border-[#15452d] focus-within:ring-2 focus-within:ring-[#15452d]/20 sm:order-2 sm:basis-auto lg:order-2"
@@ -139,20 +132,23 @@ export function StorefrontHeader() {
       </div>
 
       <nav className="border-t border-stone-200 bg-white">
-        <div className="mx-auto flex w-full max-w-[1500px] items-center gap-1 overflow-x-auto px-3 py-1.5 text-sm scrollbar-none sm:px-6 lg:px-8">
-          {TOP_CATEGORIES.map((item) => (
-            <Link
-              key={item.label}
-              href={item.href}
-              className={`whitespace-nowrap rounded-md px-3 py-2 text-[13px] font-semibold transition ${
-                item.highlight
-                  ? "bg-[#c03a2b] text-white hover:bg-[#a32d22]"
-                  : "text-stone-700 hover:bg-stone-100 hover:text-stone-950"
-              }`}
-            >
-              {item.label}
-            </Link>
-          ))}
+        <div className="mx-auto flex w-full max-w-[1500px] items-center gap-2 px-3 py-1.5 text-sm sm:px-6 lg:px-8">
+          <div className="flex min-w-0 flex-1 items-center gap-1 overflow-x-auto scrollbar-none">
+            {TOP_CATEGORIES.map((item) => (
+              <Link
+                key={item.label}
+                href={item.href}
+                className={`whitespace-nowrap rounded-md px-3 py-2 text-[13px] font-semibold transition ${
+                  item.highlight
+                    ? "bg-[#c03a2b] text-white hover:bg-[#a32d22]"
+                    : "text-stone-700 hover:bg-stone-100 hover:text-stone-950"
+                }`}
+              >
+                {item.label}
+              </Link>
+            ))}
+          </div>
+          <StoreSelector stores={stores} selectedStoreId={selectedStoreId} variant="nav" />
         </div>
       </nav>
     </header>
@@ -182,11 +178,3 @@ function SearchIcon() {
   );
 }
 
-function UserIcon() {
-  return (
-    <svg viewBox="0 0 20 20" fill="none" stroke="currentColor" strokeWidth="1.8" className="h-4.5 w-4.5" aria-hidden="true">
-      <circle cx="10" cy="7" r="3.5" />
-      <path d="M3 17c0-3.3 3.1-6 7-6s7 2.7 7 6" strokeLinecap="round" />
-    </svg>
-  );
-}

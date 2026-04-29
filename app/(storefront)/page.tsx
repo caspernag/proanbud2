@@ -1,21 +1,39 @@
 import Link from "next/link";
+import { cookies } from "next/headers";
 import { Suspense } from "react";
 
+import { AddToMaterialListButton } from "@/app/_components/storefront/add-to-material-list-button";
 import { AddToCartButton } from "@/app/_components/storefront/add-to-cart-button";
 import { MobileFilterDrawer } from "@/app/_components/storefront/mobile-filter-drawer";
+import { StorefrontProfileTracker } from "@/app/_components/storefront/storefront-profile-tracker";
 import { StorefrontProductImage } from "@/app/_components/storefront/storefront-product-image";
 import { StorefrontViewControls } from "@/app/_components/storefront/storefront-view-controls";
-import { getByggmakkerAvailabilityBatch } from "@/lib/byggmakker-availability";
+import { getByggmakkerAvailabilityBatch, type ByggmakkerAvailability } from "@/lib/byggmakker-availability";
 import {
   getStorefrontImageUrl,
   getStorefrontProducts,
   getStorefrontProductsByNobb,
   queryStorefrontProducts,
 } from "@/lib/storefront";
+import {
+  STOREFRONT_SELECTED_STORE_COOKIE,
+  STOREFRONT_STORE_OPTIONS,
+} from "@/lib/storefront-store-selection";
+import { parseStorefrontUserProfileCookie, STOREFRONT_USER_PROFILE_COOKIE } from "@/lib/storefront-user-profile";
 import type { StorefrontProduct, StorefrontSortOption } from "@/lib/storefront-types";
 import { formatCurrency } from "@/lib/utils";
 
 type StockStatus = "in-stock" | "stores" | "backorder" | "unknown";
+type ProductStockInfo = {
+  status: StockStatus;
+  label: string;
+  detail?: string;
+};
+
+const UNKNOWN_PRODUCT_STOCK: ProductStockInfo = {
+  status: "unknown",
+  label: "Sjekk lager",
+};
 
 type StorefrontPageProps = {
   searchParams: Promise<Record<string, string | string[] | undefined>>;
@@ -95,10 +113,14 @@ const FEATURED_CATEGORIES: Array<{
 
 export default async function StorefrontPage({ searchParams }: StorefrontPageProps) {
   const resolvedSearchParams = await searchParams;
+  const cookieStore = await cookies();
+  const selectedStoreId = cookieStore.get(STOREFRONT_SELECTED_STORE_COOKIE)?.value ?? "";
+  const userProfile = parseStorefrontUserProfileCookie(cookieStore.get(STOREFRONT_USER_PROFILE_COOKIE)?.value);
   const q = typeof resolvedSearchParams.q === "string" ? resolvedSearchParams.q : "";
   const category = typeof resolvedSearchParams.category === "string" ? resolvedSearchParams.category : "";
   const supplier = typeof resolvedSearchParams.supplier === "string" ? resolvedSearchParams.supplier : "";
   const sort = normalizeSortOption(typeof resolvedSearchParams.sort === "string" ? resolvedSearchParams.sort : "");
+  const inStockOnly = resolvedSearchParams.inStock === "1";
   const page = typeof resolvedSearchParams.page === "string" ? Number.parseInt(resolvedSearchParams.page, 10) : 1;
   const cols = normalizeGridColumns(typeof resolvedSearchParams.cols === "string" ? resolvedSearchParams.cols : "");
 
@@ -107,10 +129,11 @@ export default async function StorefrontPage({ searchParams }: StorefrontPagePro
     category,
     supplier,
     sort,
+    userProfile,
     page: Number.isFinite(page) ? page : 1,
   });
 
-  const hasFilters = Boolean(q || category || supplier);
+  const hasFilters = Boolean(q || category || supplier || inStockOnly);
   const showLanding = !hasFilters && result.page === 1;
   const { products: allProducts } = showLanding
     ? await getStorefrontProducts()
@@ -120,10 +143,30 @@ export default async function StorefrontPage({ searchParams }: StorefrontPagePro
     ? resolveFeaturedCategories(result.categories, allProducts)
     : [];
 
-  // Batch-resolve real stock status for all visible products using the
-  // Byggmakker availability API with EANs sourced directly from the price list.
+  const selectedStoreName = selectedStoreId
+    ? STOREFRONT_STORE_OPTIONS.find((store) => store.id === selectedStoreId)?.name ?? "valgt butikk"
+    : "";
+  const stockFilterCandidates = inStockOnly
+    ? await queryStorefrontProducts({
+        q,
+        category,
+        supplier,
+        sort,
+        userProfile,
+        page: 1,
+        pageSize: Math.max(result.total, 1),
+        pageSizeLimit: Math.max(result.total, 1),
+      })
+    : null;
+  const stockCandidateItems = stockFilterCandidates?.items ?? [];
+
+  // Batch-resolve real stock status for all products that may be rendered or
+  // filtered using EANs sourced directly from the price list.
   const visibleEans = new Set<string>();
   for (const product of result.items) {
+    if (product.ean) visibleEans.add(product.ean);
+  }
+  for (const product of stockCandidateItems) {
     if (product.ean) visibleEans.add(product.ean);
   }
   for (const product of featuredDeals) {
@@ -132,25 +175,33 @@ export default async function StorefrontPage({ searchParams }: StorefrontPagePro
   const availabilityMap = visibleEans.size
     ? await getByggmakkerAvailabilityBatch(visibleEans)
     : new Map();
-  const stockByEan = new Map<string, StockStatus>();
+  const stockByEan = new Map<string, ProductStockInfo>();
   for (const [ean, info] of availabilityMap) {
-    const status: StockStatus = info.netAvailable
-      ? "in-stock"
-      : info.storeAvailable
-        ? "stores"
-        : "backorder";
-    stockByEan.set(ean, status);
+    stockByEan.set(ean, buildProductStockInfo(info, selectedStoreId, selectedStoreName));
   }
+  const stockFilteredItems = inStockOnly
+    ? stockCandidateItems.filter((product) => product.ean && isProductInStock(stockByEan.get(product.ean)))
+    : result.items;
+  const filteredTotal = inStockOnly ? stockFilteredItems.length : result.total;
+  const filteredTotalPages = Math.max(1, Math.ceil(filteredTotal / result.pageSize));
+  const filteredPage = inStockOnly ? Math.min(Math.max(1, page), filteredTotalPages) : result.page;
+  const displayItems = inStockOnly
+    ? stockFilteredItems.slice((filteredPage - 1) * result.pageSize, filteredPage * result.pageSize)
+    : result.items;
 
   return (
     <div className="space-y-6">
+      <StorefrontProfileTracker
+        search={{ q, category, supplier }}
+        visibleProducts={displayItems.map(mapProductForProfile).slice(0, 12)}
+      />
       {showLanding ? (
         <>
           <HeroSection total={result.total} />
           {featuredCategories.length > 0 ? (
             <CategoryTiles tiles={featuredCategories} counts={result.categoryCounts} />
           ) : null}
-          {featuredDeals.length > 0 ? <DealsStrip deals={featuredDeals} /> : null}
+          {featuredDeals.length > 0 ? <DealsStrip deals={featuredDeals} stockByEan={stockByEan} /> : null}
           <div className="hidden sm:block"><ValuePropsBand /></div>
         </>
       ) : null}
@@ -163,6 +214,7 @@ export default async function StorefrontPage({ searchParams }: StorefrontPagePro
             category={category}
             supplier={supplier}
             sort={sort}
+            inStockOnly={inStockOnly}
             cols={cols}
             categories={result.categories}
             categoryCounts={result.categoryCounts}
@@ -175,19 +227,20 @@ export default async function StorefrontPage({ searchParams }: StorefrontPagePro
         <div className="space-y-4">
           {/* Mobile filter drawer – only visible on mobile */}
           <div className="flex items-center justify-between lg:hidden">
-            <MobileFilterDrawer activeFiltersCount={(q ? 1 : 0) + (category ? 1 : 0) + (supplier ? 1 : 0)}>
+            <MobileFilterDrawer activeFiltersCount={(q ? 1 : 0) + (category ? 1 : 0) + (supplier ? 1 : 0) + (inStockOnly ? 1 : 0)}>
               <FilterPanel
                 q={q}
                 category={category}
                 supplier={supplier}
                 sort={sort}
+                inStockOnly={inStockOnly}
                 cols={cols}
                 categories={result.categories}
                 categoryCounts={result.categoryCounts}
                 priceRange={result.priceRange}
               />
             </MobileFilterDrawer>
-            <Suspense><StorefrontViewControls initialSort={sort} initialCols={cols} /></Suspense>
+            <Suspense><StorefrontViewControls initialSort={sort} initialCols={cols} initialInStockOnly={inStockOnly} /></Suspense>
           </div>
 
           <div className="flex flex-col gap-3 rounded-xl border border-stone-200 bg-white p-3 shadow-[0_8px_20px_rgba(32,25,15,0.04)] sm:flex-row sm:items-center sm:justify-between sm:p-4">
@@ -196,42 +249,43 @@ export default async function StorefrontPage({ searchParams }: StorefrontPagePro
                 {q ? `Søkeresultat for "${q}"` : category || supplier || "Alle produkter"}
               </p>
               <p className="text-sm text-stone-500">
-                {result.total.toLocaleString("nb-NO")} produkter
+                {filteredTotal.toLocaleString("nb-NO")} produkter
               </p>
             </div>
 
             <div className="hidden lg:block">
-              <Suspense><StorefrontViewControls initialSort={sort} initialCols={cols} /></Suspense>
+              <Suspense><StorefrontViewControls initialSort={sort} initialCols={cols} initialInStockOnly={inStockOnly} /></Suspense>
             </div>
           </div>
 
           {hasFilters ? (
-            <ActiveFilterChips q={q} category={category} supplier={supplier} sort={sort} cols={cols} />
+            <ActiveFilterChips q={q} category={category} supplier={supplier} sort={sort} inStockOnly={inStockOnly} cols={cols} />
           ) : null}
 
-          {result.items.length === 0 ? (
+          {displayItems.length === 0 ? (
             <EmptyState q={q} />
           ) : (
             <div className={getGridClasses(cols)}>
-              {result.items.map((product) => (
+              {displayItems.map((product) => (
                 <ProductCard
                   key={product.id}
                   product={product}
-                  stockStatus={product.ean ? stockByEan.get(product.ean) ?? "unknown" : "unknown"}
+                  stockInfo={product.ean ? stockByEan.get(product.ean) ?? UNKNOWN_PRODUCT_STOCK : UNKNOWN_PRODUCT_STOCK}
                 />
               ))}
             </div>
           )}
 
-          {result.totalPages > 1 ? (
+          {filteredTotalPages > 1 ? (
             <Pagination
               q={q}
               category={category}
               supplier={supplier}
               sort={sort}
+              inStockOnly={inStockOnly}
               cols={cols}
-              page={result.page}
-              totalPages={result.totalPages}
+              page={filteredPage}
+              totalPages={filteredTotalPages}
             />
           ) : null}
         </div>
@@ -242,45 +296,51 @@ export default async function StorefrontPage({ searchParams }: StorefrontPagePro
 
 function HeroSection({ total }: { total: number }) {
   return (
-    <section className="overflow-hidden rounded-xl border border-[#123321]/15 bg-[#123321] px-3 py-3 text-white shadow-[0_8px_20px_rgba(18,51,33,0.14)] sm:px-4">
-      <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+    <section className="border border-stone-200 bg-white px-4 py-3 shadow-[0_4px_16px_rgba(32,25,15,0.035)] sm:px-5 lg:px-6">
+      <div className="grid gap-4 xl:grid-cols-[minmax(0,1fr)_420px] xl:items-center">
         <div className="min-w-0">
-          <div className="flex flex-wrap items-center gap-2">
-            <span className="rounded-md bg-[#d9ff7a] px-2 py-1 text-[10px] font-bold uppercase tracking-[0.12em] text-[#123321]">
-              Partnerpris
-            </span>
-            <span className="text-xs font-semibold text-emerald-50/70">
-              {total.toLocaleString("nb-NO")} byggevarer
-            </span>
+          <div className="flex flex-wrap items-center gap-2 text-[11px] font-semibold uppercase tracking-[0.14em]">
+            <span className="rounded-sm bg-[#d9ff7a] px-2 py-1 text-[#123321]">Partnerpris</span>
+            <span className="text-stone-500">Innkjøpsflate for byggevarer</span>
           </div>
 
-          <h1 className="mt-1 text-xl font-semibold leading-tight text-white sm:text-2xl">
-            Proanbud gir deg byggevarer til proffpris.
+          <h1 className="mt-2 max-w-3xl text-xl font-semibold leading-tight text-stone-950 sm:text-2xl">
+            Proffpris på byggevarer, lagerstatus og handlekurv på ett sted.
           </h1>
-          <p className="mt-1 max-w-2xl text-xs leading-5 text-emerald-50/75 sm:text-sm">
-            Partneravtaler gir lavere pris på samme type varer som i byggevarehus.
+          <p className="mt-2 max-w-2xl text-sm leading-6 text-stone-600">
+            Finn varer fra prislisten, sjekk tilgjengelighet og legg produkter direkte i handlekurven.
           </p>
-        </div>
 
-        <div className="w-full rounded-lg border border-white/15 bg-white p-3 text-stone-900 shadow-[0_8px_18px_rgba(0,0,0,0.14)] sm:max-w-[300px]">
-          <div className="flex items-center justify-between gap-3">
-            <div>
-              <p className="text-[10px] font-bold uppercase tracking-[0.14em] text-stone-500">Typisk besparelse</p>
-              <p className="text-xl font-bold text-[#123321]">-20 til -60%</p>
-            </div>
-            <Link
-              href="/?sort=price_asc"
-              className="inline-flex h-9 shrink-0 items-center justify-center rounded-md bg-[#d9ff7a] px-3 text-xs font-bold text-[#123321]! transition hover:bg-[#cfff55]"
-            >
-              Se priser
+          <div className="mt-4 flex flex-wrap gap-2">
+            <Link href="/?inStock=1" className="inline-flex h-9 items-center justify-center rounded-md bg-[#15452d] px-4 text-sm font-semibold text-white! hover:bg-[#0f321f]">
+              Se varer på lager
+            </Link>
+            <Link href="/?sort=price_asc" className="inline-flex h-9 items-center justify-center rounded-md border border-stone-300 bg-white px-4 text-sm font-semibold text-stone-800 hover:border-[#15452d] hover:text-[#15452d]">
+              Laveste pris først
             </Link>
           </div>
-          <div className="mt-2 h-2 overflow-hidden rounded-full bg-stone-200">
-            <div className="h-full w-[52%] rounded-full bg-[#15452d]" />
+        </div>
+
+        <div className="grid grid-cols-3 gap-2 border-t border-stone-200 pt-3 xl:border-l xl:border-t-0 xl:pl-5 xl:pt-0">
+          <HeroMetric label="Varer" value={total.toLocaleString("nb-NO")} />
+          <HeroMetric label="Prisnivå" value="-20-60%" />
+          <HeroMetric label="Flyt" value="Kurv" />
+          <div className="col-span-3 flex items-center justify-between border-t border-stone-200 pt-3 text-xs text-stone-600">
+            <span>Pris inkl. mva, NOBB-data og Byggmakker-lagerstatus.</span>
+            <span className="font-semibold text-[#15452d]">Oppdatert</span>
           </div>
         </div>
       </div>
     </section>
+  );
+}
+
+function HeroMetric({ label, value }: { label: string; value: string }) {
+  return (
+    <div className="border border-stone-200 bg-stone-50 px-3 py-2">
+      <p className="text-[10px] font-semibold uppercase tracking-[0.14em] text-stone-500">{label}</p>
+      <p className="mt-1 text-base font-semibold text-stone-950">{value}</p>
+    </div>
   );
 }
 
@@ -295,17 +355,17 @@ function CategoryTiles({
     <section id="kategorier">
       <div className="mb-3 flex items-end justify-between">
         <div>
-          <p className="text-[11px] font-bold uppercase tracking-[0.16em] text-[#15452d]">Byggevarekategorier</p>
-          <h2 className="mt-1 text-xl font-semibold text-stone-900 sm:text-2xl">Handle etter kategori</h2>
+          <p className="text-[11px] font-bold uppercase tracking-[0.16em] text-[#15452d]">Kategorier</p>
+          <h2 className="mt-1 text-xl font-semibold text-stone-900">Finn riktig varegruppe</h2>
         </div>
         <Link href="/?sort=price_asc" className="hidden text-sm font-semibold text-[#15452d] hover:underline sm:inline">
           Alle varer →
         </Link>
       </div>
 
-      <div className="-mx-3 flex gap-3 overflow-x-auto scroll-smooth px-3 scrollbar-none sm:-mx-6 sm:px-6 lg:-mx-8 lg:px-8">
-        {tiles.map((tile, i) => (
-          <CategoryTile key={tile.label} tile={tile} count={counts[tile.category] ?? 0} featured={i === 0} priority={i < 2} />
+      <div className="grid gap-2 sm:grid-cols-2 lg:grid-cols-4">
+        {tiles.map((tile) => (
+          <CategoryTile key={tile.label} tile={tile} count={counts[tile.category] ?? 0} />
         ))}
       </div>
     </section>
@@ -315,47 +375,37 @@ function CategoryTiles({
 function CategoryTile({
   tile,
   count,
-  featured = false,
-  priority = false,
 }: {
   tile: { label: string; category: string; tone: string; imageUrl: string };
   count: number;
-  featured?: boolean;
-  priority?: boolean;
 }) {
   return (
     <Link
       href={`/?category=${encodeURIComponent(tile.category)}`}
-      className={`group relative shrink-0 overflow-hidden rounded-xl border border-stone-200 bg-gradient-to-br ${tile.tone} shadow-[0_8px_18px_rgba(32,25,15,0.08)] transition hover:-translate-y-0.5 hover:shadow-[0_16px_30px_rgba(21,69,45,0.15)] ${
-        featured ? "h-44 w-64 sm:h-52 sm:w-80" : priority ? "h-40 w-56 sm:h-48 sm:w-64" : "h-40 w-52 sm:h-44 sm:w-60"
-      }`}
+      className="group grid min-h-[126px] grid-cols-[minmax(0,1fr)_112px] overflow-hidden rounded-md border border-stone-200 bg-white shadow-[0_3px_12px_rgba(32,25,15,0.03)] transition hover:border-[#15452d] hover:shadow-[0_8px_18px_rgba(21,69,45,0.08)]"
     >
-      {/* Background product image */}
-      <div className="absolute inset-0 flex items-center justify-end pr-4 opacity-90 mix-blend-luminosity transition group-hover:opacity-100 group-hover:mix-blend-normal">
+      <div className="flex flex-col justify-between p-3.5">
+        <div>
+          <span className="inline-flex items-center rounded-sm bg-stone-100 px-2 py-0.5 text-[10px] font-semibold uppercase tracking-[0.12em] text-stone-600">
+            {count} varer
+          </span>
+          <p className="mt-2 text-base font-semibold leading-tight text-stone-950">
+            {tile.label}
+          </p>
+        </div>
+        <span className="mt-4 inline-flex items-center gap-1.5 text-sm font-semibold text-[#15452d]">
+          Åpne kategori
+          <svg viewBox="0 0 16 16" fill="currentColor" className="h-3.5 w-3.5 transition group-hover:translate-x-0.5"><path d="M3 8h9.59L9 4.41 10.41 3l6 6-6 6L9 13.59 12.59 10H3z" /></svg>
+        </span>
+      </div>
+      <div className="flex items-center justify-center border-l border-stone-100 bg-stone-50 p-2">
         {/* eslint-disable-next-line @next/next/no-img-element */}
         <img
           src={tile.imageUrl}
           alt=""
-          className="h-36 w-auto object-contain drop-shadow-[0_6px_14px_rgba(0,0,0,0.25)] transition duration-500 group-hover:scale-[1.05] sm:h-44"
+          className="h-full max-h-28 w-full object-contain transition duration-300 group-hover:scale-[1.04]"
           loading="lazy"
         />
-      </div>
-      {/* Dark overlay for readability */}
-      <div className="absolute inset-0 bg-gradient-to-r from-black/40 via-black/15 to-transparent" />
-
-      <div className="relative z-10 flex h-full flex-col justify-between p-4 text-white sm:p-5">
-        <div>
-          <span className="inline-flex items-center rounded-full bg-white/20 px-2 py-0.5 text-[10px] font-semibold uppercase tracking-[0.14em] backdrop-blur">
-            {count} varer
-          </span>
-          <p className={`mt-2 font-semibold leading-tight ${featured ? "text-lg sm:text-2xl" : "text-base sm:text-lg"}`}>
-            {tile.label}
-          </p>
-        </div>
-        <div className="flex items-center gap-1.5 text-sm font-semibold text-white">
-          Handle nå
-          <svg viewBox="0 0 16 16" fill="currentColor" className="h-3.5 w-3.5 transition group-hover:translate-x-0.5"><path d="M3 8h9.59L9 4.41 10.41 3l6 6-6 6L9 13.59 12.59 10H3z" /></svg>
-        </div>
       </div>
     </Link>
   );
@@ -418,10 +468,10 @@ function ValuePropsBand() {
     },
   ];
   return (
-    <section className="grid gap-3 rounded-xl border border-stone-200 bg-white p-4 shadow-[0_8px_20px_rgba(32,25,15,0.04)] sm:grid-cols-2 lg:grid-cols-5">
+    <section className="grid gap-0 border border-stone-200 bg-white sm:grid-cols-2 lg:grid-cols-5">
       {props.map((prop) => (
-        <div key={prop.title} className="flex items-start gap-3">
-          <span className="flex h-10 w-10 shrink-0 items-center justify-center rounded-lg bg-[#15452d]/10 text-[#15452d]">
+        <div key={prop.title} className="flex items-start gap-3 border-b border-stone-200 p-3 last:border-b-0 sm:border-r lg:border-b-0 lg:last:border-r-0">
+          <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-md bg-[#15452d]/10 text-[#15452d]">
             {prop.icon}
           </span>
           <div>
@@ -434,7 +484,7 @@ function ValuePropsBand() {
   );
 }
 
-function DealsStrip({ deals }: { deals: StorefrontProduct[] }) {
+function DealsStrip({ deals, stockByEan }: { deals: StorefrontProduct[]; stockByEan: Map<string, ProductStockInfo> }) {
   return (
     <section>
       <div className="mb-3 flex items-end justify-between">
@@ -458,10 +508,9 @@ function DealsStrip({ deals }: { deals: StorefrontProduct[] }) {
             ? Math.round(((product.listPriceNok - product.unitPriceNok) / product.listPriceNok) * 100)
             : 0;
           return (
-            <Link
+            <article
               key={product.id}
-              href={`/${product.slug}`}
-              className="group relative w-44 shrink-0 overflow-hidden rounded-xl border border-stone-200 bg-white shadow-[0_6px_16px_rgba(32,25,15,0.05)] transition hover:-translate-y-0.5 hover:border-[#15452d] sm:w-52"
+              className="group relative flex w-48 shrink-0 flex-col overflow-hidden rounded-xl border border-stone-200 bg-white shadow-[0_6px_16px_rgba(32,25,15,0.05)] transition hover:-translate-y-0.5 hover:border-[#15452d] sm:w-56"
             >
               {hasDiscount ? (
                 <span className="absolute left-2 top-2 z-10 inline-flex items-center rounded bg-[#c03a2b] px-2 py-0.5 text-[11px] font-semibold text-white shadow">
@@ -472,21 +521,33 @@ function DealsStrip({ deals }: { deals: StorefrontProduct[] }) {
                   Populær
                 </span>
               )}
-              <div className="flex h-32 items-center justify-center p-3">
-                <StorefrontProductImage
-                  src={getStorefrontImageUrl(product)}
-                  alt={product.productName}
-                  className="h-full w-full object-contain transition duration-300 group-hover:scale-[1.04]"
-                />
-              </div>
-              <div className="space-y-1 border-t border-stone-100 px-3 py-2.5">
-                <p className="line-clamp-2 text-[13px] font-semibold leading-4 text-stone-900">{product.productName}</p>
+              <Link href={`/${product.slug}`} className="block">
+                <div className="flex h-32 items-center justify-center p-3">
+                  <StorefrontProductImage
+                    src={getStorefrontImageUrl(product)}
+                    alt={product.productName}
+                    className="h-full w-full object-contain transition duration-300 group-hover:scale-[1.04]"
+                  />
+                </div>
+              </Link>
+              <div className="flex flex-1 flex-col space-y-2 border-t border-stone-100 px-3 py-2.5">
+                <Link href={`/${product.slug}`} className="line-clamp-2 text-[13px] font-semibold leading-4 text-stone-900 hover:text-[#15452d]">
+                  {product.productName}
+                </Link>
                 <div className="flex items-end gap-1.5">
                   <p className={`text-sm font-semibold ${hasDiscount ? "text-[#c03a2b]" : "text-stone-900"}`}>{formatCurrency(product.unitPriceNok)}</p>
                   {hasDiscount ? <p className="pb-0.5 text-[11px] text-stone-400 line-through">{formatCurrency(product.listPriceNok)}</p> : null}
                 </div>
+                <div className="flex min-w-0 items-center gap-1.5 text-[11px] text-stone-500">
+                  <StockChip stock={product.ean ? stockByEan.get(product.ean) ?? UNKNOWN_PRODUCT_STOCK : UNKNOWN_PRODUCT_STOCK} />
+                  <span className="truncate">per {formatUnitLabel(product.priceUnit ?? product.unit)}</span>
+                </div>
+                <div className="mt-auto grid grid-cols-[minmax(0,1fr)_auto] gap-2 pt-1">
+                  <AddToCartButton productId={product.id} fullWidth />
+                  <AddToMaterialListButton {...buildMaterialListProduct(product)} compact />
+                </div>
               </div>
-            </Link>
+            </article>
           );
         })}
       </div>
@@ -494,14 +555,17 @@ function DealsStrip({ deals }: { deals: StorefrontProduct[] }) {
   );
 }
 
-function ProductCard({ product, stockStatus }: { product: StorefrontProduct; stockStatus: StockStatus }) {
+function ProductCard({ product, stockInfo }: { product: StorefrontProduct; stockInfo: ProductStockInfo }) {
   const hasDiscount = product.listPriceNok > product.unitPriceNok;
   const discountPct = hasDiscount
     ? Math.round(((product.listPriceNok - product.unitPriceNok) / product.listPriceNok) * 100)
     : 0;
+  const priceUnitLabel = formatUnitLabel(product.priceUnit ?? product.unit);
+  const salesUnitLabel = formatUnitLabel(product.salesUnit ?? product.unit);
+  const packagePriceNok = product.packageAreaSqm ? product.unitPriceNok * product.packageAreaSqm : 0;
 
   return (
-    <article className="group relative flex min-w-0 flex-col overflow-hidden rounded-xl border border-stone-200 bg-white shadow-[0_5px_14px_rgba(32,25,15,0.04)] transition hover:-translate-y-0.5 hover:border-[#15452d] hover:shadow-[0_14px_28px_rgba(21,69,45,0.1)]">
+    <article className="group relative flex min-w-0 flex-col overflow-hidden rounded-md border border-stone-200 bg-white shadow-[0_3px_12px_rgba(32,25,15,0.03)] transition hover:border-[#15452d] hover:shadow-[0_8px_18px_rgba(21,69,45,0.08)]">
       {hasDiscount ? (
         <span className="absolute left-3 top-3 z-10 inline-flex items-center rounded bg-[#c03a2b] px-2 py-0.5 text-[11px] font-semibold text-white shadow">
           -{discountPct}%
@@ -509,11 +573,11 @@ function ProductCard({ product, stockStatus }: { product: StorefrontProduct; sto
       ) : null}
 
       <Link href={`/${product.slug}`} className="block">
-        <div className="flex aspect-[1.08] items-center justify-center bg-gradient-to-b from-white to-stone-50 p-3 sm:p-4">
+        <div className="flex aspect-[1.08] items-center justify-center bg-white p-3 sm:p-4">
           <StorefrontProductImage
             src={getStorefrontImageUrl(product)}
             alt={product.productName}
-            className="h-full w-full object-contain transition duration-300 group-hover:scale-[1.05]"
+            className="h-full w-full object-contain transition duration-300 group-hover:scale-[1.02]"
           />
         </div>
       </Link>
@@ -541,46 +605,84 @@ function ProductCard({ product, stockStatus }: { product: StorefrontProduct; sto
             ) : null}
           </div>
           <div className="flex min-w-0 items-center gap-1.5 text-[11px] text-stone-500">
-            <StockChip status={stockStatus} />
-            <span className="truncate">per {product.unit.toLowerCase() || "stk"}</span>
+            <StockChip stock={stockInfo} />
+            <span className="truncate">per {priceUnitLabel}</span>
           </div>
+          {product.packageAreaSqm ? (
+            <p className="truncate text-[11px] font-medium text-stone-500">
+              1 {salesUnitLabel} = {formatDecimalNo(product.packageAreaSqm)} m² · {formatCurrency(packagePriceNok)}
+            </p>
+          ) : null}
 
-          <AddToCartButton productId={product.id} fullWidth />
+          <div className="grid grid-cols-[minmax(0,1fr)_auto] gap-2">
+            <AddToCartButton productId={product.id} fullWidth />
+            <AddToMaterialListButton {...buildMaterialListProduct(product)} />
+          </div>
         </div>
       </div>
     </article>
   );
 }
 
-function StockChip({ status }: { status: StockStatus }) {
-  if (status === "in-stock") {
+function buildMaterialListProduct(product: StorefrontProduct) {
+  const salesUnitLabel = formatUnitLabel(product.salesUnit ?? product.unit);
+
+  return {
+    source: "catalog" as const,
+    productName: product.productName,
+    quantity: `1 ${salesUnitLabel}`,
+    comment: "Lagt til fra nettbutikken.",
+    quantityReason: "Valgt manuelt fra Proanbud nettbutikk.",
+    nobbNumber: product.nobbNumber,
+    supplierName: product.supplierName,
+    unitPriceNok: product.unitPriceNok,
+    productUrl: `/${product.slug}`,
+    imageUrl: getStorefrontImageUrl(product),
+    sectionTitle: product.sectionTitle,
+    category: product.category,
+  };
+}
+
+function mapProductForProfile(product: StorefrontProduct) {
+  return {
+    nobbNumber: product.nobbNumber,
+    productName: product.productName,
+    category: product.category,
+    sectionTitle: product.sectionTitle,
+    supplierName: product.supplierName,
+    brand: product.brand,
+  };
+}
+
+function StockChip({ stock }: { stock: ProductStockInfo }) {
+  if (stock.status === "in-stock") {
     return (
-      <span className="inline-flex shrink-0 items-center gap-1 rounded-full bg-emerald-50 px-1.5 py-0.5 text-[10px] font-semibold text-emerald-700 ring-1 ring-emerald-200">
+      <span className="inline-flex min-w-0 shrink-0 items-center gap-1 rounded-full bg-emerald-50 px-1.5 py-0.5 text-[10px] font-semibold text-emerald-700 ring-1 ring-emerald-200" title={stock.detail ?? stock.label}>
         <span className="h-1.5 w-1.5 rounded-full bg-emerald-500" />
-        På lager
+        <span className="max-w-[150px] truncate">{stock.label}</span>
       </span>
     );
   }
-  if (status === "stores") {
+  if (stock.status === "stores") {
     return (
-      <span className="inline-flex shrink-0 items-center gap-1 rounded-full bg-amber-50 px-1.5 py-0.5 text-[10px] font-semibold text-amber-800 ring-1 ring-amber-200">
+      <span className="inline-flex min-w-0 shrink-0 items-center gap-1 rounded-full bg-amber-50 px-1.5 py-0.5 text-[10px] font-semibold text-amber-800 ring-1 ring-amber-200" title={stock.detail ?? stock.label}>
         <span className="h-1.5 w-1.5 rounded-full bg-amber-500" />
-        I butikk
+        <span className="max-w-[150px] truncate">{stock.label}</span>
       </span>
     );
   }
-  if (status === "backorder") {
+  if (stock.status === "backorder") {
     return (
-      <span className="inline-flex shrink-0 items-center gap-1 rounded-full bg-stone-100 px-1.5 py-0.5 text-[10px] font-semibold text-stone-600 ring-1 ring-stone-200">
+      <span className="inline-flex shrink-0 items-center gap-1 rounded-full bg-stone-100 px-1.5 py-0.5 text-[10px] font-semibold text-stone-600 ring-1 ring-stone-200" title={stock.detail ?? stock.label}>
         <span className="h-1.5 w-1.5 rounded-full bg-stone-400" />
-        Bestilling
+        {stock.label}
       </span>
     );
   }
   return (
     <span className="inline-flex shrink-0 items-center gap-1 text-[10px] font-medium text-stone-500">
       <span className="h-1.5 w-1.5 rounded-full bg-stone-400" />
-      Sjekk
+      {stock.label}
     </span>
   );
 }
@@ -610,18 +712,21 @@ function ActiveFilterChips({
   category,
   supplier,
   sort,
+  inStockOnly,
   cols,
 }: {
   q: string;
   category: string;
   supplier: string;
   sort: StorefrontSortOption;
+  inStockOnly: boolean;
   cols: number;
 }) {
   const chips: Array<{ label: string; href: string }> = [];
-  if (q) chips.push({ label: `Søk: ${q}`, href: buildStoreHref({ category, supplier, sort, cols }) });
-  if (category) chips.push({ label: `Kategori: ${category}`, href: buildStoreHref({ q, supplier, sort, cols }) });
-  if (supplier) chips.push({ label: `Leverandør: ${supplier}`, href: buildStoreHref({ q, category, sort, cols }) });
+  if (q) chips.push({ label: `Søk: ${q}`, href: buildStoreHref({ category, supplier, sort, inStock: inStockOnly ? 1 : undefined, cols }) });
+  if (category) chips.push({ label: `Kategori: ${category}`, href: buildStoreHref({ q, supplier, sort, inStock: inStockOnly ? 1 : undefined, cols }) });
+  if (supplier) chips.push({ label: `Leverandør: ${supplier}`, href: buildStoreHref({ q, category, sort, inStock: inStockOnly ? 1 : undefined, cols }) });
+  if (inStockOnly) chips.push({ label: "På lager", href: buildStoreHref({ q, category, supplier, sort, cols }) });
 
   return (
     <div className="flex flex-wrap items-center gap-2 rounded-xl border border-stone-200 bg-white px-3 py-2 shadow-[0_6px_16px_rgba(32,25,15,0.04)]">
@@ -651,6 +756,7 @@ function FilterPanel({
   category,
   supplier,
   sort,
+  inStockOnly,
   cols,
   categories,
   categoryCounts,
@@ -660,6 +766,7 @@ function FilterPanel({
   category: string;
   supplier: string;
   sort: StorefrontSortOption;
+  inStockOnly: boolean;
   cols: number;
   categories: string[];
   categoryCounts: Record<string, number>;
@@ -669,7 +776,7 @@ function FilterPanel({
     <div className="rounded-xl border border-stone-200 bg-white p-4 shadow-[0_8px_20px_rgba(32,25,15,0.06)]">
       <div className="flex items-center justify-between">
         <p className="text-sm font-semibold text-stone-900">Filtrer varer</p>
-        {q || category || supplier ? (
+        {q || category || supplier || inStockOnly ? (
           <Link href={buildStoreHref({ sort, cols })} className="text-xs font-semibold text-[#15452d] hover:underline">
             Nullstill
           </Link>
@@ -683,7 +790,7 @@ function FilterPanel({
           counts={categoryCounts}
           currentValue={category}
           whiteText
-          buildHref={(value) => buildStoreHref({ q, category: value, supplier, sort, cols })}
+          buildHref={(value) => buildStoreHref({ q, category: value, supplier, sort, inStock: inStockOnly ? 1 : undefined, cols })}
         />
 
         <div>
@@ -701,7 +808,7 @@ function FilterPanel({
             ].map((preset) => (
               <Link
                 key={preset.label}
-                href={buildStoreHref({ q, category, supplier, sort: preset.sort, cols })}
+                href={buildStoreHref({ q, category, supplier, sort: preset.sort, inStock: inStockOnly ? 1 : undefined, cols })}
                 className="rounded-full border border-stone-300 bg-white px-3 py-1 text-xs font-medium text-stone-700 transition hover:border-[#15452d] hover:text-[#15452d]"
               >
                 {preset.label}
@@ -785,6 +892,7 @@ function Pagination({
   category,
   supplier,
   sort,
+  inStockOnly,
   cols,
   page,
   totalPages,
@@ -793,6 +901,7 @@ function Pagination({
   category: string;
   supplier: string;
   sort: StorefrontSortOption;
+  inStockOnly: boolean;
   cols: number;
   page: number;
   totalPages: number;
@@ -801,7 +910,7 @@ function Pagination({
     <div className="flex flex-col gap-3 rounded-xl border border-stone-200 bg-white p-3 shadow-[0_8px_20px_rgba(32,25,15,0.06)] sm:flex-row sm:items-center sm:justify-between">
       {page > 1 ? (
         <Link
-          href={buildStoreHref({ q, category, supplier, sort, page: page - 1, cols })}
+          href={buildStoreHref({ q, category, supplier, sort, inStock: inStockOnly ? 1 : undefined, page: page - 1, cols })}
           className="inline-flex h-9 items-center justify-center rounded-md border border-stone-300 bg-white px-4 text-sm font-semibold text-stone-700 transition hover:border-[#15452d] hover:text-[#15452d]"
         >
           ← Forrige
@@ -818,7 +927,7 @@ function Pagination({
 
       {page < totalPages ? (
         <Link
-          href={buildStoreHref({ q, category, supplier, sort, page: page + 1, cols })}
+          href={buildStoreHref({ q, category, supplier, sort, inStock: inStockOnly ? 1 : undefined, page: page + 1, cols })}
           className="inline-flex h-9 items-center justify-center rounded-md bg-[#15452d] px-4 text-sm font-semibold text-white transition hover:bg-[#0f321f]"
         >
           Neste →
@@ -883,6 +992,85 @@ function resolveFeaturedCategories(
   }
 
   return tiles.slice(0, 8);
+}
+
+function buildProductStockInfo(
+  info: ByggmakkerAvailability,
+  selectedStoreId: string,
+  selectedStoreName: string,
+): ProductStockInfo {
+  if (selectedStoreId) {
+    const selectedStore = info.stores.find((store) => store.id === selectedStoreId);
+
+    if (selectedStore) {
+      return selectedStore.quantity > 0
+        ? {
+            status: "stores",
+            label: `${formatStockQuantity(selectedStore.quantity)} i ${selectedStore.name}`,
+            detail: `Valgt butikk: ${selectedStore.name}`,
+          }
+        : {
+            status: "backorder",
+            label: `Tomt i ${selectedStore.name}`,
+            detail: `Valgt butikk: ${selectedStore.name}`,
+          };
+    }
+
+    return {
+      status: "backorder",
+      label: `Tomt i ${selectedStoreName || "valgt butikk"}`,
+      detail: info.netAvailable && typeof info.netQuantity === "number"
+        ? `Nettlager: ${formatStockQuantity(info.netQuantity)}`
+        : undefined,
+    };
+  }
+
+  if (info.netAvailable) {
+    const netQuantity = typeof info.netQuantity === "number" ? formatStockQuantity(info.netQuantity) : "på lager";
+    return {
+      status: "in-stock",
+      label: `Nettlager: ${netQuantity}`,
+      detail: info.storeAvailable ? `${info.storeCount} butikker har også lager` : undefined,
+    };
+  }
+
+  if (info.storeAvailable) {
+    const storeQuantity = info.stores.reduce((sum, store) => sum + store.quantity, 0);
+    return {
+      status: "stores",
+      label: `Butikk: ${formatStockQuantity(storeQuantity)}`,
+      detail: `${info.storeCount} ${info.storeCount === 1 ? "butikk" : "butikker"} har varen`,
+    };
+  }
+
+  return {
+    status: "backorder",
+    label: "Ikke på lager",
+  };
+}
+
+function isProductInStock(stock: ProductStockInfo | undefined) {
+  return stock?.status === "in-stock" || stock?.status === "stores";
+}
+
+function formatUnitLabel(unit: string) {
+  const normalized = unit.trim().toUpperCase();
+
+  if (normalized === "M2") return "m²";
+  if (normalized === "PAK") return "pakke";
+  if (normalized === "STK") return "stk";
+  if (normalized === "LM") return "lm";
+
+  return normalized.toLowerCase();
+}
+
+function formatDecimalNo(value: number) {
+  return new Intl.NumberFormat("nb-NO", { maximumFractionDigits: 2 }).format(value);
+}
+
+function formatStockQuantity(quantity: number) {
+  if (!Number.isFinite(quantity)) return "0";
+  return new Intl.NumberFormat("nb-NO", { maximumFractionDigits: 0 }).format(Math.max(0, Math.round(quantity)));
 }
 
 function normalizeSortOption(value: string): StorefrontSortOption {

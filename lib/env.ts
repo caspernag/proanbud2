@@ -35,7 +35,7 @@ export function hasStripeWebhookEnv() {
 }
 
 export function isStripeBypassed() {
-  return env.bypassStripeCheckout && process.env.NODE_ENV !== "production";
+  return !hasStripeEnv() || (env.bypassStripeCheckout && process.env.NODE_ENV !== "production");
 }
 
 export function hasNobbApiEnv() {

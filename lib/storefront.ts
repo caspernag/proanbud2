@@ -8,7 +8,9 @@ import { env, hasOpenAiEnv } from "@/lib/env";
 import { toVatInclusiveNok } from "@/lib/material-order";
 import { applyMarkup, getSupplierMarkups, type SupplierMarkup } from "@/lib/price-markup";
 import { getPriceListProducts, type PriceListProduct } from "@/lib/price-lists";
+import { filterStorefrontBlacklistedProducts } from "@/lib/storefront-product-blacklist";
 import { buildStorefrontNobbImagePath, isAllowedStorefrontImageUrl, STORE_IMAGE_FALLBACK_URL } from "@/lib/storefront-image";
+import { scoreStorefrontProductForUserProfile } from "@/lib/storefront-user-profile";
 import type {
   StorefrontProduct,
   StorefrontProductQuery,
@@ -44,7 +46,7 @@ export async function getStorefrontProducts() {
 
     return {
       ...fromVectorStore,
-      products: applyStorefrontPricing(merged, markups),
+      products: filterStorefrontBlacklistedProducts(applyStorefrontPricing(merged, markups)),
     };
   }
 
@@ -53,7 +55,9 @@ export async function getStorefrontProducts() {
   const dedupedFallbackProducts = dedupeStorefrontProducts(normalizedFallbackProducts);
 
   return {
-    products: applyStorefrontPricing(sortStorefrontProducts(dedupedFallbackProducts, "newest"), markups),
+    products: filterStorefrontBlacklistedProducts(
+      applyStorefrontPricing(sortStorefrontProducts(dedupedFallbackProducts, "newest"), markups),
+    ),
     source: "price_lists" as const,
     vectorStoreId: null,
   };
@@ -65,7 +69,9 @@ export async function queryStorefrontProducts(query: StorefrontProductQuery): Pr
   const category = (query.category ?? "").trim();
   const supplier = (query.supplier ?? "").trim();
   const sort = normalizeStorefrontSort(query.sort);
-  const pageSize = clampNumber(query.pageSize ?? STOREFRONT_DEFAULT_PAGE_SIZE, 1, 60);
+  const userProfile = query.userProfile ?? null;
+  const pageSizeLimit = clampNumber(query.pageSizeLimit ?? 60, 1, 5000);
+  const pageSize = clampNumber(query.pageSize ?? STOREFRONT_DEFAULT_PAGE_SIZE, 1, pageSizeLimit);
   const page = Math.max(1, Math.round(query.page ?? 1));
 
   const filtered = products.filter((product) => {
@@ -84,7 +90,7 @@ export async function queryStorefrontProducts(query: StorefrontProductQuery): Pr
     return true;
   });
 
-  const sorted = sortStorefrontProducts(filtered, sort, q);
+  const sorted = sortStorefrontProducts(filtered, sort, q, userProfile);
   const total = sorted.length;
   const totalPages = Math.max(1, Math.ceil(total / pageSize));
   const safePage = Math.min(page, totalPages);
@@ -343,7 +349,10 @@ function parseProductsFromCsvLikeText(rawContent: string, fileName: string): Sto
       continue;
     }
 
-    const unit = (salesUnit || priceUnit || "STK").toUpperCase();
+    const normalizedPriceUnit = (priceUnit || salesUnit || "STK").toUpperCase();
+    const normalizedSalesUnit = (salesUnit || normalizedPriceUnit).toUpperCase();
+    const packageAreaSqm = parsePackageAreaSqm(descriptionRaw);
+    const unit = normalizedSalesUnit;
     const priceNok = parseCsvPriceNok(pricePrimary) ?? parseCsvPriceNok(priceSecondary) ?? 0;
     const listPriceNok = parseCsvPriceNok(priceSecondary) ?? priceNok;
 
@@ -355,6 +364,9 @@ function parseProductsFromCsvLikeText(rawContent: string, fileName: string): Sto
         supplierName,
         brand: inferCsvBrand(brandOrSeries, productName),
         unit,
+        priceUnit: normalizedPriceUnit,
+        salesUnit: normalizedSalesUnit,
+        packageAreaSqm,
         unitPriceNok: priceNok,
         listPriceNok,
         sectionTitle: inferCsvSectionTitle(categoryCode, productName),
@@ -363,8 +375,9 @@ function parseProductsFromCsvLikeText(rawContent: string, fileName: string): Sto
         ean: parseCsvEan(eanRaw),
         technicalDetails: [
           descriptionRaw,
-          `Prisenhet: ${priceUnit || unit}`,
-          `Salgsenhet: ${unit}`,
+          `Prisenhet: ${normalizedPriceUnit}`,
+          `Salgsenhet: ${normalizedSalesUnit}`,
+          packageAreaSqm ? `Pakningsinnhold: ${formatDecimalNo(packageAreaSqm)} m²` : "",
         ].filter((value) => value.length > 0),
         quantitySuggestion: inferCsvQuantitySuggestion(unit, inferCsvSectionTitle(categoryCode, productName)),
         quantityReason: inferCsvQuantityReason(unit, inferCsvSectionTitle(categoryCode, productName), supplierName),
@@ -413,6 +426,9 @@ function normalizeProductsFromUnknown(
       supplierName: readStringField(record, ["supplierName", "supplier_name", "supplier"]) || "",
       brand: readStringField(record, ["brand", "brandName", "brand_name"]) || "",
       unit: readStringField(record, ["unit", "salesUnit", "unit_code"]) || "STK",
+      priceUnit: readStringField(record, ["priceUnit", "price_unit", "pricingUnit", "pricing_unit"]),
+      salesUnit: readStringField(record, ["salesUnit", "sales_unit", "sellingUnit", "selling_unit"]),
+      packageAreaSqm: readNumberField(record, ["packageAreaSqm", "package_area_sqm", "sqmPerPackage", "sqm_per_package"]),
       unitPriceNok:
         readNumberField(record, ["unitPriceNok", "unit_price_nok", "priceNok", "price_nok", "price"]) ?? 0,
       listPriceNok:
@@ -445,6 +461,9 @@ function normalizePriceListProducts(products: PriceListProduct[], source: "price
         supplierName: product.supplierName,
         brand: product.brand,
         unit: product.unit,
+        priceUnit: product.priceUnit,
+        salesUnit: product.salesUnit,
+        packageAreaSqm: product.packageAreaSqm,
         unitPriceNok: product.priceNok,
         listPriceNok: product.listPriceNok,
         sectionTitle: product.sectionTitle,
@@ -474,6 +493,9 @@ function normalizeStorefrontProduct(
     supplierName: string;
     brand: string;
     unit: string;
+    priceUnit?: string;
+    salesUnit?: string;
+    packageAreaSqm?: number;
     unitPriceNok: number;
     listPriceNok: number;
     sectionTitle: string;
@@ -499,6 +521,10 @@ function normalizeStorefrontProduct(
   }
 
   const slugBase = `${productName}-${supplierName}-${nobbNumber}`;
+  const fallbackUnit = product.unit.trim().toUpperCase() || "STK";
+  const priceUnit = product.priceUnit?.trim().toUpperCase() || fallbackUnit;
+  const salesUnit = product.salesUnit?.trim().toUpperCase() || fallbackUnit;
+  const packageAreaSqm = product.packageAreaSqm ?? parsePackageAreaSqm(product.description);
 
   return {
     id: product.id.trim() || `${slugify(supplierName)}-${nobbNumber}`,
@@ -507,7 +533,10 @@ function normalizeStorefrontProduct(
     productName,
     supplierName,
     brand: product.brand.trim() || inferCsvBrand("", productName),
-    unit: product.unit.trim().toUpperCase() || "STK",
+    unit: salesUnit,
+    priceUnit,
+    salesUnit,
+    ...(packageAreaSqm ? { packageAreaSqm } : {}),
     unitPriceNok: Math.max(0, Math.round(product.unitPriceNok)),
     listPriceNok: Math.max(0, Math.round(product.listPriceNok || product.unitPriceNok)),
     sectionTitle: product.sectionTitle.trim() || "Byggevarer",
@@ -550,13 +579,31 @@ function applyPriceListCategoryOverrides(
     if (!match) return product;
     const nextCategory = match.category?.trim();
     const nextSection = match.sectionTitle?.trim();
-    if (!nextCategory && !nextSection) return product;
     return {
       ...product,
       category: nextCategory || product.category,
       sectionTitle: nextSection || product.sectionTitle,
+      unit: match.salesUnit || match.unit || product.unit,
+      priceUnit: match.priceUnit || product.priceUnit,
+      salesUnit: match.salesUnit || product.salesUnit,
+      ...(match.packageAreaSqm ? { packageAreaSqm: match.packageAreaSqm } : {}),
+      technicalDetails: mergeTechnicalDetails(product.technicalDetails, match.technicalDetails),
     };
   });
+}
+
+function mergeTechnicalDetails(current: string[], next: string[]) {
+  const seen = new Set<string>();
+  const merged: string[] = [];
+
+  for (const detail of [...next, ...current]) {
+    const trimmed = detail.trim();
+    if (!trimmed || seen.has(trimmed.toLowerCase())) continue;
+    seen.add(trimmed.toLowerCase());
+    merged.push(trimmed);
+  }
+
+  return merged.slice(0, 8);
 }
 
 function applyStorefrontPricing(products: StorefrontProduct[], markups: SupplierMarkup[]): StorefrontProduct[] {
@@ -601,7 +648,12 @@ function dedupeStorefrontProducts(products: StorefrontProduct[]) {
   return Array.from(deduped.values());
 }
 
-function sortStorefrontProducts(products: StorefrontProduct[], sort: StorefrontSortOption, q = "") {
+function sortStorefrontProducts(
+  products: StorefrontProduct[],
+  sort: StorefrontSortOption,
+  q = "",
+  userProfile?: StorefrontProductQuery["userProfile"],
+) {
   return products.slice().sort((left, right) => {
     if (sort === "price_asc") {
       return left.unitPriceNok - right.unitPriceNok || left.productName.localeCompare(right.productName, "nb-NO");
@@ -622,8 +674,11 @@ function sortStorefrontProducts(products: StorefrontProduct[], sort: StorefrontS
       );
     }
 
+    const leftRelevance = scoreStorefrontProduct(left, q) + scoreStorefrontProductForUserProfile(left, userProfile);
+    const rightRelevance = scoreStorefrontProduct(right, q) + scoreStorefrontProductForUserProfile(right, userProfile);
+
     return (
-      scoreStorefrontProduct(right, q) - scoreStorefrontProduct(left, q) ||
+      rightRelevance - leftRelevance ||
       left.productName.localeCompare(right.productName, "nb-NO")
     );
   });
@@ -854,6 +909,22 @@ function parseCsvPriceNok(value: string) {
 function parseCsvEan(value: string) {
   const digits = value.replace(/\D/g, "");
   return digits.length >= 8 ? digits : undefined;
+}
+
+function parsePackageAreaSqm(raw: string) {
+  const normalized = raw.replace(/m²/gi, "M2");
+  const match = normalized.match(/(\d+(?:[,.]\d+)?)\s*M2\s*(?:PR|PER)?\s*(?:PK|PAK|PAKKE)\b/i);
+
+  if (!match) {
+    return undefined;
+  }
+
+  const value = Number(match[1].replace(",", "."));
+  return Number.isFinite(value) && value > 0 ? value : undefined;
+}
+
+function formatDecimalNo(value: number) {
+  return new Intl.NumberFormat("nb-NO", { maximumFractionDigits: 2 }).format(value);
 }
 
 function supplierLabelFromFileName(fileName: string) {

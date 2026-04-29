@@ -1,6 +1,7 @@
 import Link from "next/link";
 import { notFound } from "next/navigation";
 
+import { AddMaterialListToCartButton } from "@/app/_components/add-material-list-to-cart-button";
 import { CheckoutButton } from "@/app/_components/checkout-button";
 import { DeleteProjectButton } from "@/app/_components/delete-project-button";
 import { MaterialListDocument } from "@/app/_components/material-list-document";
@@ -409,12 +410,15 @@ function OrderCard({
 
       <div className="mt-4 space-y-2">
         {projectId ? (
-          <Link
-            href={`/min-side/materiallister/${projectSlug}/bestilling`}
-            className="inline-flex h-11 w-full items-center justify-center rounded-sm bg-stone-900 px-4 text-sm font-semibold text-white transition hover:bg-stone-800"
-          >
-            Gå til bestilling →
-          </Link>
+          <>
+            <Link
+              href={`/min-side/materiallister/${projectSlug}/bestilling`}
+              className="inline-flex h-11 w-full items-center justify-center rounded-sm bg-stone-900 px-4 text-sm font-semibold text-white transition hover:bg-stone-800"
+            >
+              Gå til bestilling →
+            </Link>
+            <AddMaterialListToCartButton projectSlug={projectSlug} />
+          </>
         ) : (
           <p className="rounded-md border border-stone-200 bg-white px-3 py-2 text-xs text-stone-600">
             Logg inn for å lagre prosjektet før bestilling.

@@ -109,7 +109,7 @@ export async function POST(request: Request) {
     product_name: item.product.productName,
     supplier_name: item.product.supplierName,
     category: item.product.category,
-    unit: item.product.unit,
+    unit: item.product.priceUnit ?? item.product.unit,
     quantity: item.quantity,
     unit_price_nok: item.unitPriceNok,
     line_total_nok: item.lineTotalNok,

@@ -11,6 +11,9 @@ export type PriceListProduct = {
   supplierName: string;
   brand: string;
   unit: string;
+  priceUnit: string;
+  salesUnit: string;
+  packageAreaSqm?: number;
   priceNok: number;
   listPriceNok: number;
   sectionTitle: string;
@@ -123,15 +126,19 @@ async function parseSupplierCsv(csvPath: string): Promise<PriceListProduct[]> {
         continue;
       }
 
-      const unit = (salesUnit || priceUnit || "STK").toUpperCase();
+      const normalizedPriceUnit = (priceUnit || salesUnit || "STK").toUpperCase();
+      const normalizedSalesUnit = (salesUnit || normalizedPriceUnit).toUpperCase();
+      const packageAreaSqm = parsePackageAreaSqm(descriptionRaw);
+      const unit = normalizedSalesUnit;
       const priceNok = parsePriceNok(pricePrimary) ?? parsePriceNok(priceSecondary) ?? 0;
       const listPriceNok = parsePriceNok(priceSecondary) ?? priceNok;
       const sectionTitle = inferSectionTitle(categoryCode, productName);
       const category = inferCategory(categoryCode, productName);
       const technicalDetails = [
         descriptionRaw,
-        `Prisenhet: ${priceUnit || unit}`,
-        `Salgsenhet: ${unit}`,
+        `Prisenhet: ${normalizedPriceUnit}`,
+        `Salgsenhet: ${normalizedSalesUnit}`,
+        packageAreaSqm ? `Pakningsinnhold: ${formatDecimalNo(packageAreaSqm)} m²` : "",
       ].filter((value) => value.length > 0);
 
       products.push({
@@ -141,6 +148,9 @@ async function parseSupplierCsv(csvPath: string): Promise<PriceListProduct[]> {
         supplierName,
         brand: inferBrand(brandOrSeries, productName),
         unit,
+        priceUnit: normalizedPriceUnit,
+        salesUnit: normalizedSalesUnit,
+        ...(packageAreaSqm ? { packageAreaSqm } : {}),
         priceNok,
         listPriceNok,
         sectionTitle,
@@ -242,6 +252,22 @@ function parseEan(raw: string) {
 
   const ean = Math.round(numeric).toString();
   return ean.length >= 8 ? ean : null;
+}
+
+function parsePackageAreaSqm(raw: string) {
+  const normalized = raw.replace(/m²/gi, "M2");
+  const match = normalized.match(/(\d+(?:[,.]\d+)?)\s*M2\s*(?:PR|PER)?\s*(?:PK|PAK|PAKKE)\b/i);
+
+  if (!match) {
+    return undefined;
+  }
+
+  const value = Number(match[1].replace(",", "."));
+  return Number.isFinite(value) && value > 0 ? value : undefined;
+}
+
+function formatDecimalNo(value: number) {
+  return new Intl.NumberFormat("nb-NO", { maximumFractionDigits: 2 }).format(value);
 }
 
 // NOBB Varekategori-kode → lesbar kategori.
