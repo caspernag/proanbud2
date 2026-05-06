@@ -1,4 +1,5 @@
 import { requireAdminUser } from "@/lib/admin-auth";
+import { SHOP_ORDER_TRANSPORT_LABELS, type ShopOrderTransportStatus } from "@/lib/shop-order";
 import { createSupabaseAdminClient } from "@/lib/supabase/admin";
 import { createSupabaseServerClient } from "@/lib/supabase/server";
 
@@ -24,6 +25,16 @@ const PARTNER_STATUS: Record<string, { label: string; color: string }> = {
   cancelled:        { label: "Kansellert",   color: "bg-red-500/20 text-red-400" },
 };
 
+const TRANSPORT_STATUS_COLOR: Record<ShopOrderTransportStatus, string> = {
+  pending: "bg-stone-200 text-stone-700",
+  confirmed: "bg-blue-500/20 text-blue-400",
+  packing: "bg-amber-500/20 text-amber-500",
+  shipped: "bg-violet-500/20 text-violet-400",
+  out_for_delivery: "bg-cyan-500/20 text-cyan-500",
+  delivered: "bg-emerald-500/20 text-emerald-400",
+  cancelled: "bg-red-500/20 text-red-400",
+};
+
 type PageProps = {
   searchParams: Promise<{ type?: string; status?: string }>;
 };
@@ -43,7 +54,7 @@ export default async function BestillingerPage({ searchParams }: PageProps) {
       .limit(200),
     supabase!
       .from("shop_orders")
-      .select("id, status, total_nok, customer_name, customer_email, customer_phone, shipping_city, created_at, paid_at")
+      .select("id, status, transport_status, total_nok, customer_name, customer_email, customer_phone, shipping_city, created_at, paid_at")
       .order("created_at", { ascending: false })
       .limit(200),
     supabase!.from("partners").select("id, name"),
@@ -165,26 +176,35 @@ export default async function BestillingerPage({ searchParams }: PageProps) {
                   <th className="px-5 py-3.5 text-xs text-stone-400 font-medium">By</th>
                   <th className="px-5 py-3.5 text-xs text-stone-400 font-medium">Dato</th>
                   <th className="px-5 py-3.5 text-xs text-stone-400 font-medium">Status</th>
+                  <th className="px-5 py-3.5 text-xs text-stone-400 font-medium">Transport</th>
                   <th className="px-5 py-3.5 text-xs text-stone-400 font-medium text-right">Beløp</th>
                 </tr>
               </thead>
               <tbody>
                 {filteredShop.map((o) => {
                   const sCfg = ORDER_STATUS[o.status] ?? { label: o.status, color: "bg-stone-200 text-stone-700" };
+                  const transportStatus = (o.transport_status ?? "pending") as ShopOrderTransportStatus;
+                  const transportLabel = SHOP_ORDER_TRANSPORT_LABELS[transportStatus] ?? transportStatus;
+                  const transportColor = TRANSPORT_STATUS_COLOR[transportStatus] ?? "bg-stone-200 text-stone-700";
                   return (
                     <tr key={o.id} className="border-b border-stone-200/70 hover:bg-stone-50/80 transition">
-                      <td className="px-5 py-3 font-mono text-xs text-stone-500">{o.id.slice(0, 8)}…</td>
+                      <td className="px-5 py-3 font-mono text-xs text-stone-500">
+                        <a href={`/sjefen/bestillinger/${o.id}`} className="font-semibold text-stone-700 hover:text-stone-950 hover:underline">
+                          {o.id.slice(0, 8)}…
+                        </a>
+                      </td>
                       <td className="px-5 py-3 text-xs text-stone-700">{o.customer_name}</td>
                       <td className="px-5 py-3 text-xs text-stone-500">{o.customer_email}</td>
                       <td className="px-5 py-3 text-xs text-stone-500">{o.shipping_city}</td>
                       <td className="px-5 py-3 text-xs text-stone-500">{new Date(o.created_at).toLocaleDateString("nb-NO")}</td>
                       <td className="px-5 py-3"><span className={`text-xs px-2 py-0.5 rounded-full font-medium ${sCfg.color}`}>{sCfg.label}</span></td>
+                      <td className="px-5 py-3"><span className={`text-xs px-2 py-0.5 rounded-full font-medium ${transportColor}`}>{transportLabel}</span></td>
                       <td className="px-5 py-3 text-right text-stone-800 font-semibold">{fmt(o.total_nok)}</td>
                     </tr>
                   );
                 })}
                 {filteredShop.length === 0 && (
-                  <tr><td colSpan={7} className="px-5 py-10 text-center text-stone-400 text-sm">Ingen butikkordre.</td></tr>
+                  <tr><td colSpan={8} className="px-5 py-10 text-center text-stone-400 text-sm">Ingen butikkordre.</td></tr>
                 )}
               </tbody>
             </table>

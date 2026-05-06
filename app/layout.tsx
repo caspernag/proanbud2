@@ -1,19 +1,13 @@
 import type { Metadata, Viewport } from "next";
 import { Suspense } from "react";
-import { Sora, Space_Grotesk } from "next/font/google";
+import { Inter } from "next/font/google";
 import { GlobalNav } from "@/app/_components/global-nav";
 import "./globals.css";
 
-const spaceGrotesk = Space_Grotesk({
-  variable: "--font-space-grotesk",
+const inter = Inter({
+  variable: "--font-inter",
   subsets: ["latin"],
-  weight: ["400", "500", "600", "700"],
-});
-
-const sora = Sora({
-  variable: "--font-sora",
-  subsets: ["latin"],
-  weight: ["500", "600", "700"],
+  display: "swap",
 });
 
 export const metadata: Metadata = {
@@ -39,7 +33,7 @@ export default async function RootLayout({
     <html
       lang="nb"
       data-scroll-behavior="smooth"
-      className={`${spaceGrotesk.variable} ${sora.variable} h-full antialiased`}
+      className={`${inter.variable} h-full antialiased`}
     >
       <body suppressHydrationWarning={true} className="min-h-full flex flex-col">
         <Suspense fallback={null}>

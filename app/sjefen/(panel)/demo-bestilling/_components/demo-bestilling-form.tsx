@@ -1,6 +1,7 @@
 "use client";
 
 import { useState } from "react";
+import Link from "next/link";
 import { useRouter } from "next/navigation";
 
 type User = { id: string; email: string };
@@ -158,12 +159,12 @@ export function DemoBestillingForm({ users, presets }: Props) {
               &nbsp;·&nbsp;
               Total: {new Intl.NumberFormat("nb-NO", { style: "currency", currency: "NOK", maximumFractionDigits: 0 }).format(result.total)}
             </p>
-            <a
+            <Link
               href="/sjefen/bestillinger"
               className="text-xs text-emerald-700 underline mt-2 inline-block"
             >
               Se alle bestillinger →
-            </a>
+            </Link>
           </div>
         ) : (
           <div className="rounded-lg bg-red-50 border border-red-200 px-4 py-3">

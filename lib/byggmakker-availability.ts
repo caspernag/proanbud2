@@ -133,21 +133,19 @@ export async function getByggmakkerAvailabilityBatch(
 }
 
 async function fetchAvailabilityPayload(ean: string): Promise<AvailabilityPayload | null> {
-  const controller = new AbortController();
-  const timeout = setTimeout(() => controller.abort(), REQUEST_TIMEOUT_MS);
-
   try {
-    const response = await fetch(`${AVAILABILITY_API_BASE_URL}/${encodeURIComponent(ean)}`, {
+    const response = await fetchWithSoftTimeout(`${AVAILABILITY_API_BASE_URL}/${encodeURIComponent(ean)}`, {
       method: "GET",
       redirect: "follow",
-      signal: controller.signal,
       headers: {
         "User-Agent":
           "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/135.0.0.0 Safari/537.36",
         Accept: "application/json,text/plain,*/*",
       },
       cache: "no-store",
-    });
+    }, REQUEST_TIMEOUT_MS);
+
+    if (!response) return null;
 
     if (!response.ok) return null;
 
@@ -157,19 +155,13 @@ async function fetchAvailabilityPayload(ean: string): Promise<AvailabilityPayloa
     return (await response.json()) as AvailabilityPayload;
   } catch {
     return null;
-  } finally {
-    clearTimeout(timeout);
   }
 }
 
 async function fetchAvailabilityBatch(eans: string[]): Promise<AvailabilityPayload[] | null> {
-  const controller = new AbortController();
-  const timeout = setTimeout(() => controller.abort(), REQUEST_TIMEOUT_MS);
-
   try {
-    const response = await fetch(AVAILABILITY_API_BASE_URL, {
+    const response = await fetchWithSoftTimeout(AVAILABILITY_API_BASE_URL, {
       method: "POST",
-      signal: controller.signal,
       redirect: "follow",
       cache: "no-store",
       headers: {
@@ -179,7 +171,9 @@ async function fetchAvailabilityBatch(eans: string[]): Promise<AvailabilityPaylo
           "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/135.0.0.0 Safari/537.36",
       },
       body: JSON.stringify({ eans }),
-    });
+    }, REQUEST_TIMEOUT_MS);
+
+    if (!response) return null;
 
     if (!response.ok) return null;
 
@@ -206,9 +200,18 @@ async function fetchAvailabilityBatch(eans: string[]): Promise<AvailabilityPaylo
     return null;
   } catch {
     return null;
-  } finally {
-    clearTimeout(timeout);
   }
+}
+
+function fetchWithSoftTimeout(input: RequestInfo | URL, init: RequestInit, timeoutMs: number) {
+  let timeout: ReturnType<typeof setTimeout>;
+
+  return Promise.race<Response | null>([
+    fetch(input, init).catch(() => null),
+    new Promise<null>((resolve) => {
+      timeout = setTimeout(() => resolve(null), timeoutMs);
+    }),
+  ]).finally(() => clearTimeout(timeout));
 }
 
 function parseAvailabilityPayload(

@@ -1731,11 +1731,17 @@ function SupplierAvailabilityBadge({
   const [errorMessage, setErrorMessage] = useState<string>("");
 
   useEffect(() => {
+    let isActive = true;
+
     if (supplierKey !== "byggmakker" || !supplierSku) {
       return;
     }
 
-    setFetchState("loading");
+    queueMicrotask(() => {
+      if (isActive) {
+        setFetchState("loading");
+      }
+    });
     const abortController = new AbortController();
 
     void (async () => {
@@ -1762,6 +1768,7 @@ function SupplierAvailabilityBadge({
     })();
 
     return () => {
+      isActive = false;
       abortController.abort();
     };
   }, [supplierKey, supplierSku]);

@@ -20,22 +20,15 @@ type CheckoutProductsResponse = {
   stockByProductId?: Record<string, StockInfo>;
 };
 
-type StockStatus = "in-stock" | "stores" | "backorder" | "unknown";
+type StockStatus = "in-stock" | "backorder" | "unknown";
 type StockInfo = {
   status: StockStatus;
   netQuantity: number | null;
-  storeCount: number;
-  storeQuantity: number;
-  stores: { name: string; quantity: number }[];
-  selectedStore?: { id: string; name: string; quantity: number };
 };
 
 const UNKNOWN_STOCK_INFO: StockInfo = {
   status: "unknown",
   netQuantity: null,
-  storeCount: 0,
-  storeQuantity: 0,
-  stores: [],
 };
 
 export function StorefrontCheckoutClient({ paymentCancelled }: { paymentCancelled: boolean }) {
@@ -321,7 +314,7 @@ export function StorefrontCheckoutClient({ paymentCancelled }: { paymentCancelle
                             {formatCurrency(lineItem.product.listPriceNok)}
                           </span>
                         ) : null}
-                        <span className="text-xs text-stone-500">/ {formatUnitLabel(lineItem.product.priceUnit ?? lineItem.product.unit)}</span>
+                        <span className="text-xs text-stone-500">/ {formatUnitLabel(lineItem.product.salesUnit ?? lineItem.product.unit)}</span>
                       </div>
 
                       <div className="mt-2 flex flex-wrap items-center gap-3 sm:hidden">
@@ -573,59 +566,13 @@ function QuantityStepper({ value, onChange }: { value: number; onChange: (next: 
 }
 
 function StockChip({ stock }: { stock: StockInfo }) {
-  if (stock.selectedStore) {
-    const hasStock = stock.selectedStore.quantity > 0;
-    return (
-      <span
-        className={`inline-flex max-w-full flex-wrap items-center gap-x-1.5 gap-y-0.5 rounded-full px-2 py-0.5 text-[11px] font-semibold ring-1 ${
-          hasStock
-            ? "bg-emerald-50 text-emerald-700 ring-emerald-200"
-            : "bg-amber-50 text-amber-800 ring-amber-200"
-        }`}
-      >
-        <span className={`h-1.5 w-1.5 rounded-full ${hasStock ? "bg-emerald-500" : "bg-amber-500"}`} aria-hidden />
-        <span>
-          {hasStock
-            ? `${formatStockQuantity(stock.selectedStore.quantity)} i ${stock.selectedStore.name}`
-            : `Tomt i ${stock.selectedStore.name}`}
-        </span>
-        {stock.netQuantity !== null && stock.netQuantity > 0 ? (
-          <span className={hasStock ? "text-emerald-600/80" : "text-amber-700/80"}>
-            · Nettlager: {formatStockQuantity(stock.netQuantity)}
-          </span>
-        ) : null}
-      </span>
-    );
-  }
-
   const netLabel = stock.netQuantity !== null ? `Nettlager: ${formatStockQuantity(stock.netQuantity)}` : "På nettlager";
-  const storeLabel = stock.storeQuantity > 0
-    ? `Butikk: ${formatStockQuantity(stock.storeQuantity)} i ${stock.storeCount} ${stock.storeCount === 1 ? "butikk" : "butikker"}`
-    : stock.storeCount > 0
-      ? `I ${stock.storeCount} ${stock.storeCount === 1 ? "butikk" : "butikker"}`
-      : "I butikk";
-  const topStore = stock.stores[0];
 
   if (stock.status === "in-stock") {
     return (
       <span className="inline-flex max-w-full flex-wrap items-center gap-x-1.5 gap-y-0.5 rounded-full bg-emerald-50 px-2 py-0.5 text-[11px] font-semibold text-emerald-700 ring-1 ring-emerald-200">
         <span className="h-1.5 w-1.5 rounded-full bg-emerald-500" aria-hidden />
         <span>{netLabel}</span>
-        {stock.storeQuantity > 0 ? <span className="text-emerald-600/80">· {storeLabel}</span> : null}
-      </span>
-    );
-  }
-
-  if (stock.status === "stores") {
-    return (
-      <span className="inline-flex max-w-full flex-wrap items-center gap-x-1.5 gap-y-0.5 rounded-full bg-amber-50 px-2 py-0.5 text-[11px] font-semibold text-amber-800 ring-1 ring-amber-200">
-        <span className="h-1.5 w-1.5 rounded-full bg-amber-500" aria-hidden />
-        <span>{storeLabel}</span>
-        {topStore ? (
-          <span className="truncate text-amber-700/80">
-            · {topStore.name}: {formatStockQuantity(topStore.quantity)}
-          </span>
-        ) : null}
       </span>
     );
   }
@@ -634,7 +581,7 @@ function StockChip({ stock }: { stock: StockInfo }) {
     return (
       <span className="inline-flex shrink-0 items-center gap-1 rounded-full bg-stone-100 px-2 py-0.5 text-[11px] font-semibold text-stone-600 ring-1 ring-stone-200">
         <span className="h-1.5 w-1.5 rounded-full bg-stone-400" aria-hidden />
-        Ikke på nett/butikk
+        Ikke på nettlager
       </span>
     );
   }

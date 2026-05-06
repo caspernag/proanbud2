@@ -12,6 +12,7 @@ export type StorefrontProduct = {
   unit: string;
   priceUnit?: string;
   salesUnit?: string;
+  salesUnitQuantity?: number;
   packageAreaSqm?: number;
   unitPriceNok: number;
   listPriceNok: number;

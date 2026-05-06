@@ -233,11 +233,11 @@ async function fetchNobbExportImage(nobb: string): Promise<ImageData | null> {
 
   for (const url of candidates) {
     try {
-      const res = await fetch(url, {
+      const res = await fetchWithSoftTimeout(url, {
         headers: authHeader ? { Authorization: authHeader } : undefined,
-        signal: AbortSignal.timeout(8000),
         cache: "no-store",
-      });
+      }, 8000);
+      if (!res) continue;
       if (!res.ok) continue;
       const contentType = res.headers.get("content-type") ?? "";
       if (!contentType.startsWith("image/")) continue;
@@ -336,9 +336,8 @@ async function fetchByggmakkerImage(nobb: string): Promise<ImageData | null> {
 /** Download a URL and return its bytes only if it looks like an image. */
 async function tryFetchImageUrl(url: string): Promise<ImageData | null> {
   try {
-    const res = await fetch(url, {
-      signal: AbortSignal.timeout(6000),
-    });
+    const res = await fetchWithSoftTimeout(url, {}, 6000);
+    if (!res) return null;
     if (!res.ok) return null;
     const contentType = res.headers.get("content-type") ?? "";
     if (!contentType.startsWith("image/")) return null;
@@ -351,14 +350,14 @@ async function tryFetchImageUrl(url: string): Promise<ImageData | null> {
 /** Fetch a URL as text/html with a browser-like User-Agent. */
 async function fetchHtml(url: string): Promise<string | null> {
   try {
-    const res = await fetch(url, {
+    const res = await fetchWithSoftTimeout(url, {
       headers: {
         "User-Agent":
           "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36",
         Accept: "text/html,application/xhtml+xml",
       },
-      signal: AbortSignal.timeout(8000),
-    });
+    }, 8000);
+    if (!res) return null;
     if (!res.ok) return null;
     return res.text();
   } catch {
@@ -414,10 +413,10 @@ function extractPrimaryImageFromHtml(html: string): string | null {
 
 async function buildPlaceholderResponse(): Promise<Response> {
   try {
-    const res = await fetch(STORE_IMAGE_FALLBACK_URL, {
+    const res = await fetchWithSoftTimeout(STORE_IMAGE_FALLBACK_URL, {
       cache: "force-cache",
-      signal: AbortSignal.timeout(4000),
-    });
+    }, 4000);
+    if (!res) return Response.redirect(STORE_IMAGE_FALLBACK_URL, 307);
     if (res.ok) {
       const contentType = res.headers.get("content-type") ?? "image/svg+xml";
       return new Response(await res.arrayBuffer(), {
@@ -432,5 +431,16 @@ async function buildPlaceholderResponse(): Promise<Response> {
     // fall through
   }
   return Response.redirect(STORE_IMAGE_FALLBACK_URL, 307);
+}
+
+function fetchWithSoftTimeout(input: RequestInfo | URL, init: RequestInit, timeoutMs: number) {
+  let timeout: ReturnType<typeof setTimeout>;
+
+  return Promise.race<Response | null>([
+    fetch(input, init).catch(() => null),
+    new Promise<null>((resolve) => {
+      timeout = setTimeout(() => resolve(null), timeoutMs);
+    }),
+  ]).finally(() => clearTimeout(timeout));
 }
 

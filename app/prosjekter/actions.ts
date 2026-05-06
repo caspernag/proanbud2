@@ -2,6 +2,7 @@
 
 import { redirect } from "next/navigation";
 
+import { constrainMaterialSectionsToCatalog } from "@/lib/material-list-catalog";
 import { encodeMaterialSectionsForUrl } from "@/lib/material-list-encoding";
 import { generateMaterialSectionsFromAttachments, summarizeAttachments } from "@/lib/material-list-ai";
 import {
@@ -9,8 +10,7 @@ import {
   recalculateOrderSummary,
   toOrderItemRowsInput,
 } from "@/lib/material-order";
-import { getPriceListProducts, type PriceListProduct } from "@/lib/price-lists";
-import { getByggmakkerAvailability } from "@/lib/byggmakker-availability";
+import { getPriceListProducts } from "@/lib/price-lists";
 import { buildDefaultMaterialSections, buildProjectView, type MaterialSection } from "@/lib/project-data";
 import { createSupabaseServerClient } from "@/lib/supabase/server";
 import { normalizeProjectTitle, slugify, toNumber } from "@/lib/utils";
@@ -502,158 +502,6 @@ function toTrimmedString(value: unknown, maxLength: number) {
   return normalized.length > 0 ? normalized.slice(0, maxLength) : "";
 }
 
-async function constrainMaterialSectionsToCatalog(
-  sections: MaterialSection[] | null,
-  products: PriceListProduct[],
-) {
-  if (!sections || sections.length === 0) {
-    return null;
-  }
-
-  if (products.length === 0) {
-    return sections;
-  }
-
-  const normalized: MaterialSection[] = [];
-  const byggmakkerAvailabilityCache = new Map<string, boolean>();
-
-  for (const section of sections) {
-    const items: MaterialSection["items"] = [];
-
-    for (const item of section.items) {
-      const bestMatch = await findBestCatalogMatch(
-        item,
-        section,
-        products,
-        byggmakkerAvailabilityCache,
-      );
-
-      if (!bestMatch) {
-        continue;
-      }
-
-      items.push({
-        ...item,
-        item: bestMatch.productName,
-        nobb: bestMatch.nobbNumber,
-        quantityReason: item.quantityReason || bestMatch.quantityReason,
-        note: `${item.note}${item.note ? " | " : ""}Valgt fra aktiv leverandørkatalog (${bestMatch.supplierName}).`.slice(0, 1200),
-      });
-    }
-
-    if (items.length === 0) {
-      continue;
-    }
-
-    normalized.push({
-      ...section,
-      items,
-    });
-  }
-
-  return normalized.length > 0 ? normalized : null;
-}
-
-async function findBestCatalogMatch(
-  item: MaterialSection["items"][number],
-  section: MaterialSection,
-  products: PriceListProduct[],
-  byggmakkerAvailabilityCache: Map<string, boolean>,
-) {
-  const directNobb = typeof item.nobb === "string" ? item.nobb.replace(/\D/g, "") : "";
-
-  if (directNobb.length >= 6) {
-    const direct = products.find((product) => product.nobbNumber === directNobb);
-    if (direct) {
-      const isAvailable = await isCatalogProductAvailableForMaterialList(
-        direct,
-        byggmakkerAvailabilityCache,
-      );
-      return isAvailable ? direct : null;
-    }
-  }
-
-  const itemTokens = tokenizeForReplacement(item.item);
-  const sectionTokens = tokenizeForReplacement(`${section.title} ${section.description}`);
-
-  if (itemTokens.length === 0) {
-    return null;
-  }
-
-  const scored: Array<{ product: PriceListProduct; score: number }> = [];
-
-  for (const product of products) {
-    const productTokens = tokenizeForReplacement(product.productName);
-    const catalogTokens = tokenizeForReplacement(`${product.sectionTitle} ${product.category}`);
-
-    if (productTokens.length === 0) {
-      continue;
-    }
-
-    const nameOverlap = itemTokens.filter((token) => productTokens.includes(token)).length;
-    const sectionOverlap = sectionTokens.filter((token) => catalogTokens.includes(token)).length;
-    const score =
-      nameOverlap / Math.max(itemTokens.length, productTokens.length) +
-      sectionOverlap * 0.08;
-
-    if (product.productName.trim().toLowerCase() === item.item.trim().toLowerCase()) {
-      const isAvailable = await isCatalogProductAvailableForMaterialList(
-        product,
-        byggmakkerAvailabilityCache,
-      );
-      return isAvailable ? product : null;
-    }
-
-    scored.push({ product, score });
-  }
-
-  scored.sort((left, right) => right.score - left.score);
-
-  for (const candidate of scored) {
-    if (candidate.score < 0.18) {
-      break;
-    }
-
-    const isAvailable = await isCatalogProductAvailableForMaterialList(
-      candidate.product,
-      byggmakkerAvailabilityCache,
-    );
-
-    if (isAvailable) {
-      return candidate.product;
-    }
-  }
-
-  return null;
-}
-
-async function isCatalogProductAvailableForMaterialList(
-  product: PriceListProduct,
-  byggmakkerAvailabilityCache: Map<string, boolean>,
-) {
-  // Start with Byggmakker as requested. Other suppliers pass through for now.
-  if (!product.supplierName.toLowerCase().includes("byggmakker")) {
-    return true;
-  }
-
-  const cacheKey = (product.ean ?? "").trim();
-
-  if (!cacheKey) {
-    return false;
-  }
-
-  const cached = byggmakkerAvailabilityCache.get(cacheKey);
-
-  if (cached !== undefined) {
-    return cached;
-  }
-
-  const availability = await getByggmakkerAvailability(cacheKey);
-  const isAvailable = Boolean(availability?.netAvailable);
-  byggmakkerAvailabilityCache.set(cacheKey, isAvailable);
-  return isAvailable;
-}
-
 function normalizeNobb(value: string) {
   const normalized = value.replace(/\D/g, "");
   return normalized.length >= 6 && normalized.length <= 10 ? normalized : "";
@@ -691,18 +539,4 @@ function toNonNegativeInteger(value: unknown) {
   }
 
   return undefined;
-}
-
-function extractNobb(value: string) {
-  const match = value.match(/\b(\d{6,10})\b/);
-  return match ? match[1] : "";
-}
-
-function tokenize(value: string) {
-  return value
-    .toLowerCase()
-    .normalize("NFKD")
-    .replace(/[\u0300-\u036f]/g, "")
-    .split(/[^a-z0-9]+/)
-    .filter((token) => token.length > 1);
 }

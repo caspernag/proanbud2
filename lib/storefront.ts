@@ -7,6 +7,11 @@ import { cacheLife } from "next/cache";
 import { env, hasOpenAiEnv } from "@/lib/env";
 import { toVatInclusiveNok } from "@/lib/material-order";
 import { applyMarkup, getSupplierMarkups, type SupplierMarkup } from "@/lib/price-markup";
+import {
+  describeSalesUnitQuantity,
+  parseSalesUnitQuantity,
+  priceForSalesUnit,
+} from "@/lib/product-unit-pricing";
 import { getPriceListProducts, type PriceListProduct } from "@/lib/price-lists";
 import { filterStorefrontBlacklistedProducts } from "@/lib/storefront-product-blacklist";
 import { buildStorefrontNobbImagePath, isAllowedStorefrontImageUrl, STORE_IMAGE_FALLBACK_URL } from "@/lib/storefront-image";
@@ -20,6 +25,26 @@ import type {
 import { slugify } from "@/lib/utils";
 
 const STOREFRONT_DEFAULT_PAGE_SIZE = 24;
+const MAX_STOREFRONT_DISCOUNT = 0.4;
+
+const CATEGORY_FILTER_ALIASES: Record<string, string[]> = {
+  isolasjon: [
+    "isolasjon",
+    "glava",
+    "rockwool",
+    "mineralull",
+    "jackofoam",
+    "jackopor",
+    "cellplast",
+    "eps",
+    "xps",
+    "flexi a-plate",
+    "i-plate",
+    "markplate",
+    "vintermatte",
+    "lydreduksjonsbøyle",
+  ],
+};
 
 export async function getStorefrontProducts() {
   "use cache";
@@ -75,7 +100,7 @@ export async function queryStorefrontProducts(query: StorefrontProductQuery): Pr
   const page = Math.max(1, Math.round(query.page ?? 1));
 
   const filtered = products.filter((product) => {
-    if (category && !product.category.toLowerCase().includes(category.toLowerCase()) && !product.sectionTitle.toLowerCase().includes(category.toLowerCase())) {
+    if (category && !matchesStorefrontCategory(product, category)) {
       return false;
     }
 
@@ -341,6 +366,7 @@ function parseProductsFromCsvLikeText(rawContent: string, fileName: string): Sto
     const priceUnit = normalizeCsvColumn(columns[7]);
     const descriptionRaw = normalizeCsvColumn(columns[isSemicolon ? 9 : 2]);
     const salesUnit = normalizeCsvColumn(columns[isSemicolon ? 10 : 7]);
+    const salesUnitQuantityRaw = normalizeCsvColumn(columns[isSemicolon ? 11 : -1]);
     const altNobbCandidate = normalizeCsvColumn(columns[isSemicolon ? 14 : -1]);
     const brandOrSeries = normalizeCsvColumn(columns[isSemicolon ? 9 : 2]);
     const nobbNumber = pickCsvNobbNumber(nobbCandidate, altNobbCandidate);
@@ -351,10 +377,21 @@ function parseProductsFromCsvLikeText(rawContent: string, fileName: string): Sto
 
     const normalizedPriceUnit = (priceUnit || salesUnit || "STK").toUpperCase();
     const normalizedSalesUnit = (salesUnit || normalizedPriceUnit).toUpperCase();
-    const packageAreaSqm = parsePackageAreaSqm(descriptionRaw);
+    const salesUnitQuantity = parseSalesUnitQuantity(
+      descriptionRaw,
+      normalizedPriceUnit,
+      normalizedSalesUnit,
+      salesUnitQuantityRaw,
+    );
+    const packageAreaSqm = normalizedPriceUnit === "M2" ? salesUnitQuantity : undefined;
     const unit = normalizedSalesUnit;
     const priceNok = parseCsvPriceNok(pricePrimary) ?? parseCsvPriceNok(priceSecondary) ?? 0;
     const listPriceNok = parseCsvPriceNok(priceSecondary) ?? priceNok;
+    const salesUnitQuantityDetail = describeSalesUnitQuantity({
+      priceUnit: normalizedPriceUnit,
+      salesUnit: normalizedSalesUnit,
+      salesUnitQuantity,
+    });
 
     const normalizedProduct = normalizeStorefrontProduct(
       {
@@ -366,6 +403,7 @@ function parseProductsFromCsvLikeText(rawContent: string, fileName: string): Sto
         unit,
         priceUnit: normalizedPriceUnit,
         salesUnit: normalizedSalesUnit,
+        salesUnitQuantity,
         packageAreaSqm,
         unitPriceNok: priceNok,
         listPriceNok,
@@ -377,12 +415,13 @@ function parseProductsFromCsvLikeText(rawContent: string, fileName: string): Sto
           descriptionRaw,
           `Prisenhet: ${normalizedPriceUnit}`,
           `Salgsenhet: ${normalizedSalesUnit}`,
-          packageAreaSqm ? `Pakningsinnhold: ${formatDecimalNo(packageAreaSqm)} m²` : "",
+          salesUnitQuantityDetail,
         ].filter((value) => value.length > 0),
         quantitySuggestion: inferCsvQuantitySuggestion(unit, inferCsvSectionTitle(categoryCode, productName)),
         quantityReason: inferCsvQuantityReason(unit, inferCsvSectionTitle(categoryCode, productName), supplierName),
         lastUpdated,
         source: "vector_store",
+        unitPriceBasis: "price_unit",
       },
       fileName,
     );
@@ -428,6 +467,12 @@ function normalizeProductsFromUnknown(
       unit: readStringField(record, ["unit", "salesUnit", "unit_code"]) || "STK",
       priceUnit: readStringField(record, ["priceUnit", "price_unit", "pricingUnit", "pricing_unit"]),
       salesUnit: readStringField(record, ["salesUnit", "sales_unit", "sellingUnit", "selling_unit"]),
+      salesUnitQuantity: readNumberField(record, [
+        "salesUnitQuantity",
+        "sales_unit_quantity",
+        "quantityPerSalesUnit",
+        "quantity_per_sales_unit",
+      ]),
       packageAreaSqm: readNumberField(record, ["packageAreaSqm", "package_area_sqm", "sqmPerPackage", "sqm_per_package"]),
       unitPriceNok:
         readNumberField(record, ["unitPriceNok", "unit_price_nok", "priceNok", "price_nok", "price"]) ?? 0,
@@ -444,6 +489,7 @@ function normalizeProductsFromUnknown(
       quantityReason: readStringField(record, ["quantityReason", "quantity_reason"]) || "Direkte fra leverandørkatalog.",
       lastUpdated: readStringField(record, ["lastUpdated", "last_updated"]) || new Date().toISOString().slice(0, 10),
       source,
+      unitPriceBasis: "price_unit",
     },
     fileName,
   );
@@ -463,6 +509,7 @@ function normalizePriceListProducts(products: PriceListProduct[], source: "price
         unit: product.unit,
         priceUnit: product.priceUnit,
         salesUnit: product.salesUnit,
+        salesUnitQuantity: product.salesUnitQuantity,
         packageAreaSqm: product.packageAreaSqm,
         unitPriceNok: product.priceNok,
         listPriceNok: product.listPriceNok,
@@ -477,6 +524,7 @@ function normalizePriceListProducts(products: PriceListProduct[], source: "price
         quantityReason: product.quantityReason,
         lastUpdated: product.lastUpdated,
         source,
+        unitPriceBasis: "sales_unit",
       },
       product.supplierName,
     );
@@ -495,6 +543,7 @@ function normalizeStorefrontProduct(
     unit: string;
     priceUnit?: string;
     salesUnit?: string;
+    salesUnitQuantity?: number;
     packageAreaSqm?: number;
     unitPriceNok: number;
     listPriceNok: number;
@@ -509,6 +558,7 @@ function normalizeStorefrontProduct(
     quantityReason?: string;
     lastUpdated?: string;
     source: "vector_store" | "price_lists";
+    unitPriceBasis?: "price_unit" | "sales_unit";
   },
   fileName: string,
 ) {
@@ -524,7 +574,16 @@ function normalizeStorefrontProduct(
   const fallbackUnit = product.unit.trim().toUpperCase() || "STK";
   const priceUnit = product.priceUnit?.trim().toUpperCase() || fallbackUnit;
   const salesUnit = product.salesUnit?.trim().toUpperCase() || fallbackUnit;
-  const packageAreaSqm = product.packageAreaSqm ?? parsePackageAreaSqm(product.description);
+  const salesUnitQuantity = product.salesUnitQuantity ?? parseSalesUnitQuantity(product.description, priceUnit, salesUnit);
+  const packageAreaSqm = product.packageAreaSqm ?? (priceUnit === "M2" ? salesUnitQuantity : undefined);
+  const unitPriceNok =
+    product.unitPriceBasis === "price_unit"
+      ? priceForSalesUnit(product.unitPriceNok, { priceUnit, salesUnit, salesUnitQuantity })
+      : product.unitPriceNok;
+  const listPriceNok =
+    product.unitPriceBasis === "price_unit"
+      ? priceForSalesUnit(product.listPriceNok || product.unitPriceNok, { priceUnit, salesUnit, salesUnitQuantity })
+      : product.listPriceNok || product.unitPriceNok;
 
   return {
     id: product.id.trim() || `${slugify(supplierName)}-${nobbNumber}`,
@@ -536,9 +595,10 @@ function normalizeStorefrontProduct(
     unit: salesUnit,
     priceUnit,
     salesUnit,
+    ...(salesUnitQuantity ? { salesUnitQuantity } : {}),
     ...(packageAreaSqm ? { packageAreaSqm } : {}),
-    unitPriceNok: Math.max(0, Math.round(product.unitPriceNok)),
-    listPriceNok: Math.max(0, Math.round(product.listPriceNok || product.unitPriceNok)),
+    unitPriceNok: Math.max(0, Math.round(unitPriceNok)),
+    listPriceNok: Math.max(0, Math.round(listPriceNok)),
     sectionTitle: product.sectionTitle.trim() || "Byggevarer",
     category: product.category.trim() || "Diverse",
     description: product.description.trim() || productName,
@@ -553,9 +613,8 @@ function normalizeStorefrontProduct(
   } satisfies StorefrontProduct;
 }
 
-// Prislisten (Varekategori-kolonnen) er autoritativ for kategorisering.
-// Vector-store-indeksen kan inneholde utdaterte kategorier, så vi overlegger
-// category/sectionTitle fra prislisten matchet på NOBB-nummer.
+// Prislisten er autoritativ for kategori, enheter og basispris.
+// Vector-store-indeksen kan være stale, så vi overlegger prislistedata matchet på NOBB-nummer.
 function applyPriceListCategoryOverrides(
   products: StorefrontProduct[],
   priceListProducts: PriceListProduct[],
@@ -581,12 +640,17 @@ function applyPriceListCategoryOverrides(
     const nextSection = match.sectionTitle?.trim();
     return {
       ...product,
+      brand: preferSearchText(match.brand, product.brand, product.productName),
       category: nextCategory || product.category,
       sectionTitle: nextSection || product.sectionTitle,
+      description: preferSearchText(match.description, product.description, product.productName),
       unit: match.salesUnit || match.unit || product.unit,
       priceUnit: match.priceUnit || product.priceUnit,
       salesUnit: match.salesUnit || product.salesUnit,
+      ...(match.salesUnitQuantity ? { salesUnitQuantity: match.salesUnitQuantity } : {}),
       ...(match.packageAreaSqm ? { packageAreaSqm: match.packageAreaSqm } : {}),
+      unitPriceNok: match.priceNok,
+      listPriceNok: match.listPriceNok || match.priceNok,
       technicalDetails: mergeTechnicalDetails(product.technicalDetails, match.technicalDetails),
     };
   });
@@ -606,6 +670,23 @@ function mergeTechnicalDetails(current: string[], next: string[]) {
   return merged.slice(0, 8);
 }
 
+function preferSearchText(primary: string, fallback: string, productName: string) {
+  const primaryText = primary.trim();
+  const fallbackText = fallback.trim();
+  const normalizedFallback = fallbackText.toLowerCase();
+  const normalizedProductName = productName.trim().toLowerCase();
+
+  if (!primaryText) {
+    return fallbackText;
+  }
+
+  if (!fallbackText || normalizedFallback === normalizedProductName || normalizedFallback === "ukjent merke") {
+    return primaryText;
+  }
+
+  return fallbackText;
+}
+
 function applyStorefrontPricing(products: StorefrontProduct[], markups: SupplierMarkup[]): StorefrontProduct[] {
   return products.map((product) => {
     // Salgs-/minpris: markup + MVA.
@@ -614,8 +695,7 @@ function applyStorefrontPricing(products: StorefrontProduct[], markups: Supplier
     const listWithVat = product.listPriceNok > 0 ? toVatInclusiveNok(product.listPriceNok) : 0;
     const markedUnit = applyMarkup(product.unitPriceNok, product.supplierName, markups);
     const unitWithVat = toVatInclusiveNok(markedUnit);
-    const cappedUnitWithVat =
-      listWithVat > 0 && unitWithVat > 0 ? Math.min(unitWithVat, listWithVat) : unitWithVat;
+    const cappedUnitWithVat = limitStorefrontDiscount(unitWithVat, listWithVat);
 
     return {
       ...product,
@@ -623,6 +703,15 @@ function applyStorefrontPricing(products: StorefrontProduct[], markups: Supplier
       listPriceNok: listWithVat || cappedUnitWithVat,
     };
   });
+}
+
+export function limitStorefrontDiscount(unitWithVat: number, listWithVat: number) {
+  if (listWithVat <= 0 || unitWithVat <= 0) {
+    return unitWithVat;
+  }
+
+  const lowestAllowedPrice = Math.round(listWithVat * (1 - MAX_STOREFRONT_DISCOUNT));
+  return Math.min(Math.max(unitWithVat, lowestAllowedPrice), listWithVat);
 }
 
 function dedupeStorefrontProducts(products: StorefrontProduct[]) {
@@ -684,62 +773,247 @@ function sortStorefrontProducts(
   });
 }
 
-function scoreStorefrontProduct(product: StorefrontProduct, q: string) {
-  const needle = q.trim().toLowerCase();
+export function scoreStorefrontProduct(product: StorefrontProduct, q: string) {
+  const needle = normalizeSearchText(q);
 
   if (!needle) {
     return 1;
   }
 
-  const productName = product.productName.toLowerCase();
-  const category = product.category.toLowerCase();
-  const sectionTitle = product.sectionTitle.toLowerCase();
-  const supplierName = product.supplierName.toLowerCase();
-  const brand = product.brand.toLowerCase();
-  const description = product.description.toLowerCase();
-  const nobbNumber = product.nobbNumber.toLowerCase();
+  const numericNeedle = q.replace(/\D/g, "");
+  const ean = product.ean ?? "";
 
-  if (productName === needle || nobbNumber === needle) {
+  if (numericNeedle.length >= 6 && (product.nobbNumber === numericNeedle || ean === numericNeedle)) {
     return 100;
   }
 
   let score = 0;
+  let numericMatch = false;
+  const fields = searchableProductFields(product);
+  const combined = normalizeSearchText(fields.map((field) => field.value).join(" "));
+  const tokens = searchTokens(q);
+  const matchQuality = analyzeSearchMatch(fields, needle, tokens);
 
-  if (productName.startsWith(needle)) {
-    score += 60;
+  if (combined.includes(needle)) {
+    score += 45;
   }
 
-  if (productName.includes(needle)) {
+  for (const field of fields) {
+    const value = normalizeSearchText(field.value);
+
+    if (!value) {
+      continue;
+    }
+
+    if (value === needle) {
+      score += field.phraseWeight * 3;
+    } else if (value.startsWith(needle)) {
+      score += field.phraseWeight * 2;
+    } else if (value.includes(needle)) {
+      score += field.phraseWeight;
+    }
+
+    for (const token of tokens) {
+      if (fieldMatchesToken(value, token)) {
+        score += field.tokenWeight;
+      }
+    }
+  }
+
+  if (product.nobbNumber.includes(numericNeedle) && numericNeedle.length >= 4) {
+    score += 30;
+    numericMatch = true;
+  }
+
+  if (ean.includes(numericNeedle) && numericNeedle.length >= 6) {
+    score += 20;
+    numericMatch = true;
+  }
+
+  const matchedTokens = tokens.filter((token) => fieldMatchesToken(combined, token)).length;
+
+  if (tokens.length > 1 && matchedTokens > 0) {
+    score += matchedTokens * 8;
+  }
+
+  if (tokens.length > 1 && matchedTokens === tokens.length) {
     score += 40;
+  } else if (tokens.length > 2 && matchedTokens / tokens.length >= 0.6) {
+    score += 18;
   }
 
-  if (brand.includes(needle)) {
-    score += 15;
+  return isSearchMatchEligible({ score, tokens, numericMatch, matchQuality }) ? score : 0;
+}
+
+function searchableProductFields(product: StorefrontProduct) {
+  const brandAndName = `${product.brand} ${product.productName}`.trim();
+  const nameAndBrand = `${product.productName} ${product.brand}`.trim();
+
+  return [
+    { value: product.productName, phraseWeight: 70, tokenWeight: 20, strength: "strong" },
+    { value: brandAndName, phraseWeight: 62, tokenWeight: 16, strength: "strong" },
+    { value: nameAndBrand, phraseWeight: 58, tokenWeight: 15, strength: "strong" },
+    { value: product.brand, phraseWeight: 50, tokenWeight: 14, strength: "strong" },
+    { value: product.description, phraseWeight: 36, tokenWeight: 10, strength: "supporting" },
+    { value: product.technicalDetails.join(" "), phraseWeight: 32, tokenWeight: 9, strength: "supporting" },
+    { value: product.category, phraseWeight: 24, tokenWeight: 7, strength: "weak" },
+    { value: product.sectionTitle, phraseWeight: 20, tokenWeight: 6, strength: "weak" },
+    { value: product.supplierName, phraseWeight: 12, tokenWeight: 4, strength: "weak" },
+  ];
+}
+
+type SearchableProductField = ReturnType<typeof searchableProductFields>[number];
+
+function analyzeSearchMatch(fields: SearchableProductField[], needle: string, tokens: string[]) {
+  const strongTokens = new Set<string>();
+  const supportingTokens = new Set<string>();
+  const weakTokens = new Set<string>();
+  let strongPhrase = false;
+  let supportingPhrase = false;
+
+  for (const field of fields) {
+    const value = normalizeSearchText(field.value);
+
+    if (!value) {
+      continue;
+    }
+
+    const hasPhrase = value === needle || value.startsWith(needle) || value.includes(needle);
+
+    if (hasPhrase && field.strength === "strong") {
+      strongPhrase = true;
+    }
+
+    if (hasPhrase && field.strength === "supporting") {
+      supportingPhrase = true;
+    }
+
+    for (const token of tokens) {
+      if (!fieldMatchesToken(value, token)) {
+        continue;
+      }
+
+      if (field.strength === "strong") {
+        strongTokens.add(token);
+      } else if (field.strength === "supporting") {
+        supportingTokens.add(token);
+      } else {
+        weakTokens.add(token);
+      }
+    }
   }
 
-  if (category.includes(needle) || sectionTitle.includes(needle)) {
-    score += 12;
+  const totalTokens = new Set([...strongTokens, ...supportingTokens, ...weakTokens]);
+
+  return {
+    strongTokens: strongTokens.size,
+    supportingTokens: supportingTokens.size,
+    totalTokens: totalTokens.size,
+    strongPhrase,
+    supportingPhrase,
+  };
+}
+
+function isSearchMatchEligible({
+  score,
+  tokens,
+  numericMatch,
+  matchQuality,
+}: {
+  score: number;
+  tokens: string[];
+  numericMatch: boolean;
+  matchQuality: ReturnType<typeof analyzeSearchMatch>;
+}) {
+  if (score <= 0) {
+    return false;
   }
 
-  if (supplierName.includes(needle)) {
-    score += 10;
+  if (numericMatch) {
+    return true;
   }
 
-  if (description.includes(needle)) {
-    score += 6;
+  if (tokens.length <= 1) {
+    return matchQuality.totalTokens > 0 && score >= 30;
   }
 
-  if (nobbNumber.includes(needle)) {
-    score += 25;
+  if (matchQuality.strongPhrase || matchQuality.supportingPhrase) {
+    return true;
   }
 
-  const tokens = needle.split(/\s+/).filter(Boolean);
-
-  if (tokens.length > 1) {
-    score += tokens.reduce((sum, token) => sum + scoreStorefrontProduct(product, token), 0);
+  if (tokens.length === 2) {
+    return matchQuality.strongTokens >= 1 && matchQuality.totalTokens === 2;
   }
 
-  return score;
+  const requiredTokenMatches = Math.max(2, Math.ceil(tokens.length * 0.6));
+  const requiredStrongMatches = Math.max(1, Math.ceil(requiredTokenMatches / 2));
+
+  return matchQuality.totalTokens >= requiredTokenMatches && matchQuality.strongTokens >= requiredStrongMatches;
+}
+
+function normalizeSearchText(value: string) {
+  return value
+    .toLowerCase()
+    .replace(/m²/g, "m2")
+    .replace(/×/g, "x")
+    .replace(/(\d),(\d)/g, "$1.$2")
+    .replace(/(\d)\s*x\s*(\d)/g, "$1x$2")
+    .replace(/[^a-z0-9æøå.]+/g, " ")
+    .replace(/\s+/g, " ")
+    .trim();
+}
+
+function searchTokens(value: string) {
+  return normalizeSearchText(value)
+    .split(" ")
+    .map((token) => token.trim())
+    .filter((token) => token.length > 1 || /^\d$/.test(token));
+}
+
+function fieldMatchesToken(fieldValue: string, token: string) {
+  if (!token) {
+    return false;
+  }
+
+  if (fieldValue.includes(token)) {
+    return true;
+  }
+
+  const words = fieldValue.split(" ");
+
+  return words.some((word) => {
+    if (word.length < 4 || token.length < 4) {
+      return false;
+    }
+
+    return word.startsWith(token) || token.startsWith(word);
+  });
+}
+
+function matchesStorefrontCategory(product: StorefrontProduct, category: string) {
+  const needle = category.trim().toLowerCase();
+
+  if (!needle) {
+    return true;
+  }
+
+  const haystack = [
+    product.category,
+    product.sectionTitle,
+    product.productName,
+    product.brand,
+    product.description,
+    ...product.technicalDetails,
+  ]
+    .join(" ")
+    .toLowerCase();
+
+  if (haystack.includes(needle)) {
+    return true;
+  }
+
+  const aliases = CATEGORY_FILTER_ALIASES[needle] ?? [];
+  return aliases.some((alias) => haystack.includes(alias));
 }
 
 function normalizeStorefrontSort(value?: string): StorefrontSortOption {
@@ -909,22 +1183,6 @@ function parseCsvPriceNok(value: string) {
 function parseCsvEan(value: string) {
   const digits = value.replace(/\D/g, "");
   return digits.length >= 8 ? digits : undefined;
-}
-
-function parsePackageAreaSqm(raw: string) {
-  const normalized = raw.replace(/m²/gi, "M2");
-  const match = normalized.match(/(\d+(?:[,.]\d+)?)\s*M2\s*(?:PR|PER)?\s*(?:PK|PAK|PAKKE)\b/i);
-
-  if (!match) {
-    return undefined;
-  }
-
-  const value = Number(match[1].replace(",", "."));
-  return Number.isFinite(value) && value > 0 ? value : undefined;
-}
-
-function formatDecimalNo(value: number) {
-  return new Intl.NumberFormat("nb-NO", { maximumFractionDigits: 2 }).format(value);
 }
 
 function supplierLabelFromFileName(fileName: string) {

@@ -4,7 +4,7 @@ import { Suspense } from "react";
 
 import { AddToMaterialListButton } from "@/app/_components/storefront/add-to-material-list-button";
 import { AddToCartButton } from "@/app/_components/storefront/add-to-cart-button";
-import { MobileFilterDrawer } from "@/app/_components/storefront/mobile-filter-drawer";
+import { StorefrontMobileControls } from "@/app/_components/storefront/storefront-mobile-controls";
 import { StorefrontProfileTracker } from "@/app/_components/storefront/storefront-profile-tracker";
 import { StorefrontProductImage } from "@/app/_components/storefront/storefront-product-image";
 import { StorefrontViewControls } from "@/app/_components/storefront/storefront-view-controls";
@@ -15,15 +15,11 @@ import {
   getStorefrontProductsByNobb,
   queryStorefrontProducts,
 } from "@/lib/storefront";
-import {
-  STOREFRONT_SELECTED_STORE_COOKIE,
-  STOREFRONT_STORE_OPTIONS,
-} from "@/lib/storefront-store-selection";
 import { parseStorefrontUserProfileCookie, STOREFRONT_USER_PROFILE_COOKIE } from "@/lib/storefront-user-profile";
 import type { StorefrontProduct, StorefrontSortOption } from "@/lib/storefront-types";
 import { formatCurrency } from "@/lib/utils";
 
-type StockStatus = "in-stock" | "stores" | "backorder" | "unknown";
+type StockStatus = "in-stock" | "backorder" | "unknown";
 type ProductStockInfo = {
   status: StockStatus;
   label: string;
@@ -114,7 +110,6 @@ const FEATURED_CATEGORIES: Array<{
 export default async function StorefrontPage({ searchParams }: StorefrontPageProps) {
   const resolvedSearchParams = await searchParams;
   const cookieStore = await cookies();
-  const selectedStoreId = cookieStore.get(STOREFRONT_SELECTED_STORE_COOKIE)?.value ?? "";
   const userProfile = parseStorefrontUserProfileCookie(cookieStore.get(STOREFRONT_USER_PROFILE_COOKIE)?.value);
   const q = typeof resolvedSearchParams.q === "string" ? resolvedSearchParams.q : "";
   const category = typeof resolvedSearchParams.category === "string" ? resolvedSearchParams.category : "";
@@ -143,9 +138,6 @@ export default async function StorefrontPage({ searchParams }: StorefrontPagePro
     ? resolveFeaturedCategories(result.categories, allProducts)
     : [];
 
-  const selectedStoreName = selectedStoreId
-    ? STOREFRONT_STORE_OPTIONS.find((store) => store.id === selectedStoreId)?.name ?? "valgt butikk"
-    : "";
   const stockFilterCandidates = inStockOnly
     ? await queryStorefrontProducts({
         q,
@@ -158,7 +150,20 @@ export default async function StorefrontPage({ searchParams }: StorefrontPagePro
         pageSizeLimit: Math.max(result.total, 1),
       })
     : null;
-  const stockCandidateItems = stockFilterCandidates?.items ?? [];
+  const shouldPrioritizeNetStock = !inStockOnly && hasFilters;
+  const stockRankingCandidates = shouldPrioritizeNetStock
+    ? await queryStorefrontProducts({
+        q,
+        category,
+        supplier,
+        sort,
+        userProfile,
+        page: 1,
+        pageSize: Math.max(result.total, 1),
+        pageSizeLimit: Math.max(result.total, 1),
+      })
+    : null;
+  const stockCandidateItems = stockFilterCandidates?.items ?? stockRankingCandidates?.items ?? [];
 
   // Batch-resolve real stock status for all products that may be rendered or
   // filtered using EANs sourced directly from the price list.
@@ -177,15 +182,18 @@ export default async function StorefrontPage({ searchParams }: StorefrontPagePro
     : new Map();
   const stockByEan = new Map<string, ProductStockInfo>();
   for (const [ean, info] of availabilityMap) {
-    stockByEan.set(ean, buildProductStockInfo(info, selectedStoreId, selectedStoreName));
+    stockByEan.set(ean, buildProductStockInfo(info));
   }
   const stockFilteredItems = inStockOnly
     ? stockCandidateItems.filter((product) => product.ean && isProductInStock(stockByEan.get(product.ean)))
-    : result.items;
-  const filteredTotal = inStockOnly ? stockFilteredItems.length : result.total;
+    : shouldPrioritizeNetStock
+      ? prioritizeNetStock(stockCandidateItems, stockByEan)
+      : result.items;
+  const stockAdjustedPaging = inStockOnly || shouldPrioritizeNetStock;
+  const filteredTotal = stockAdjustedPaging ? stockFilteredItems.length : result.total;
   const filteredTotalPages = Math.max(1, Math.ceil(filteredTotal / result.pageSize));
-  const filteredPage = inStockOnly ? Math.min(Math.max(1, page), filteredTotalPages) : result.page;
-  const displayItems = inStockOnly
+  const filteredPage = stockAdjustedPaging ? Math.min(Math.max(1, page), filteredTotalPages) : result.page;
+  const displayItems = stockAdjustedPaging
     ? stockFilteredItems.slice((filteredPage - 1) * result.pageSize, filteredPage * result.pageSize)
     : result.items;
 
@@ -225,9 +233,12 @@ export default async function StorefrontPage({ searchParams }: StorefrontPagePro
         </aside>
 
         <div className="space-y-4">
-          {/* Mobile filter drawer – only visible on mobile */}
-          <div className="flex items-center justify-between lg:hidden">
-            <MobileFilterDrawer activeFiltersCount={(q ? 1 : 0) + (category ? 1 : 0) + (supplier ? 1 : 0) + (inStockOnly ? 1 : 0)}>
+          <Suspense>
+            <StorefrontMobileControls
+              activeFiltersCount={(q ? 1 : 0) + (category ? 1 : 0) + (supplier ? 1 : 0) + (inStockOnly ? 1 : 0)}
+              initialSort={sort}
+              initialInStockOnly={inStockOnly}
+            >
               <FilterPanel
                 q={q}
                 category={category}
@@ -239,9 +250,8 @@ export default async function StorefrontPage({ searchParams }: StorefrontPagePro
                 categoryCounts={result.categoryCounts}
                 priceRange={result.priceRange}
               />
-            </MobileFilterDrawer>
-            <Suspense><StorefrontViewControls initialSort={sort} initialCols={cols} initialInStockOnly={inStockOnly} /></Suspense>
-          </div>
+            </StorefrontMobileControls>
+          </Suspense>
 
           <div className="flex flex-col gap-3 rounded-xl border border-stone-200 bg-white p-3 shadow-[0_8px_20px_rgba(32,25,15,0.04)] sm:flex-row sm:items-center sm:justify-between sm:p-4">
             <div className="min-w-0">
@@ -540,7 +550,7 @@ function DealsStrip({ deals, stockByEan }: { deals: StorefrontProduct[]; stockBy
                 </div>
                 <div className="flex min-w-0 items-center gap-1.5 text-[11px] text-stone-500">
                   <StockChip stock={product.ean ? stockByEan.get(product.ean) ?? UNKNOWN_PRODUCT_STOCK : UNKNOWN_PRODUCT_STOCK} />
-                  <span className="truncate">per {formatUnitLabel(product.priceUnit ?? product.unit)}</span>
+                  <span className="truncate">per {formatUnitLabel(product.salesUnit ?? product.unit)}</span>
                 </div>
                 <div className="mt-auto grid grid-cols-[minmax(0,1fr)_auto] gap-2 pt-1">
                   <AddToCartButton productId={product.id} fullWidth />
@@ -562,7 +572,7 @@ function ProductCard({ product, stockInfo }: { product: StorefrontProduct; stock
     : 0;
   const priceUnitLabel = formatUnitLabel(product.priceUnit ?? product.unit);
   const salesUnitLabel = formatUnitLabel(product.salesUnit ?? product.unit);
-  const packagePriceNok = product.packageAreaSqm ? product.unitPriceNok * product.packageAreaSqm : 0;
+  const pricePerPriceUnitNok = product.packageAreaSqm ? product.unitPriceNok / product.packageAreaSqm : 0;
 
   return (
     <article className="group relative flex min-w-0 flex-col overflow-hidden rounded-md border border-stone-200 bg-white shadow-[0_3px_12px_rgba(32,25,15,0.03)] transition hover:border-[#15452d] hover:shadow-[0_8px_18px_rgba(21,69,45,0.08)]">
@@ -606,11 +616,11 @@ function ProductCard({ product, stockInfo }: { product: StorefrontProduct; stock
           </div>
           <div className="flex min-w-0 items-center gap-1.5 text-[11px] text-stone-500">
             <StockChip stock={stockInfo} />
-            <span className="truncate">per {priceUnitLabel}</span>
+            <span className="truncate">per {salesUnitLabel}</span>
           </div>
           {product.packageAreaSqm ? (
             <p className="truncate text-[11px] font-medium text-stone-500">
-              1 {salesUnitLabel} = {formatDecimalNo(product.packageAreaSqm)} m² · {formatCurrency(packagePriceNok)}
+              1 {salesUnitLabel} = {formatDecimalNo(product.packageAreaSqm)} m² · {formatCurrency(pricePerPriceUnitNok)} per {priceUnitLabel}
             </p>
           ) : null}
 
@@ -659,14 +669,6 @@ function StockChip({ stock }: { stock: ProductStockInfo }) {
     return (
       <span className="inline-flex min-w-0 shrink-0 items-center gap-1 rounded-full bg-emerald-50 px-1.5 py-0.5 text-[10px] font-semibold text-emerald-700 ring-1 ring-emerald-200" title={stock.detail ?? stock.label}>
         <span className="h-1.5 w-1.5 rounded-full bg-emerald-500" />
-        <span className="max-w-[150px] truncate">{stock.label}</span>
-      </span>
-    );
-  }
-  if (stock.status === "stores") {
-    return (
-      <span className="inline-flex min-w-0 shrink-0 items-center gap-1 rounded-full bg-amber-50 px-1.5 py-0.5 text-[10px] font-semibold text-amber-800 ring-1 ring-amber-200" title={stock.detail ?? stock.label}>
-        <span className="h-1.5 w-1.5 rounded-full bg-amber-500" />
         <span className="max-w-[150px] truncate">{stock.label}</span>
       </span>
     );
@@ -729,13 +731,13 @@ function ActiveFilterChips({
   if (inStockOnly) chips.push({ label: "På lager", href: buildStoreHref({ q, category, supplier, sort, cols }) });
 
   return (
-    <div className="flex flex-wrap items-center gap-2 rounded-xl border border-stone-200 bg-white px-3 py-2 shadow-[0_6px_16px_rgba(32,25,15,0.04)]">
-      <span className="text-xs font-semibold uppercase tracking-[0.14em] text-stone-500">Aktive filtre</span>
+    <div className="-mx-1 flex items-center gap-2 overflow-x-auto px-1 pb-1 sm:mx-0 sm:flex-wrap sm:overflow-visible sm:rounded-xl sm:border sm:border-stone-200 sm:bg-white sm:px-3 sm:py-2 sm:shadow-[0_6px_16px_rgba(32,25,15,0.04)]">
+      <span className="hidden text-xs font-semibold uppercase tracking-[0.14em] text-stone-500 sm:inline">Aktive filtre</span>
       {chips.map((chip) => (
         <Link
           key={chip.label}
           href={chip.href}
-          className="inline-flex items-center gap-1.5 rounded-full border border-stone-300 bg-stone-50 px-3 py-1 text-xs font-medium text-stone-700 transition hover:border-[#c03a2b] hover:text-[#c03a2b]"
+          className="inline-flex shrink-0 items-center gap-1.5 rounded-full border border-stone-300 bg-white px-3 py-1.5 text-xs font-medium text-stone-700 shadow-[0_2px_8px_rgba(32,25,15,0.04)] transition hover:border-[#c03a2b] hover:text-[#c03a2b] sm:bg-stone-50 sm:py-1 sm:shadow-none"
         >
           {chip.label}
           <span aria-hidden>×</span>
@@ -743,7 +745,7 @@ function ActiveFilterChips({
       ))}
       <Link
         href={buildStoreHref({ sort, cols })}
-        className="ml-auto text-xs font-semibold text-[#15452d] hover:underline"
+        className="shrink-0 rounded-full border border-stone-200 bg-white px-3 py-1.5 text-xs font-semibold text-[#15452d] shadow-[0_2px_8px_rgba(32,25,15,0.04)] hover:border-[#15452d] sm:ml-auto sm:border-0 sm:bg-transparent sm:px-0 sm:py-0 sm:shadow-none sm:hover:underline"
       >
         Nullstill alle
       </Link>
@@ -773,9 +775,9 @@ function FilterPanel({
   priceRange: { min: number; max: number };
 }) {
   return (
-    <div className="rounded-xl border border-stone-200 bg-white p-4 shadow-[0_8px_20px_rgba(32,25,15,0.06)]">
-      <div className="flex items-center justify-between">
-        <p className="text-sm font-semibold text-stone-900">Filtrer varer</p>
+    <div className="bg-white lg:rounded-xl lg:border lg:border-stone-200 lg:p-4 lg:shadow-[0_8px_20px_rgba(32,25,15,0.06)]">
+      <div className="flex items-center justify-end lg:justify-between">
+        <p className="hidden text-sm font-semibold text-stone-900 lg:block">Filtrer varer</p>
         {q || category || supplier || inStockOnly ? (
           <Link href={buildStoreHref({ sort, cols })} className="text-xs font-semibold text-[#15452d] hover:underline">
             Nullstill
@@ -994,63 +996,49 @@ function resolveFeaturedCategories(
   return tiles.slice(0, 8);
 }
 
-function buildProductStockInfo(
-  info: ByggmakkerAvailability,
-  selectedStoreId: string,
-  selectedStoreName: string,
-): ProductStockInfo {
-  if (selectedStoreId) {
-    const selectedStore = info.stores.find((store) => store.id === selectedStoreId);
-
-    if (selectedStore) {
-      return selectedStore.quantity > 0
-        ? {
-            status: "stores",
-            label: `${formatStockQuantity(selectedStore.quantity)} i ${selectedStore.name}`,
-            detail: `Valgt butikk: ${selectedStore.name}`,
-          }
-        : {
-            status: "backorder",
-            label: `Tomt i ${selectedStore.name}`,
-            detail: `Valgt butikk: ${selectedStore.name}`,
-          };
-    }
-
-    return {
-      status: "backorder",
-      label: `Tomt i ${selectedStoreName || "valgt butikk"}`,
-      detail: info.netAvailable && typeof info.netQuantity === "number"
-        ? `Nettlager: ${formatStockQuantity(info.netQuantity)}`
-        : undefined,
-    };
-  }
-
+function buildProductStockInfo(info: ByggmakkerAvailability): ProductStockInfo {
   if (info.netAvailable) {
     const netQuantity = typeof info.netQuantity === "number" ? formatStockQuantity(info.netQuantity) : "på lager";
     return {
       status: "in-stock",
       label: `Nettlager: ${netQuantity}`,
-      detail: info.storeAvailable ? `${info.storeCount} butikker har også lager` : undefined,
-    };
-  }
-
-  if (info.storeAvailable) {
-    const storeQuantity = info.stores.reduce((sum, store) => sum + store.quantity, 0);
-    return {
-      status: "stores",
-      label: `Butikk: ${formatStockQuantity(storeQuantity)}`,
-      detail: `${info.storeCount} ${info.storeCount === 1 ? "butikk" : "butikker"} har varen`,
     };
   }
 
   return {
     status: "backorder",
-    label: "Ikke på lager",
+    label: "Ikke på nettlager",
   };
 }
 
 function isProductInStock(stock: ProductStockInfo | undefined) {
-  return stock?.status === "in-stock" || stock?.status === "stores";
+  return stock?.status === "in-stock";
+}
+
+function prioritizeNetStock(products: StorefrontProduct[], stockByEan: Map<string, ProductStockInfo>) {
+  return products
+    .map((product, index) => ({ product, index }))
+    .sort((left, right) => {
+      const leftRank = netStockRank(left.product, stockByEan);
+      const rightRank = netStockRank(right.product, stockByEan);
+
+      return leftRank - rightRank || left.index - right.index;
+    })
+    .map(({ product }) => product);
+}
+
+function netStockRank(product: StorefrontProduct, stockByEan: Map<string, ProductStockInfo>) {
+  const stock = product.ean ? stockByEan.get(product.ean) : undefined;
+
+  if (stock?.status === "in-stock") {
+    return 0;
+  }
+
+  if (!stock || stock.status === "unknown") {
+    return 1;
+  }
+
+  return 2;
 }
 
 function formatUnitLabel(unit: string) {

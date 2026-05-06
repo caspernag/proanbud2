@@ -1,6 +1,7 @@
 import { describe, it, expect } from "vitest";
 
 import { applyMarkup, applyMarkupForSupplierKey, type SupplierMarkup } from "@/lib/price-markup";
+import { limitStorefrontDiscount } from "@/lib/storefront";
 
 const SAMPLE_MARKUPS: SupplierMarkup[] = [
   { supplier_name: "Byggmakker", markup_percentage: 10, markup_fixed: 0 },
@@ -72,5 +73,19 @@ describe("applyMarkup (by supplier name string)", () => {
     // 500 + 8 % (40) + 50 = 590
     const result = applyMarkup(500, "Optimera", SAMPLE_MARKUPS);
     expect(result).toBe(590);
+  });
+});
+
+describe("limitStorefrontDiscount", () => {
+  it("does not allow more than 40 percent discount against list price", () => {
+    expect(limitStorefrontDiscount(400, 1000)).toBe(600);
+  });
+
+  it("keeps valid discounts unchanged", () => {
+    expect(limitStorefrontDiscount(750, 1000)).toBe(750);
+  });
+
+  it("does not allow sale price above list price", () => {
+    expect(limitStorefrontDiscount(1200, 1000)).toBe(1000);
   });
 });

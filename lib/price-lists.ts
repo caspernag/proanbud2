@@ -2,7 +2,16 @@ import "server-only";
 import { promises as fs } from "node:fs";
 import path from "node:path";
 
+import OpenAI from "openai";
+
 import { cacheLife } from "next/cache";
+
+import { env, hasOpenAiEnv } from "@/lib/env";
+import {
+  describeSalesUnitQuantity,
+  parseSalesUnitQuantity,
+  priceForSalesUnit,
+} from "@/lib/product-unit-pricing";
 
 export type PriceListProduct = {
   id: string;
@@ -13,6 +22,7 @@ export type PriceListProduct = {
   unit: string;
   priceUnit: string;
   salesUnit: string;
+  salesUnitQuantity?: number;
   packageAreaSqm?: number;
   priceNok: number;
   listPriceNok: number;
@@ -31,18 +41,28 @@ export type PriceListProduct = {
 const PRIVATE_PRICE_LIST_DIR = path.join(process.cwd(), ".private", "prislister");
 const LEGACY_PRICE_LIST_DIR = path.join(process.cwd(), "prislister");
 
-export async function getPriceListProducts() {
+type GetPriceListProductsOptions = {
+  includeVectorStore?: boolean;
+};
+
+export async function getPriceListProducts(options: GetPriceListProductsOptions = {}) {
   "use cache";
   cacheLife("minutes");
 
+  const includeVectorStore = options.includeVectorStore ?? true;
   const csvPaths = await resolvePriceListCsvPaths();
+  const [localProducts, vectorProducts] = await Promise.all([
+    csvPaths.length > 0
+      ? Promise.all(csvPaths.map((csvPath) => parseSupplierCsv(csvPath))).then((groups) => groups.flat())
+      : Promise.resolve([] as PriceListProduct[]),
+    includeVectorStore ? getOpenAiVectorStorePriceListProducts() : Promise.resolve([] as PriceListProduct[]),
+  ]);
 
-  if (csvPaths.length === 0) {
-    return [] as PriceListProduct[];
+  if (vectorProducts.length === 0) {
+    return localProducts;
   }
 
-  const productGroups = await Promise.all(csvPaths.map((csvPath) => parseSupplierCsv(csvPath)));
-  return productGroups.flat();
+  return mergePriceListProducts(vectorProducts, localProducts);
 }
 
 function decodePriceListCsv(rawBuffer: Buffer) {
@@ -117,6 +137,7 @@ async function parseSupplierCsv(csvPath: string): Promise<PriceListProduct[]> {
       const priceUnit = normalizeColumn(columns[7]);
       const descriptionRaw = normalizeColumn(columns[9]);
       const salesUnit = normalizeColumn(columns[10]);
+      const salesUnitQuantityRaw = normalizeColumn(columns[11]);
       const brandOrSeries = normalizeColumn(columns[9]);
       const altNobbCandidate = normalizeColumn(columns[14]);
 
@@ -128,17 +149,38 @@ async function parseSupplierCsv(csvPath: string): Promise<PriceListProduct[]> {
 
       const normalizedPriceUnit = (priceUnit || salesUnit || "STK").toUpperCase();
       const normalizedSalesUnit = (salesUnit || normalizedPriceUnit).toUpperCase();
-      const packageAreaSqm = parsePackageAreaSqm(descriptionRaw);
+      const salesUnitQuantity = parseSalesUnitQuantity(
+        descriptionRaw,
+        normalizedPriceUnit,
+        normalizedSalesUnit,
+        salesUnitQuantityRaw,
+      );
+      const packageAreaSqm = normalizedPriceUnit === "M2" ? salesUnitQuantity : undefined;
       const unit = normalizedSalesUnit;
-      const priceNok = parsePriceNok(pricePrimary) ?? parsePriceNok(priceSecondary) ?? 0;
-      const listPriceNok = parsePriceNok(priceSecondary) ?? priceNok;
+      const priceUnitPriceNok = parsePriceNok(pricePrimary) ?? parsePriceNok(priceSecondary) ?? 0;
+      const listPriceUnitNok = parsePriceNok(priceSecondary) ?? priceUnitPriceNok;
+      const priceNok = priceForSalesUnit(priceUnitPriceNok, {
+        priceUnit: normalizedPriceUnit,
+        salesUnit: normalizedSalesUnit,
+        salesUnitQuantity,
+      });
+      const listPriceNok = priceForSalesUnit(listPriceUnitNok, {
+        priceUnit: normalizedPriceUnit,
+        salesUnit: normalizedSalesUnit,
+        salesUnitQuantity,
+      });
       const sectionTitle = inferSectionTitle(categoryCode, productName);
       const category = inferCategory(categoryCode, productName);
+      const salesUnitQuantityDetail = describeSalesUnitQuantity({
+        priceUnit: normalizedPriceUnit,
+        salesUnit: normalizedSalesUnit,
+        salesUnitQuantity,
+      });
       const technicalDetails = [
         descriptionRaw,
         `Prisenhet: ${normalizedPriceUnit}`,
         `Salgsenhet: ${normalizedSalesUnit}`,
-        packageAreaSqm ? `Pakningsinnhold: ${formatDecimalNo(packageAreaSqm)} m²` : "",
+        salesUnitQuantityDetail,
       ].filter((value) => value.length > 0);
 
       products.push({
@@ -150,6 +192,7 @@ async function parseSupplierCsv(csvPath: string): Promise<PriceListProduct[]> {
         unit,
         priceUnit: normalizedPriceUnit,
         salesUnit: normalizedSalesUnit,
+        ...(salesUnitQuantity ? { salesUnitQuantity } : {}),
         ...(packageAreaSqm ? { packageAreaSqm } : {}),
         priceNok,
         listPriceNok,
@@ -252,22 +295,6 @@ function parseEan(raw: string) {
 
   const ean = Math.round(numeric).toString();
   return ean.length >= 8 ? ean : null;
-}
-
-function parsePackageAreaSqm(raw: string) {
-  const normalized = raw.replace(/m²/gi, "M2");
-  const match = normalized.match(/(\d+(?:[,.]\d+)?)\s*M2\s*(?:PR|PER)?\s*(?:PK|PAK|PAKKE)\b/i);
-
-  if (!match) {
-    return undefined;
-  }
-
-  const value = Number(match[1].replace(",", "."));
-  return Number.isFinite(value) && value > 0 ? value : undefined;
-}
-
-function formatDecimalNo(value: number) {
-  return new Intl.NumberFormat("nb-NO", { maximumFractionDigits: 2 }).format(value);
 }
 
 // NOBB Varekategori-kode → lesbar kategori.

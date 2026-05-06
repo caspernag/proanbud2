@@ -16,6 +16,8 @@ export const env = {
   openAiVectorStoreIdStorefront:
     process.env.OPENAI_VECTOR_STORE_ID_STOREFRONT ?? "vs_69e881362da8819196c25789a50dee3d",
   resendApiKey: process.env.RESEND_API_KEY ?? "",
+  byggmakkerOrderEmail: process.env.BYGGMAKKER_ORDER_EMAIL ?? "",
+  trebyggOrderFromEmail: process.env.TREBYGG_ORDER_FROM_EMAIL ?? "",
 };
 
 export function hasSupabaseEnv() {
@@ -35,7 +37,7 @@ export function hasStripeWebhookEnv() {
 }
 
 export function isStripeBypassed() {
-  return !hasStripeEnv() || (env.bypassStripeCheckout && process.env.NODE_ENV !== "production");
+  return env.bypassStripeCheckout && process.env.NODE_ENV === "test";
 }
 
 export function hasNobbApiEnv() {

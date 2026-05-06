@@ -1,3 +1,5 @@
+/* eslint-disable @typescript-eslint/no-require-imports */
+
 const fs = require('fs');
 
 let content = fs.readFileSync('app/_components/new-project-dialog.tsx', 'utf8');

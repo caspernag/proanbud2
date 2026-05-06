@@ -1,19 +1,14 @@
 import { Suspense, type ReactNode } from "react";
-import { cookies } from "next/headers";
 
 import { StorefrontHeader } from "@/app/_components/storefront/storefront-header";
 import { StorefrontProvider } from "@/app/_components/storefront/storefront-provider";
-import {
-  STOREFRONT_SELECTED_STORE_COOKIE,
-  STOREFRONT_STORE_OPTIONS,
-} from "@/lib/storefront-store-selection";
 
 export default function StorefrontLayout({ children }: { children: ReactNode }) {
   return (
     <StorefrontProvider>
       <div className="min-h-screen bg-[#f5f4f1] text-stone-900">
         <Suspense fallback={<StorefrontHeaderFallback />}>
-          <StorefrontHeaderWithSelectedStore />
+          <StorefrontHeader />
         </Suspense>
         <main className="mx-auto w-full max-w-[1500px] px-3 pb-[calc(2rem+env(safe-area-inset-bottom))] pt-3 sm:px-6 sm:pt-5 lg:px-8">
           <Suspense fallback={null}>
@@ -40,36 +35,29 @@ function StorefrontHeaderFallback() {
         </div>
       </div>
 
-      <div className="mx-auto flex w-full max-w-[1500px] flex-wrap items-center gap-2 px-3 py-2.5 sm:gap-4 sm:px-6 lg:flex-nowrap lg:gap-6 lg:px-8">
-        <div className="order-1 flex shrink-0 items-center gap-2">
-          <div className="h-7 w-7 rounded-md bg-[#15452d] sm:h-8 sm:w-32" />
+      <div className="mx-auto flex w-full max-w-[1500px] flex-col gap-2 px-3 py-2.5 sm:px-6 md:py-3 lg:flex-row lg:items-center lg:gap-6 lg:px-8">
+        <div className="flex items-center gap-2 lg:contents">
+          <div className="h-8 w-8 rounded-md bg-[#15452d] sm:h-8 sm:w-32" />
           <span className="hidden rounded-md bg-[#d9ff7a] px-1.5 py-0.5 text-[10px] font-bold uppercase tracking-[0.14em] text-[#0f321f] sm:inline-flex">
             Partnerpris
           </span>
+          <div className="ml-auto flex items-center gap-1.5 lg:hidden">
+            <div className="h-10 w-10 rounded-lg border border-stone-200 bg-white shadow-sm" />
+          </div>
         </div>
 
-        <div className="order-4 flex h-11 min-w-0 flex-1 basis-full items-center rounded-md border border-stone-300 bg-white px-4 text-sm text-stone-400 shadow-sm sm:order-2 sm:basis-auto lg:order-2">
-          Søk etter terrassebord, gips, skruer...
+        <div className="flex h-11 min-w-0 flex-1 items-center rounded-lg border border-stone-200 bg-stone-50 px-4 text-sm text-stone-400 shadow-sm lg:rounded-md lg:bg-white">
+          Søk byggevarer
         </div>
-
-        <div className="order-3 ml-auto h-10 w-28 rounded-md border border-stone-300 bg-white lg:order-4 lg:ml-0" />
       </div>
 
-      <nav className="border-t border-stone-200 bg-white">
+      <nav className="hidden border-t border-stone-200 bg-white md:block">
         <div className="mx-auto flex w-full max-w-[1500px] items-center gap-2 overflow-hidden px-3 py-1.5 sm:px-6 lg:px-8">
-          {STOREFRONT_STORE_OPTIONS.slice(0, 8).map((store) => (
-            <span key={store.id} className="h-9 w-24 shrink-0 rounded-md bg-stone-100" />
+          {Array.from({ length: 8 }, (_, index) => (
+            <span key={index} className="h-9 w-24 shrink-0 rounded-md bg-stone-100" />
           ))}
-          <span className="ml-auto h-8 w-32 shrink-0 rounded-md bg-stone-100" />
         </div>
       </nav>
     </header>
   );
-}
-
-async function StorefrontHeaderWithSelectedStore() {
-  const cookieStore = await cookies();
-  const selectedStoreId = cookieStore.get(STOREFRONT_SELECTED_STORE_COOKIE)?.value ?? "";
-
-  return <StorefrontHeader stores={STOREFRONT_STORE_OPTIONS} selectedStoreId={selectedStoreId} />;
 }

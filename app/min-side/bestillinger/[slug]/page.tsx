@@ -1,6 +1,17 @@
 import Link from "next/link";
+import { revalidatePath } from "next/cache";
 import { notFound, redirect } from "next/navigation";
 
+import {
+  isUuid,
+  logShopOrderEvent,
+  SHOP_ORDER_TRANSPORT_LABELS,
+  SHOP_ORDER_TRANSPORT_STEPS,
+  transportStepState,
+  type ShopOrderTransportStatus,
+} from "@/lib/shop-order";
+import { withResolvedShopOrderUnits } from "@/lib/shop-order-units";
+import { createSupabaseAdminClient } from "@/lib/supabase/admin";
 import { createSupabaseServerClient } from "@/lib/supabase/server";
 import { formatCurrency } from "@/lib/utils";
 
@@ -35,7 +46,17 @@ type MatItem = {
 
 type ShopOrder = {
   id: string;
+  public_token: string;
+  slug: string | null;
   status: "draft" | "pending_payment" | "paid" | "fulfilled" | "cancelled" | "failed";
+  transport_status: ShopOrderTransportStatus;
+  carrier: string | null;
+  tracking_number: string | null;
+  tracking_url: string | null;
+  estimated_delivery_date: string | null;
+  shipped_at: string | null;
+  delivered_at: string | null;
+  last_status_note: string;
   total_nok: number;
   subtotal_nok: number;
   shipping_nok: number;
@@ -54,6 +75,7 @@ type ShopOrder = {
 
 type ShopItem = {
   id: string;
+  product_id: string;
   product_name: string;
   supplier_name: string;
   quantity: number;
@@ -61,6 +83,22 @@ type ShopItem = {
   line_total_nok: number;
   unit: string;
   nobb_number: string;
+};
+
+type ShopMessage = {
+  id: string;
+  author_type: "customer" | "admin";
+  author_name: string;
+  body: string;
+  created_at: string;
+};
+
+type ShopEvent = {
+  id: string;
+  event_type: string;
+  actor_label: string | null;
+  message: string;
+  created_at: string;
 };
 
 function fmtDate(v: string) {
@@ -198,39 +236,106 @@ export default async function BestillingDetaljPage({ params }: PageProps) {
     );
   }
 
-  const { data: shopData } = await supabase
+  const shopOrderClient = createSupabaseAdminClient() ?? supabase;
+  const shopOrderFilter = isUuid(slug)
+    ? `id.eq.${slug},public_token.eq.${slug},slug.eq.${slug}`
+    : `slug.eq.${slug}`;
+  const { data: shopData } = await shopOrderClient
     .from("shop_orders")
     .select(
-      "id, status, total_nok, subtotal_nok, shipping_nok, vat_nok, customer_name, customer_email, customer_phone, shipping_address_line1, shipping_postal_code, shipping_city, customer_note, created_at, paid_at, fulfilled_at",
+      "id, public_token, slug, status, transport_status, carrier, tracking_number, tracking_url, estimated_delivery_date, shipped_at, delivered_at, last_status_note, total_nok, subtotal_nok, shipping_nok, vat_nok, customer_name, customer_email, customer_phone, shipping_address_line1, shipping_postal_code, shipping_city, customer_note, created_at, paid_at, fulfilled_at",
     )
-    .eq("id", slug)
+    .or(shopOrderFilter)
     .eq("customer_email", user.email!)
     .maybeSingle();
 
   if (shopData) {
     const order = shopData as ShopOrder;
-    const { data: itemRows } = await supabase
-      .from("shop_order_items")
-      .select("id, product_name, supplier_name, quantity, unit_price_nok, line_total_nok, unit, nobb_number")
-      .eq("order_id", order.id)
-      .order("supplier_name");
+    const [{ data: itemRows }, { data: messageRows }, { data: eventRows }] = await Promise.all([
+      supabase
+        .from("shop_order_items")
+        .select("id, product_id, product_name, supplier_name, quantity, unit_price_nok, line_total_nok, unit, nobb_number")
+        .eq("order_id", order.id)
+        .order("supplier_name"),
+      supabase
+        .from("shop_order_messages")
+        .select("id, author_type, author_name, body, created_at")
+        .eq("order_id", order.id)
+        .order("created_at", { ascending: true }),
+      supabase
+        .from("shop_order_events")
+        .select("id, event_type, actor_label, message, created_at")
+        .eq("order_id", order.id)
+        .eq("is_customer_visible", true)
+        .order("created_at", { ascending: false })
+        .limit(20),
+    ]);
 
-    const items = (itemRows ?? []) as ShopItem[];
+    async function sendSupportMessage(formData: FormData) {
+      "use server";
+
+      const body = String(formData.get("message") ?? "").trim();
+      const orderId = String(formData.get("orderId") ?? "").trim();
+
+      if (!orderId || body.length < 2 || body.length > 2000) return;
+
+      const server = await createSupabaseServerClient();
+      const admin = createSupabaseAdminClient();
+      if (!server || !admin) return;
+
+      const { data: authData } = await server.auth.getUser();
+      const currentUser = authData.user;
+      if (!currentUser?.email) return;
+
+      const { data: targetOrder } = await admin
+        .from("shop_orders")
+        .select("id, customer_name, customer_email")
+        .eq("id", orderId)
+        .eq("customer_email", currentUser.email)
+        .maybeSingle<{ id: string; customer_name: string; customer_email: string }>();
+
+      if (!targetOrder) return;
+
+      await admin.from("shop_order_messages").insert({
+        order_id: targetOrder.id,
+        author_type: "customer",
+        author_name: targetOrder.customer_name,
+        author_email: targetOrder.customer_email,
+        body,
+      });
+
+      await logShopOrderEvent(admin, {
+        orderId: targetOrder.id,
+        eventType: "customer_message_created",
+        actorType: "customer",
+        actorLabel: targetOrder.customer_name,
+        message: "Kunden sendte en melding til support.",
+        payload: { messageLength: body.length },
+      });
+
+      revalidatePath(`/min-side/bestillinger/${targetOrder.id}`);
+    }
+
+    const items = await withResolvedShopOrderUnits((itemRows ?? []) as ShopItem[]);
+    const messages = (messageRows ?? []) as ShopMessage[];
+    const events = (eventRows ?? []) as ShopEvent[];
     const pill = SHOP_STATUS[order.status];
     const paid = order.status === "paid" || order.status === "fulfilled";
     const delivered = order.status === "fulfilled";
     const steps: (0 | 1)[] = [1, paid ? 1 : 0, paid ? 1 : 0, delivered ? 1 : 0];
+    const orderKey = order.slug ?? order.public_token ?? order.id;
 
     return (
       <div className="space-y-4">
         <OrderHeader
           title="Nettbutikkbestilling"
-          orderId={order.id}
+          orderId={orderKey}
           type="Nettbutikk"
           typeColor="bg-violet-100 text-violet-700"
           pill={pill}
         />
         <TrackingBar steps={steps} />
+        <ShopTransportCard order={order} />
         <div className="grid gap-4 lg:grid-cols-2">
           <InfoCard title="Leveringsinformasjon">
             <Row label="Mottaker" value={order.customer_name} />
@@ -271,11 +376,124 @@ export default async function BestillingDetaljPage({ params }: PageProps) {
             </ul>
           </section>
         ) : null}
+        <ShopSupportCard orderId={order.id} messages={messages} action={sendSupportMessage} />
+        <ShopEventLog events={events} />
       </div>
     );
   }
 
   notFound();
+}
+
+function ShopTransportCard({ order }: { order: ShopOrder }) {
+  const activeIndex = transportStepState(order.transport_status);
+  const trackingHref = order.tracking_url?.startsWith("https://") || order.tracking_url?.startsWith("http://")
+    ? order.tracking_url
+    : null;
+
+  return (
+    <section className="rounded-2xl border border-stone-200 bg-white px-5 py-4">
+      <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
+        <div>
+          <h2 className="text-sm font-semibold text-stone-900">Transportoversikt</h2>
+          <p className="mt-1 text-xs text-stone-500">{SHOP_ORDER_TRANSPORT_LABELS[order.transport_status]}</p>
+        </div>
+        {trackingHref ? (
+          <Link href={trackingHref} className="inline-flex h-8 items-center rounded-lg bg-stone-900 px-3 text-xs font-semibold text-white hover:bg-stone-800">
+            Spor sending
+          </Link>
+        ) : null}
+      </div>
+      <div className="mt-4 grid gap-2 sm:grid-cols-5">
+        {SHOP_ORDER_TRANSPORT_STEPS.map((step, index) => {
+          const done = activeIndex >= index;
+          return (
+            <div key={step} className="rounded-xl border border-stone-200 bg-stone-50 px-3 py-2">
+              <div className={`mb-2 h-1 w-full rounded-full ${done ? "bg-emerald-500" : "bg-stone-200"}`} />
+              <p className={`text-[11px] font-semibold ${done ? "text-stone-900" : "text-stone-500"}`}>{SHOP_ORDER_TRANSPORT_LABELS[step]}</p>
+            </div>
+          );
+        })}
+      </div>
+      <div className="mt-4 grid gap-2 text-xs sm:grid-cols-2 lg:grid-cols-4">
+        <MiniInfo label="Transportør" value={order.carrier || "Ikke satt"} />
+        <MiniInfo label="Sporingsnr." value={order.tracking_number || "Ikke satt"} />
+        <MiniInfo label="Estimert" value={order.estimated_delivery_date ? fmtDate(order.estimated_delivery_date) : "Ikke satt"} />
+        <MiniInfo label="Sendt" value={order.shipped_at ? fmtDate(order.shipped_at) : "Ikke sendt"} />
+      </div>
+      {order.last_status_note ? <p className="mt-3 rounded-xl border border-stone-200 bg-stone-50 px-3 py-2 text-xs text-stone-600">{order.last_status_note}</p> : null}
+    </section>
+  );
+}
+
+function ShopSupportCard({
+  orderId,
+  messages,
+  action,
+}: {
+  orderId: string;
+  messages: ShopMessage[];
+  action: (formData: FormData) => Promise<void>;
+}) {
+  return (
+    <section className="rounded-2xl border border-stone-200 bg-white px-5 py-4">
+      <h2 className="text-sm font-semibold text-stone-900">Support</h2>
+      <div className="mt-3 space-y-2">
+        {messages.length === 0 ? (
+          <p className="rounded-xl border border-stone-200 bg-stone-50 px-3 py-3 text-sm text-stone-500">Ingen meldinger ennå.</p>
+        ) : (
+          messages.map((message) => (
+            <article key={message.id} className={`rounded-xl border px-3 py-2 ${message.author_type === "admin" ? "border-emerald-200 bg-emerald-50" : "border-stone-200 bg-stone-50"}`}>
+              <div className="flex items-center justify-between gap-3 text-xs text-stone-500">
+                <span className="font-semibold text-stone-700">{message.author_name}</span>
+                <span>{new Date(message.created_at).toLocaleString("nb-NO")}</span>
+              </div>
+              <p className="mt-1 whitespace-pre-wrap text-sm leading-6 text-stone-700">{message.body}</p>
+            </article>
+          ))
+        )}
+      </div>
+      <form action={action} className="mt-4 space-y-2">
+        <input type="hidden" name="orderId" value={orderId} />
+        <textarea name="message" required minLength={2} maxLength={2000} rows={3} className="w-full rounded-xl border border-stone-300 px-3 py-2 text-sm outline-none focus:border-stone-900" placeholder="Skriv til support." />
+        <button type="submit" className="inline-flex h-8 items-center rounded-lg bg-stone-900 px-3 text-xs font-semibold text-white hover:bg-stone-800">
+          Send melding
+        </button>
+      </form>
+    </section>
+  );
+}
+
+function ShopEventLog({ events }: { events: ShopEvent[] }) {
+  return (
+    <section className="rounded-2xl border border-stone-200 bg-white px-5 py-4">
+      <h2 className="text-sm font-semibold text-stone-900">Logg</h2>
+      <div className="mt-3 space-y-2">
+        {events.length === 0 ? (
+          <p className="rounded-xl border border-stone-200 bg-stone-50 px-3 py-3 text-sm text-stone-500">Ingen synlige hendelser ennå.</p>
+        ) : (
+          events.map((event) => (
+            <article key={event.id} className="rounded-xl border border-stone-200 bg-stone-50 px-3 py-2">
+              <div className="flex flex-wrap items-center justify-between gap-2">
+                <p className="text-sm font-semibold text-stone-900">{event.message || event.event_type}</p>
+                <p className="text-xs text-stone-500">{new Date(event.created_at).toLocaleString("nb-NO")}</p>
+              </div>
+              {event.actor_label ? <p className="mt-1 text-xs text-stone-500">{event.actor_label}</p> : null}
+            </article>
+          ))
+        )}
+      </div>
+    </section>
+  );
+}
+
+function MiniInfo({ label, value }: { label: string; value: string }) {
+  return (
+    <div className="rounded-xl border border-stone-200 bg-stone-50 px-3 py-2">
+      <p className="text-[10px] uppercase tracking-wider text-stone-500">{label}</p>
+      <p className="mt-1 font-semibold text-stone-900">{value}</p>
+    </div>
+  );
 }
 
 function OrderHeader({

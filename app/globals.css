@@ -19,7 +19,7 @@
 @theme inline {
   --color-background: var(--background);
   --color-foreground: var(--foreground);
-  --font-sans: var(--font-space-grotesk);
+  --font-sans: var(--font-inter);
 }
 
 * {
@@ -34,7 +34,7 @@ body {
   background: var(--background);
   color: var(--foreground);
   background-image: none;
-  font-family: var(--font-space-grotesk), sans-serif;
+  font-family: var(--font-inter), sans-serif;
 }
 
 a {
@@ -69,8 +69,8 @@ a[class*="bg-black"] {
 }
 
 .display-font {
-  font-family: var(--font-sora), sans-serif;
-  letter-spacing: -0.015em;
+  font-family: var(--font-inter), sans-serif;
+  letter-spacing: 0;
 }
 
 .panel {

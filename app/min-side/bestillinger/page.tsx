@@ -19,11 +19,15 @@ type MatOrder = {
 
 type ShopOrder = {
   id: string;
+  public_token: string;
+  slug: string | null;
   status: "draft" | "pending_payment" | "paid" | "fulfilled" | "cancelled" | "failed";
+  transport_status: "pending" | "confirmed" | "packing" | "shipped" | "out_for_delivery" | "delivered" | "cancelled";
   total_nok: number;
   created_at: string;
   paid_at: string | null;
   fulfilled_at: string | null;
+  estimated_delivery_date: string | null;
   shipping_city: string;
   customer_name: string;
 };
@@ -56,10 +60,11 @@ function matShippingSteps(status: MatOrder["status"]): (0 | 1)[] {
   return [1, paid ? 1 : 0, sent ? 1 : 0, 0];
 }
 
-function shopShippingSteps(status: ShopOrder["status"]): (0 | 1)[] {
-  const paid = status === "paid" || status === "fulfilled";
-  const delivered = status === "fulfilled";
-  return [1, paid ? 1 : 0, paid ? 1 : 0, delivered ? 1 : 0];
+function shopShippingSteps(order: ShopOrder): (0 | 1)[] {
+  const paid = order.status === "paid" || order.status === "fulfilled";
+  const sent = ["shipped", "out_for_delivery", "delivered"].includes(order.transport_status);
+  const delivered = order.status === "fulfilled" || order.transport_status === "delivered";
+  return [1, paid ? 1 : 0, sent ? 1 : 0, delivered ? 1 : 0];
 }
 
 const STEP_LABELS = ["Mottatt", "Betalt", "Sendt", "Levert"];
@@ -117,7 +122,7 @@ export default async function BestillingerPage() {
       .limit(200),
     supabase
       .from("shop_orders")
-      .select("id, status, total_nok, created_at, paid_at, fulfilled_at, shipping_city, customer_name")
+      .select("id, public_token, slug, status, transport_status, total_nok, created_at, paid_at, fulfilled_at, estimated_delivery_date, shipping_city, customer_name")
       .not("status", "in", '("draft","pending_payment")')
       .order("created_at", { ascending: false })
       .limit(200),
@@ -164,9 +169,15 @@ export default async function BestillingerPage() {
         createdAt: o.created_at,
         paidAt: o.paid_at,
         deliveredAt: o.fulfilled_at,
-        deliveryWindowLabel: o.fulfilled_at ? `Levert ${fmtDate(o.fulfilled_at)}` : o.shipping_city ? `Leveres til ${o.shipping_city}` : null,
-        shippingSteps: shopShippingSteps(o.status),
-        href: `/min-side/bestillinger/${o.id}`,
+        deliveryWindowLabel: o.fulfilled_at
+          ? `Levert ${fmtDate(o.fulfilled_at)}`
+          : o.estimated_delivery_date
+            ? `Estimert ${fmtDate(o.estimated_delivery_date)}`
+            : o.shipping_city
+              ? `Leveres til ${o.shipping_city}`
+              : null,
+        shippingSteps: shopShippingSteps(o),
+        href: `/min-side/bestillinger/${encodeURIComponent(o.slug ?? o.public_token ?? o.id)}`,
       }),
     ),
   ].sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime());

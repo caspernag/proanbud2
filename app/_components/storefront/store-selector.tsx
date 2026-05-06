@@ -55,24 +55,25 @@ export function StoreSelector({ stores, selectedStoreId = "", compact = false, v
 
   if (variant === "nav") {
     return (
-      <div ref={containerRef} className="relative flex shrink-0 items-center gap-1.5 rounded-md border border-stone-200 bg-stone-50 px-2 py-1">
+      <div ref={containerRef} className="relative flex min-w-0 shrink items-center gap-1.5 lg:shrink-0 lg:rounded-md lg:border lg:border-stone-200 lg:bg-stone-50 lg:px-2 lg:py-1">
         <span className="hidden text-[11px] font-bold uppercase tracking-[0.12em] text-stone-500 xl:inline">
           Velg butikk
         </span>
         <button
           type="button"
           onClick={() => setOpen((current) => !current)}
-          className="inline-flex h-8 max-w-[220px] items-center gap-2 rounded-sm border border-stone-300 bg-white px-2 text-left text-[12px] font-semibold text-stone-800 outline-none transition hover:border-[#15452d]"
+          className="inline-flex h-10 max-w-[136px] items-center gap-1.5 rounded-lg border border-stone-200 bg-white px-2.5 text-left text-[12px] font-semibold text-stone-800 shadow-sm outline-none transition hover:border-[#15452d] sm:max-w-[180px] lg:h-8 lg:max-w-[220px] lg:rounded-sm lg:border-stone-300 lg:px-2 lg:shadow-none"
           aria-expanded={open}
           aria-label="Velg butikk"
         >
+          <StoreIcon />
           <span className="min-w-0 flex-1 truncate">{selectedStore ? selectedStore.name : "Nettlager"}</span>
           <ChevronIcon open={open} />
         </button>
         <button
           type="button"
           onClick={useMyPosition}
-          className="h-8 rounded-sm border border-stone-300 bg-white px-2 text-[12px] font-semibold text-stone-700 transition hover:border-[#15452d] hover:text-[#15452d]"
+          className="hidden h-8 rounded-sm border border-stone-300 bg-white px-2 text-[12px] font-semibold text-stone-700 transition hover:border-[#15452d] hover:text-[#15452d] lg:inline-flex lg:items-center"
         >
           Min posisjon
         </button>
@@ -81,7 +82,7 @@ export function StoreSelector({ stores, selectedStoreId = "", compact = false, v
             stores={stores}
             selectedStoreId={value}
             onSelect={(storeId) => selectStore(storeId)}
-            className="right-0 top-[calc(100%+0.4rem)] w-[360px]"
+            className="fixed left-3 right-3 top-[116px] w-auto lg:absolute lg:left-auto lg:right-0 lg:top-[calc(100%+0.4rem)] lg:w-[360px]"
           />
         ) : null}
       </div>
@@ -266,6 +267,16 @@ function ChevronIcon({ open }: { open: boolean }) {
       aria-hidden="true"
     >
       <path d="M5 8l5 5 5-5" strokeLinecap="round" strokeLinejoin="round" />
+    </svg>
+  );
+}
+
+function StoreIcon() {
+  return (
+    <svg viewBox="0 0 20 20" fill="none" stroke="currentColor" strokeWidth="1.8" className="h-3.5 w-3.5 shrink-0 text-[#15452d]" aria-hidden="true">
+      <path d="M4 8.5V16h12V8.5" strokeLinecap="round" strokeLinejoin="round" />
+      <path d="M3.5 8.5L5 4h10l1.5 4.5" strokeLinecap="round" strokeLinejoin="round" />
+      <path d="M7 16v-4h6v4" strokeLinecap="round" strokeLinejoin="round" />
     </svg>
   );
 }

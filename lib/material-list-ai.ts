@@ -5,6 +5,7 @@ import OpenAI from "openai";
 import { z } from "zod";
 
 import { env, hasOpenAiEnv } from "@/lib/env";
+import { findConfidentPriceListProductMatch } from "@/lib/material-list-catalog";
 import { getPriceListProducts, type PriceListProduct } from "@/lib/price-lists";
 import type { MaterialSection, ProjectInput } from "@/lib/project-data";
 
@@ -47,6 +48,12 @@ type PromptInputPart =
   | {
     type: "text";
     text: string;
+  }
+  | {
+    type: "image";
+    text: string;
+    imageUrl: string;
+    detail: "high" | "low" | "auto" | "original";
   };
 
 type PreparedAttachmentContext = {
@@ -116,7 +123,7 @@ export async function generateMaterialSectionsFromAttachments(input: ProjectInpu
     return null;
   }
 
-  return enforcePriceListItemsWithNobb(sanitized, priceListProducts);
+  return attachNobbToConfidentPriceListMatches(sanitized, priceListProducts);
 }
 
 export async function generateClarificationQuestionsFromAttachments(input: ProjectInput, files: File[]) {
@@ -158,9 +165,20 @@ export async function buildAttachmentContext(files: File[]): Promise<PreparedAtt
 
   for (const file of result.files) {
     if (imageAttachments < MAX_IMAGE_ATTACHMENTS && isImageFile(file) && file.size <= MAX_IMAGE_BYTES) {
+      const imageUrl = await encodeImageFileAsDataUrl(file);
+
       result.userContentParts.push({
-        type: "text",
-        text: `Bildevedlegg: ${file.name} (${Math.max(1, Math.round(file.size / 1024))} KB). Beskriv materialbehov ut fra prosjektdata og vedleggsnavn.`,
+        ...(imageUrl
+          ? {
+              type: "image" as const,
+              imageUrl,
+              detail: "high" as const,
+              text: `Bildevedlegg: ${file.name} (${Math.max(1, Math.round(file.size / 1024))} KB). Bildet er sendt til AI for tolkning av mål, byggdeler og materialbehov.`,
+            }
+          : {
+              type: "text" as const,
+              text: `Bildevedlegg: ${file.name} (${Math.max(1, Math.round(file.size / 1024))} KB). Filtypen kunne ikke sendes som bilde; bruk prosjektdata og filnavn som svak støtte.`,
+            }),
       });
       imageAttachments += 1;
       continue;
@@ -215,6 +233,7 @@ async function requestMaterialListFromOpenAi(
       workflowAbortController.signal,
       "material-list",
       promptId,
+      attachmentContext,
     );
 
     if (!workflowContent) {
@@ -256,6 +275,7 @@ async function requestClarificationsFromOpenAi(input: ProjectInput, attachmentCo
       workflowAbortController.signal,
       "clarifications",
       promptId,
+      attachmentContext,
     );
 
     if (!workflowContent) {
@@ -562,6 +582,23 @@ function buildMaterialListPromptInput(
           },
         ],
       },
+      material_list_requirements: [
+        "Arbeid i to trinn: 1) identifiser komplett materialbehov og mengder fra prosjektdata, avklaringer og vedlegg/bilder, 2) søk i tilgjengelig produktkatalog og velg konkrete produkter eller nærliggende produkter som dekker hvert behov.",
+        "Lag en komplett materialliste for hele prosjektet, ikke bare første byggetrinn eller de mest synlige overflatene.",
+        "Inkluder alle nødvendige produktgrupper for prosjektets byggdeler, underlag, innfesting, tetting, overflater, tilbehør, kapp/svinn og forbruksmateriell når de er relevante.",
+        "For terrasse/platting skal listen normalt dekke fundament/stolpesko, bjelkelag/dragere, terrassebord/dekke, terrasseskruer/innfesting, beslag, avslutninger og eventuell rekkverks-/trappeløsning dersom prosjektet tilsier det.",
+        "Bruk avklaringssvar i prosjektbeskrivelsen som styrende krav. Ikke overstyr dem med generiske standardvalg.",
+        "Når katalogsøk gir et godt treff, bruk katalogens produktnavn i item og sett nobb til katalogens NOBB-nummer. Ved nærliggende treff skal note forklare hvorfor produktet dekker behovet.",
+        "Hvis katalogen ikke har et trygt produkt for et nødvendig behov, behold behovslinjen som presis generisk materiallinje uten NOBB. Ikke fjern nødvendige materialer bare fordi katalogtreff mangler.",
+        "Ikke foreslå en spesifikk produkttype hvis grunnlaget peker på en annen type. Behold heller en presis generisk produktlinje uten NOBB enn å gjette feil katalogprodukt.",
+        "Mengder skal ha enhet, svinnmargin og kort begrunnelse i quantityReason.",
+        "Del listen i praktiske seksjoner per byggdel/fagområde, og sørg for at hver seksjon har de linjene som trengs for å gjennomføre arbeidet.",
+      ],
+      catalog_search_requirements: [
+        "Bruk OpenAI file_search/vector-store for å finne produkter i aktiv produktkatalog når verktøyet er tilgjengelig.",
+        "Søk med flere norske fagtermer ved behov, f.eks. terrassebord, terrassegulv, impregnert bord, terrasseskrue, bjelke, stolpesko og beslag.",
+        "Produktvalg skal dekke funksjon, dimensjon/materialtype og bruksområde best mulig, men mengden skal fortsatt beregnes fra prosjektet, ikke blindt kopieres fra katalogens quantitySuggestion.",
+      ],
       project: input,
       attachments: summarizeAttachments(attachmentContext.files),
       attachment_content: flattenUserContentForResponses(attachmentContext.userContentParts),
@@ -587,6 +624,11 @@ function buildClarificationPromptInput(input: ProjectInput, attachmentContext: P
           },
         ],
       },
+      clarification_requirements: [
+        "Still spørsmål som fjerner risiko for feil materialtype eller manglende produktgrupper i hele prosjektet.",
+        "Prioriter avklaringer om byggdeler, rom, underlag, våtrom/ytterkonstruksjon, dimensjoner, materialpreferanser og omfang dersom dette er uklart.",
+        "Ikke spør om detaljer som ikke påvirker materialvalg, mengde eller kompletthet.",
+      ],
       project: input,
       attachments: summarizeAttachments(attachmentContext.files),
       attachment_content: flattenUserContentForResponses(attachmentContext.userContentParts),
@@ -652,7 +694,7 @@ function sanitizeMaterialSections(sections: Array<z.infer<typeof modelResponseSc
   return normalized.length > 0 ? (normalized as MaterialSection[]) : null;
 }
 
-function enforcePriceListItemsWithNobb(sections: MaterialSection[], products: PriceListProduct[]) {
+function attachNobbToConfidentPriceListMatches(sections: MaterialSection[], products: PriceListProduct[]) {
   if (products.length === 0) {
     return sections;
   }
@@ -660,7 +702,7 @@ function enforcePriceListItemsWithNobb(sections: MaterialSection[], products: Pr
   return sections.map((section) => ({
     ...section,
     items: section.items.map((item) => {
-      const match = findBestPriceListMatch(item, section.title, products) ?? pickFallbackProduct(section.title, products);
+      const match = findConfidentPriceListProductMatch(item, section, products);
 
       if (!match) {
         return item;
@@ -668,7 +710,6 @@ function enforcePriceListItemsWithNobb(sections: MaterialSection[], products: Pr
 
       return {
         ...item,
-        item: match.productName,
         quantityReason: normalizeQuantityReason(item.quantityReason, item.note, item.quantity, match.quantityReason),
         nobb: item.nobb ?? match.nobbNumber,
       };
@@ -812,74 +853,6 @@ function tryParseJsonObject(value: string) {
   }
 }
 
-function findBestPriceListMatch(item: { item: string; note: string; nobb?: string }, sectionTitle: string, products: PriceListProduct[]) {
-  const nobbFromItem = extractNobb(item.item);
-  const nobbFromNote = extractNobb(item.note);
-  const directNobb = normalizeNobb(item.nobb) || nobbFromItem || nobbFromNote;
-
-  if (directNobb) {
-    const direct = products.find((product) => product.nobbNumber === directNobb);
-
-    if (direct) {
-      return direct;
-    }
-  }
-
-  const queryTokens = tokenizeForMatch(item.item);
-  if (queryTokens.length === 0) {
-    return null;
-  }
-
-  const sectionTokens = tokenizeForMatch(sectionTitle);
-  let best: PriceListProduct | null = null;
-  let bestScore = 0;
-
-  for (const product of products) {
-    const nameTokens = tokenizeForMatch(product.productName);
-    const categoryTokens = tokenizeForMatch(`${product.sectionTitle} ${product.category}`);
-
-    if (nameTokens.length === 0) {
-      continue;
-    }
-
-    const overlap = queryTokens.filter((token) => nameTokens.includes(token)).length;
-    const sectionOverlap = sectionTokens.filter((token) => categoryTokens.includes(token)).length;
-    const score = overlap / Math.max(queryTokens.length, nameTokens.length) + sectionOverlap * 0.06;
-
-    if (score > bestScore) {
-      bestScore = score;
-      best = product;
-    }
-
-    if (product.productName.toLowerCase() === item.item.toLowerCase()) {
-      return product;
-    }
-  }
-
-  return bestScore >= 0.16 ? best : null;
-}
-
-function pickFallbackProduct(sectionTitle: string, products: PriceListProduct[]) {
-  const sectionNeedle = sectionTitle.trim().toLowerCase();
-
-  if (sectionNeedle.length > 0) {
-    const bySection = products.find((product) =>
-      product.sectionTitle.toLowerCase().includes(sectionNeedle) || sectionNeedle.includes(product.sectionTitle.toLowerCase()),
-    );
-
-    if (bySection) {
-      return bySection;
-    }
-  }
-
-  return products[0] ?? null;
-}
-
-function extractNobb(value: string) {
-  const match = value.match(/\b(\d{6,10})\b/);
-  return match ? match[1] : "";
-}
-
 function normalizeNobb(value?: string) {
   if (!value) {
     return undefined;
@@ -892,15 +865,6 @@ function normalizeNobb(value?: string) {
   }
 
   return normalized;
-}
-
-function tokenizeForMatch(value: string) {
-  return value
-    .toLocaleLowerCase("nb-NO")
-    .normalize("NFKD")
-    .replace(/[\u0300-\u036f]/g, "")
-    .split(/[^a-z0-9æøå]+/)
-    .filter((token) => token.length > 1);
 }
 
 function coerceMaterialSections(candidate: unknown): z.infer<typeof modelResponseSchema>["materialSections"] {
@@ -1010,6 +974,7 @@ async function requestFromPromptTemplate(
   signal: AbortSignal,
   context: AiAgentContext,
   promptId: string,
+  attachmentContext: PreparedAttachmentContext,
 ) {
   if (!promptId) {
     logAiAgentStatus(context, "prompt_id_missing=true");
@@ -1029,18 +994,47 @@ async function requestFromPromptTemplate(
       );
       logAiAgentStatus(context, `prompt_input_chars=${promptInput.length} attempt=${attempt}`);
 
+      const catalogVectorStoreId = resolveCatalogVectorStoreId(context);
+      const responseInput = buildResponseInput(promptInput, attachmentContext);
+      const imageCount = attachmentContext.userContentParts.filter((part) => part.type === "image").length;
+
+      if (imageCount > 0) {
+        logAiAgentStatus(context, `prompt_images_attached=${imageCount} attempt=${attempt}`);
+      }
+
+      if (catalogVectorStoreId) {
+        logAiAgentStatus(context, `catalog_vector_search_enabled=true vector_store_id=${catalogVectorStoreId} attempt=${attempt}`);
+      }
+
       const response = await openai.responses.create(
         {
           // Intentionally omit prompt.version so OpenAI resolves to latest published prompt version.
           prompt: {
             id: promptId,
           },
-          input: promptInput,
+          input: responseInput,
           text: {
             format: {
               type: "json_object",
             },
           },
+          ...(catalogVectorStoreId
+            ? {
+                tools: [
+                  {
+                    type: "file_search" as const,
+                    vector_store_ids: [catalogVectorStoreId],
+                    max_num_results: 30,
+                    ranking_options: {
+                      ranker: "auto" as const,
+                    },
+                  },
+                ],
+                tool_choice: "auto" as const,
+                max_tool_calls: 10,
+                include: ["file_search_call.results" as const],
+              }
+            : {}),
         },
         { signal },
       );
@@ -1202,6 +1196,49 @@ function getConfiguredPromptIdForContext(context: AiAgentContext) {
   return env.openAiPromptIdMaterialList;
 }
 
+function resolveCatalogVectorStoreId(context: AiAgentContext) {
+  if (context !== "material-list") {
+    return "";
+  }
+
+  return env.openAiVectorStoreIdStorefront.trim();
+}
+
+function buildResponseInput(promptInput: string, attachmentContext: PreparedAttachmentContext) {
+  const content: Array<
+    | { type: "input_text"; text: string }
+    | { type: "input_image"; image_url: string; detail: "high" | "low" | "auto" | "original" }
+  > = [
+    {
+      type: "input_text",
+      text: promptInput,
+    },
+  ];
+
+  for (const part of attachmentContext.userContentParts) {
+    if (part.type !== "image") {
+      continue;
+    }
+
+    content.push({
+      type: "input_text",
+      text: part.text,
+    });
+    content.push({
+      type: "input_image",
+      image_url: part.imageUrl,
+      detail: part.detail,
+    });
+  }
+
+  return [
+    {
+      role: "user" as const,
+      content,
+    },
+  ];
+}
+
 function isPromptTemplateId(id: string) {
   return id.startsWith("pmpt_");
 }
@@ -1245,6 +1282,45 @@ function flattenUserContentForResponses(userContent: PromptInputPart[]) {
   }
 
   return lines.join("\n\n");
+}
+
+async function encodeImageFileAsDataUrl(file: File) {
+  const mimeType = supportedImageMimeType(file);
+
+  if (!mimeType) {
+    return "";
+  }
+
+  const bytes = Buffer.from(await file.arrayBuffer());
+  return `data:${mimeType};base64,${bytes.toString("base64")}`;
+}
+
+function supportedImageMimeType(file: File) {
+  const fromType = file.type.toLowerCase();
+
+  if (["image/png", "image/jpeg", "image/webp", "image/gif"].includes(fromType)) {
+    return fromType;
+  }
+
+  const extension = getFileExtension(file.name);
+
+  if (extension === "png") {
+    return "image/png";
+  }
+
+  if (extension === "jpg" || extension === "jpeg") {
+    return "image/jpeg";
+  }
+
+  if (extension === "webp") {
+    return "image/webp";
+  }
+
+  if (extension === "gif") {
+    return "image/gif";
+  }
+
+  return "";
 }
 
 export function buildProjectDocumentContext(input: ProjectInput, attachmentContext: PreparedAttachmentContext) {

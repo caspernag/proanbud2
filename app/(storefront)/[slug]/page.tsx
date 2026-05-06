@@ -2,8 +2,7 @@ import Link from "next/link";
 import { cookies } from "next/headers";
 import { notFound } from "next/navigation";
 
-import { AddToCartButton } from "@/app/_components/storefront/add-to-cart-button";
-import { ProductUnitCalculator } from "@/app/_components/storefront/product-unit-calculator";
+import { ProductPurchaseControls } from "@/app/_components/storefront/product-purchase-controls";
 import { StorefrontProfileTracker } from "@/app/_components/storefront/storefront-profile-tracker";
 import { StorefrontProductImage } from "@/app/_components/storefront/storefront-product-image";
 import { getByggmakkerAvailability } from "@/lib/byggmakker-availability";
@@ -47,10 +46,8 @@ export default async function StorefrontProductPage({ params }: StorefrontProduc
   const savingsNok = hasDiscount ? product.listPriceNok - product.unitPriceNok : 0;
   const priceUnitLabel = formatUnitLabel(product.priceUnit ?? product.unit);
   const salesUnitLabel = formatUnitLabel(product.salesUnit ?? product.unit);
-  const packagePriceNok = product.packageAreaSqm ? product.unitPriceNok * product.packageAreaSqm : 0;
+  const pricePerPriceUnitNok = product.packageAreaSqm ? product.unitPriceNok / product.packageAreaSqm : 0;
   const isVerifiedNetAvailable = Boolean(byggmakkerAvailability?.netAvailable);
-  const isStoreOnlyAvailable =
-    !isVerifiedNetAvailable && Boolean(byggmakkerAvailability?.storeAvailable);
 
   return (
     <div className="space-y-5">
@@ -123,26 +120,23 @@ export default async function StorefrontProductPage({ params }: StorefrontProduc
               ) : null}
             </div>
             <p className="mt-1.5 text-xs text-stone-500">
-              Pris inkl. mva · per {priceUnitLabel}
+              Pris inkl. mva · per {salesUnitLabel}
             </p>
             {product.packageAreaSqm ? (
               <p className="mt-1 text-xs font-medium text-stone-600">
-                1 {salesUnitLabel} = {formatDecimalNo(product.packageAreaSqm)} m² · ca. {formatCurrency(packagePriceNok)} per {salesUnitLabel}
+                1 {salesUnitLabel} = {formatDecimalNo(product.packageAreaSqm)} m² · ca. {formatCurrency(pricePerPriceUnitNok)} per {priceUnitLabel}
               </p>
             ) : null}
 
-            <ProductUnitCalculator
-              unitPriceNok={product.unitPriceNok}
-              priceUnit={product.priceUnit}
-              salesUnit={product.salesUnit ?? product.unit}
-              packageAreaSqm={product.packageAreaSqm}
-            />
-
-            <div className="mt-4 flex flex-wrap items-center gap-3">
-              <div className="min-w-full flex-1 sm:min-w-[200px]">
-                <AddToCartButton productId={product.id} fullWidth />
-              </div>
-              <div className="flex items-center gap-4 text-xs font-medium">
+            <div className="space-y-3">
+              <ProductPurchaseControls
+                productId={product.id}
+                unitPriceNok={product.unitPriceNok}
+                priceUnit={product.priceUnit}
+                salesUnit={product.salesUnit ?? product.unit}
+                packageAreaSqm={product.packageAreaSqm}
+              />
+              <div className="flex flex-wrap items-center gap-x-4 gap-y-2 rounded-md border border-stone-200 bg-white px-3 py-2.5 text-xs font-medium">
                 {isVerifiedNetAvailable ? (
                   <span className="inline-flex items-center gap-1.5 text-emerald-700">
                     <span className="relative flex h-2 w-2">
@@ -150,11 +144,6 @@ export default async function StorefrontProductPage({ params }: StorefrontProduc
                       <span className="relative inline-flex h-2 w-2 rounded-full bg-emerald-500" />
                     </span>
                     På lager
-                  </span>
-                ) : isStoreOnlyAvailable ? (
-                  <span className="inline-flex items-center gap-1.5 text-amber-700">
-                    <span className="relative inline-flex h-2 w-2 rounded-full bg-amber-500" />
-                    Bestillingsvare
                   </span>
                 ) : byggmakkerAvailability ? (
                   <span className="inline-flex items-center gap-1.5 text-stone-500">
@@ -170,9 +159,7 @@ export default async function StorefrontProductPage({ params }: StorefrontProduc
                 <span className="text-stone-500">
                   {isVerifiedNetAvailable
                     ? "24-48t hjemlevering"
-                    : isStoreOnlyAvailable
-                      ? "3-5 dagers hjemlevering"
-                      : "Hjemlevering"}
+                    : "Hjemlevering"}
                 </span>
               </div>
             </div>
@@ -188,11 +175,6 @@ export default async function StorefrontProductPage({ params }: StorefrontProduc
                   <>
                     <p className="font-semibold text-stone-900">24-48 timers levering</p>
                     <p className="text-xs text-stone-500">Sendes fra Proanbud-lager neste virkedag. Gratis frakt over 5 000 kr.</p>
-                  </>
-                ) : isStoreOnlyAvailable ? (
-                  <>
-                    <p className="font-semibold text-stone-900">Bestillingsvare · 3-5 virkedager</p>
-                    <p className="text-xs text-stone-500">Vi klargjør varen i vårt nettverk og sender den hjem til deg.</p>
                   </>
                 ) : byggmakkerAvailability ? (
                   <>

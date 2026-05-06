@@ -1,3 +1,5 @@
+import Link from "next/link";
+
 import { requireAdminUser } from "@/lib/admin-auth";
 import { createSupabaseAdminClient } from "@/lib/supabase/admin";
 import { createSupabaseServerClient } from "@/lib/supabase/server";
@@ -179,7 +181,7 @@ export default async function DashboardPage() {
       <div className="bg-white border border-stone-200 rounded-2xl">
         <div className="px-6 py-4 border-b border-stone-200 flex items-center justify-between">
           <h2 className="text-sm font-semibold text-stone-900">Siste bestillinger</h2>
-          <a href="/sjefen/bestillinger" className="text-xs text-amber-500 hover:text-amber-400 transition">Se alle →</a>
+          <Link href="/sjefen/bestillinger" className="text-xs text-amber-500 hover:text-amber-400 transition">Se alle →</Link>
         </div>
         <div className="overflow-x-auto">
           <table className="w-full text-sm">

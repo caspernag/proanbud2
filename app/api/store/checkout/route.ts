@@ -1,7 +1,9 @@
 import { NextResponse } from "next/server";
 import { z } from "zod";
 
-import { isStripeBypassed } from "@/lib/env";
+import { hasStripeWebhookEnv } from "@/lib/env";
+import { orderLineUnit } from "@/lib/product-unit-pricing";
+import { createShopOrderSlug, logShopOrderEvent } from "@/lib/shop-order";
 import { getStorefrontProductsByIds } from "@/lib/storefront";
 import { getStripe } from "@/lib/stripe";
 import { createSupabaseAdminClient } from "@/lib/supabase/admin";
@@ -75,11 +77,14 @@ export async function POST(request: Request) {
   const shippingNok = calculateShippingNok(subtotalNok);
   const totalNok = subtotalNok + shippingNok;
   const vatNok = Math.round(totalNok * 0.2);
+  const orderSlug = createShopOrderSlug();
 
   const { data: createdOrder, error: createOrderError } = await supabase
     .from("shop_orders")
     .insert({
       status: "draft",
+      slug: orderSlug,
+      transport_status: "pending",
       currency: "NOK",
       customer_email: payload.customer.email,
       customer_name: payload.customer.fullName,
@@ -94,7 +99,7 @@ export async function POST(request: Request) {
       total_nok: totalNok,
       checkout_flow: payload.checkoutFlow,
     })
-    .select("id, public_token")
+    .select("id, public_token, slug")
     .single();
 
   if (createOrderError || !createdOrder) {
@@ -109,13 +114,21 @@ export async function POST(request: Request) {
     product_name: item.product.productName,
     supplier_name: item.product.supplierName,
     category: item.product.category,
-    unit: item.product.priceUnit ?? item.product.unit,
+    unit: orderLineUnit({
+      priceUnit: item.product.priceUnit,
+      salesUnit: item.product.salesUnit,
+      fallbackUnit: item.product.unit,
+    }),
     quantity: item.quantity,
     unit_price_nok: item.unitPriceNok,
     line_total_nok: item.lineTotalNok,
     metadata: {
       brand: item.product.brand,
       sectionTitle: item.product.sectionTitle,
+      priceUnit: item.product.priceUnit ?? item.product.unit,
+      salesUnit: item.product.salesUnit ?? item.product.unit,
+      salesUnitQuantity: item.product.salesUnitQuantity ?? null,
+      packageAreaSqm: item.product.packageAreaSqm ?? null,
       quantitySuggestion: item.product.quantitySuggestion,
       source: item.product.source,
     },
@@ -128,26 +141,29 @@ export async function POST(request: Request) {
     return NextResponse.json({ error: "Kunne ikke lagre varelinjene i ordren." }, { status: 500 });
   }
 
+  await logShopOrderEvent(supabase, {
+    orderId: createdOrder.id,
+    eventType: "order_created",
+    actorType: "customer",
+    actorLabel: payload.customer.fullName,
+    message: "Ordren er opprettet og klar for betaling.",
+    payload: {
+      checkoutFlow: payload.checkoutFlow,
+      itemCount: rows.length,
+      totalNok,
+    },
+  });
+
   const origin = resolveCheckoutOrigin(request.url);
-
-  if (isStripeBypassed()) {
-    await supabase
-      .from("shop_orders")
-      .update({
-        status: "paid",
-        paid_at: new Date().toISOString(),
-      })
-      .eq("id", createdOrder.id);
-
-    return NextResponse.json({
-      url: `${origin}/ordre/${createdOrder.public_token}?paid=1&test_mode=1`,
-    });
-  }
 
   const stripe = getStripe();
 
   if (!stripe) {
     return NextResponse.json({ error: "Stripe er ikke konfigurert." }, { status: 503 });
+  }
+
+  if (process.env.NODE_ENV === "production" && !hasStripeWebhookEnv()) {
+    return NextResponse.json({ error: "Stripe webhook er ikke konfigurert." }, { status: 503 });
   }
 
   const paymentMethodTypes =
@@ -159,13 +175,24 @@ export async function POST(request: Request) {
     const session = await stripe.checkout.sessions.create({
       mode: "payment",
       customer_email: payload.customer.email,
-      success_url: `${origin}/betaling/suksess?session_id={CHECKOUT_SESSION_ID}&shop_order_token=${createdOrder.public_token}`,
+      success_url: `${origin}/betaling/suksess?session_id={CHECKOUT_SESSION_ID}&shop_order_token=${createdOrder.public_token}&shop_order_slug=${createdOrder.slug ?? orderSlug}`,
       cancel_url: `${origin}/checkout?betaling=avbrutt`,
       metadata: {
         kind: "shop_order",
         shopOrderId: createdOrder.id,
         shopOrderToken: String(createdOrder.public_token),
+        shopOrderSlug: createdOrder.slug ?? orderSlug,
         checkoutFlow: payload.checkoutFlow,
+      },
+      payment_intent_data: {
+        receipt_email: payload.customer.email,
+        metadata: {
+          kind: "shop_order",
+          shopOrderId: createdOrder.id,
+          shopOrderToken: String(createdOrder.public_token),
+          shopOrderSlug: createdOrder.slug ?? orderSlug,
+          checkoutFlow: payload.checkoutFlow,
+        },
       },
       payment_method_types: [...paymentMethodTypes],
       billing_address_collection: payload.checkoutFlow === "klarna" ? "required" : "auto",
@@ -207,6 +234,16 @@ export async function POST(request: Request) {
       })
       .eq("id", createdOrder.id);
 
+    await logShopOrderEvent(supabase, {
+      orderId: createdOrder.id,
+      eventType: "checkout_session_created",
+      message: "Betaling er startet i Stripe.",
+      payload: {
+        checkoutSessionId: session.id,
+        checkoutFlow: payload.checkoutFlow,
+      },
+    });
+
     return NextResponse.json({ url: session.url });
   } catch (error) {
     const message = error instanceof Error ? error.message : "Kunne ikke starte Stripe-checkout.";
@@ -216,6 +253,14 @@ export async function POST(request: Request) {
       /(activated|enable|supported|available)/i.test(message);
 
     await supabase.from("shop_orders").update({ status: "failed" }).eq("id", createdOrder.id);
+
+    await logShopOrderEvent(supabase, {
+      orderId: createdOrder.id,
+      eventType: "checkout_session_failed",
+      message: "Betalingen kunne ikke startes.",
+      payload: { checkoutFlow: payload.checkoutFlow, error: message },
+      customerVisible: false,
+    });
 
     return NextResponse.json(
       {
