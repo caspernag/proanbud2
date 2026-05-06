@@ -213,6 +213,429 @@ async function parseSupplierCsv(csvPath: string): Promise<PriceListProduct[]> {
   }
 }
 
+async function getOpenAiVectorStorePriceListProducts() {
+  if (!hasOpenAiEnv()) {
+    return [] as PriceListProduct[];
+  }
+
+  const vectorStoreId = env.openAiVectorStoreIdStorefront.trim();
+
+  if (!vectorStoreId) {
+    return [] as PriceListProduct[];
+  }
+
+  try {
+    const openai = new OpenAI({ apiKey: env.openAiApiKey });
+    const vectorStore = await openai.vectorStores.retrieve(vectorStoreId);
+
+    if (vectorStore.status === "expired") {
+      return [] as PriceListProduct[];
+    }
+
+    const products: PriceListProduct[] = [];
+
+    for await (const file of openai.vectorStores.files.list(vectorStoreId, {
+      filter: "completed",
+      order: "asc",
+    })) {
+      const fileName = await resolveVectorStoreFileName(openai, file.id, file.attributes);
+      const fileContentParts: string[] = [];
+
+      for await (const contentPart of openai.vectorStores.files.content(file.id, { vector_store_id: vectorStoreId })) {
+        if (typeof contentPart.text === "string" && contentPart.text.trim().length > 0) {
+          fileContentParts.push(contentPart.text);
+        }
+      }
+
+      const rawContent = fileContentParts.join("\n").trim();
+
+      if (!rawContent) {
+        continue;
+      }
+
+      products.push(...parsePriceListProductsFromVectorFile(rawContent, fileName));
+    }
+
+    return products;
+  } catch (error) {
+    console.warn(
+      "[price-lists] Kunne ikke lese prisfil fra OpenAI vector-store:",
+      error instanceof Error ? error.message : String(error),
+    );
+    return [] as PriceListProduct[];
+  }
+}
+
+export function parsePriceListProductsFromVectorFile(
+  rawContent: string,
+  fileName: string,
+  lastUpdated = new Date().toISOString().slice(0, 10),
+) {
+  const fromJson = parsePriceListProductsFromJson(rawContent, fileName, lastUpdated);
+
+  if (fromJson.length > 0) {
+    return fromJson;
+  }
+
+  const fromNdjson = parsePriceListProductsFromNdjson(rawContent, fileName, lastUpdated);
+
+  if (fromNdjson.length > 0) {
+    return fromNdjson;
+  }
+
+  return parsePriceListProductsFromDelimitedText(rawContent, fileName, lastUpdated);
+}
+
+function parsePriceListProductsFromJson(rawContent: string, fileName: string, lastUpdated: string) {
+  try {
+    const parsed = JSON.parse(rawContent) as unknown;
+    return normalizePriceListProductsFromUnknown(parsed, fileName, lastUpdated);
+  } catch {
+    return [] as PriceListProduct[];
+  }
+}
+
+function parsePriceListProductsFromNdjson(rawContent: string, fileName: string, lastUpdated: string) {
+  const lines = rawContent
+    .split(/\r?\n/)
+    .map((line) => line.trim())
+    .filter((line) => line.startsWith("{") && line.endsWith("}"));
+
+  if (lines.length === 0) {
+    return [] as PriceListProduct[];
+  }
+
+  const products: PriceListProduct[] = [];
+
+  for (const line of lines) {
+    try {
+      const parsed = JSON.parse(line) as unknown;
+      products.push(...normalizePriceListProductsFromUnknown(parsed, fileName, lastUpdated));
+    } catch {
+      continue;
+    }
+  }
+
+  return products;
+}
+
+function normalizePriceListProductsFromUnknown(raw: unknown, fileName: string, lastUpdated: string): PriceListProduct[] {
+  if (Array.isArray(raw)) {
+    return raw.flatMap((entry) => normalizePriceListProductsFromUnknown(entry, fileName, lastUpdated));
+  }
+
+  if (!raw || typeof raw !== "object") {
+    return [] as PriceListProduct[];
+  }
+
+  const record = raw as Record<string, unknown>;
+
+  if (Array.isArray(record.items)) {
+    return normalizePriceListProductsFromUnknown(record.items, fileName, lastUpdated);
+  }
+
+  if (Array.isArray(record.products)) {
+    return normalizePriceListProductsFromUnknown(record.products, fileName, lastUpdated);
+  }
+
+  const productName = readStringField(record, ["productName", "product_name", "item", "title", "name"]);
+  const nobbNumber = pickNobbNumber(
+    readStringField(record, ["nobbNumber", "nobb", "nobb_number"]),
+    readStringField(record, ["supplierSku", "supplier_sku", "articleNumber", "article_number"]),
+  );
+
+  if (!productName || !nobbNumber) {
+    return [] as PriceListProduct[];
+  }
+
+  const supplierName = readStringField(record, ["supplierName", "supplier_name", "supplier"]) || supplierLabelFromFileName(fileName);
+  const description = readStringField(record, ["description", "comment", "details"]) || productName;
+  const priceUnit = normalizeProductUnit(readStringField(record, ["priceUnit", "price_unit", "pricingUnit", "pricing_unit"]), "STK");
+  const salesUnit = normalizeProductUnit(readStringField(record, ["salesUnit", "sales_unit", "sellingUnit", "selling_unit"]), priceUnit);
+  const salesUnitQuantity =
+    readNumberField(record, ["salesUnitQuantity", "sales_unit_quantity", "quantityPerSalesUnit", "quantity_per_sales_unit"]) ??
+    parseSalesUnitQuantity(description, priceUnit, salesUnit);
+  const rawPriceNok = readNumberField(record, ["priceNok", "price_nok", "unitPriceNok", "unit_price_nok", "price"]);
+  const rawListPriceNok = readNumberField(record, ["listPriceNok", "list_price_nok", "veiledendePrisNok", "compareAtPriceNok"]);
+  const priceNok = priceForSalesUnit(rawPriceNok ?? rawListPriceNok ?? 0, {
+    priceUnit,
+    salesUnit,
+    salesUnitQuantity,
+  });
+  const listPriceNok = priceForSalesUnit(rawListPriceNok ?? rawPriceNok ?? 0, {
+    priceUnit,
+    salesUnit,
+    salesUnitQuantity,
+  });
+  const sectionTitle = readStringField(record, ["sectionTitle", "section_title", "section"]) || inferSectionTitle("", productName);
+  const category = readStringField(record, ["category", "categoryName", "category_name"]) || inferCategory("", productName);
+  const salesUnitQuantityDetail = describeSalesUnitQuantity({ priceUnit, salesUnit, salesUnitQuantity });
+  const technicalDetails = [
+    ...readStringArrayField(record, ["technicalDetails", "technical_details", "specs"]),
+    description,
+    `Prisenhet: ${priceUnit}`,
+    `Salgsenhet: ${salesUnit}`,
+    salesUnitQuantityDetail,
+  ].filter((value) => value.length > 0);
+
+  return [
+    {
+      id: readStringField(record, ["id", "productId"]) || `${slugifyPriceListId(supplierName)}-${nobbNumber}`,
+      nobbNumber,
+      productName,
+      supplierName,
+      brand: readStringField(record, ["brand", "brandName", "brand_name"]) || inferBrand("", productName),
+      unit: salesUnit,
+      priceUnit,
+      salesUnit,
+      ...(salesUnitQuantity ? { salesUnitQuantity } : {}),
+      ...(priceUnit === "M2" && salesUnitQuantity ? { packageAreaSqm: salesUnitQuantity } : {}),
+      priceNok,
+      listPriceNok,
+      sectionTitle,
+      category,
+      description,
+      ...(readStringField(record, ["ean", "eanNumber", "ean_number"]) ? { ean: readStringField(record, ["ean", "eanNumber", "ean_number"]) } : {}),
+      ...(readStringField(record, ["datasheetUrl", "datasheet_url"]) ? { datasheetUrl: readStringField(record, ["datasheetUrl", "datasheet_url"]) } : {}),
+      ...(readStringField(record, ["imageUrl", "image_url"]) ? { imageUrl: readStringField(record, ["imageUrl", "image_url"]) } : {}),
+      technicalDetails: Array.from(new Set(technicalDetails)).slice(0, 8),
+      quantitySuggestion: readStringField(record, ["quantitySuggestion", "quantity_suggestion"]) || inferQuantitySuggestion(salesUnit, sectionTitle),
+      quantityReason: readStringField(record, ["quantityReason", "quantity_reason"]) || inferQuantityReason(salesUnit, sectionTitle, supplierName),
+      lastUpdated: readStringField(record, ["lastUpdated", "last_updated"]) || lastUpdated,
+    },
+  ];
+}
+
+function parsePriceListProductsFromDelimitedText(rawContent: string, fileName: string, lastUpdated: string) {
+  const lines = rawContent
+    .split(/\r?\n/)
+    .map((line) => line.trim())
+    .filter((line) => line.length > 0);
+  const delimiter = detectDelimitedTextDelimiter(lines);
+
+  if (!delimiter) {
+    return [] as PriceListProduct[];
+  }
+
+  const supplierKey = path.basename(fileName, path.extname(fileName)).toLowerCase();
+  const supplierName = supplierLabelFromFileName(supplierKey);
+  const products: PriceListProduct[] = [];
+
+  for (const line of lines) {
+    const columns = splitDelimitedLine(line, delimiter);
+    const isSemicolon = delimiter === ";";
+    const categoryCode = normalizeColumn(columns[isSemicolon ? 0 : 9]);
+    const eanRaw = normalizeColumn(columns[isSemicolon ? 1 : -1]);
+    const nobbCandidate = normalizeColumn(columns[isSemicolon ? 2 : 0]);
+    const productName = normalizeColumn(columns[isSemicolon ? 4 : 1]);
+    const pricePrimary = normalizeColumn(columns[6]);
+    const priceSecondary = normalizeColumn(columns[isSemicolon ? 5 : 4]);
+    const priceUnit = normalizeColumn(columns[7]);
+    const descriptionRaw = normalizeColumn(columns[isSemicolon ? 9 : 2]);
+    const salesUnit = normalizeColumn(columns[isSemicolon ? 10 : 7]);
+    const salesUnitQuantityRaw = normalizeColumn(columns[isSemicolon ? 11 : -1]);
+    const brandOrSeries = normalizeColumn(columns[isSemicolon ? 9 : 2]);
+    const altNobbCandidate = normalizeColumn(columns[isSemicolon ? 14 : -1]);
+    const nobbNumber = pickNobbNumber(nobbCandidate, altNobbCandidate);
+
+    if (!nobbNumber || !productName) {
+      continue;
+    }
+
+    const normalizedPriceUnit = (priceUnit || salesUnit || "STK").toUpperCase();
+    const normalizedSalesUnit = (salesUnit || normalizedPriceUnit).toUpperCase();
+    const salesUnitQuantity = parseSalesUnitQuantity(
+      descriptionRaw,
+      normalizedPriceUnit,
+      normalizedSalesUnit,
+      salesUnitQuantityRaw,
+    );
+    const packageAreaSqm = normalizedPriceUnit === "M2" ? salesUnitQuantity : undefined;
+    const priceUnitPriceNok = parsePriceNok(pricePrimary) ?? parsePriceNok(priceSecondary) ?? 0;
+    const listPriceUnitNok = parsePriceNok(priceSecondary) ?? priceUnitPriceNok;
+    const priceNok = priceForSalesUnit(priceUnitPriceNok, {
+      priceUnit: normalizedPriceUnit,
+      salesUnit: normalizedSalesUnit,
+      salesUnitQuantity,
+    });
+    const listPriceNok = priceForSalesUnit(listPriceUnitNok, {
+      priceUnit: normalizedPriceUnit,
+      salesUnit: normalizedSalesUnit,
+      salesUnitQuantity,
+    });
+    const sectionTitle = inferSectionTitle(categoryCode, productName);
+    const category = inferCategory(categoryCode, productName);
+    const salesUnitQuantityDetail = describeSalesUnitQuantity({
+      priceUnit: normalizedPriceUnit,
+      salesUnit: normalizedSalesUnit,
+      salesUnitQuantity,
+    });
+    const technicalDetails = [
+      descriptionRaw,
+      `Prisenhet: ${normalizedPriceUnit}`,
+      `Salgsenhet: ${normalizedSalesUnit}`,
+      salesUnitQuantityDetail,
+    ].filter((value) => value.length > 0);
+
+    products.push({
+      id: `${supplierKey}-${nobbNumber}`,
+      nobbNumber,
+      productName,
+      supplierName,
+      brand: inferBrand(brandOrSeries, productName),
+      unit: normalizedSalesUnit,
+      priceUnit: normalizedPriceUnit,
+      salesUnit: normalizedSalesUnit,
+      ...(salesUnitQuantity ? { salesUnitQuantity } : {}),
+      ...(packageAreaSqm ? { packageAreaSqm } : {}),
+      priceNok,
+      listPriceNok,
+      sectionTitle,
+      category,
+      description: descriptionRaw || productName,
+      ean: parseEan(eanRaw) ?? undefined,
+      technicalDetails,
+      quantitySuggestion: inferQuantitySuggestion(normalizedSalesUnit, sectionTitle),
+      quantityReason: inferQuantityReason(normalizedSalesUnit, sectionTitle, supplierName),
+      lastUpdated,
+    });
+  }
+
+  return products;
+}
+
+function mergePriceListProducts(primaryProducts: PriceListProduct[], fallbackProducts: PriceListProduct[]) {
+  const merged = new Map<string, PriceListProduct>();
+
+  for (const product of [...primaryProducts, ...fallbackProducts]) {
+    const key = `${product.supplierName.toLowerCase()}::${product.nobbNumber.replace(/\D/g, "")}`;
+    const existing = merged.get(key);
+
+    if (!existing) {
+      merged.set(key, product);
+      continue;
+    }
+
+    if (existing.priceNok <= 0 && product.priceNok > 0) {
+      merged.set(key, product);
+    }
+  }
+
+  return Array.from(merged.values());
+}
+
+async function resolveVectorStoreFileName(
+  openai: OpenAI,
+  fileId: string,
+  attributes?: Record<string, string | number | boolean> | null,
+) {
+  const namedAttribute = attributes?.filename ?? attributes?.name ?? attributes?.label;
+
+  if (typeof namedAttribute === "string" && namedAttribute.trim().length > 0) {
+    return namedAttribute.trim();
+  }
+
+  try {
+    const file = await openai.files.retrieve(fileId);
+    return file.filename?.trim() || fileId;
+  } catch {
+    return fileId;
+  }
+}
+
+function readStringField(record: Record<string, unknown>, keys: string[]) {
+  for (const key of keys) {
+    const value = record[key];
+
+    if (typeof value === "string" && value.trim().length > 0) {
+      return value.trim();
+    }
+  }
+
+  return "";
+}
+
+function readStringArrayField(record: Record<string, unknown>, keys: string[]) {
+  for (const key of keys) {
+    const value = record[key];
+
+    if (Array.isArray(value)) {
+      return value.filter((entry): entry is string => typeof entry === "string" && entry.trim().length > 0);
+    }
+
+    if (typeof value === "string" && value.trim().length > 0) {
+      return value
+        .split(/\r?\n| \| /)
+        .map((entry) => entry.trim())
+        .filter(Boolean);
+    }
+  }
+
+  return [] as string[];
+}
+
+function readNumberField(record: Record<string, unknown>, keys: string[]) {
+  for (const key of keys) {
+    const value = record[key];
+
+    if (typeof value === "number" && Number.isFinite(value)) {
+      return value;
+    }
+
+    if (typeof value === "string") {
+      const normalized = value.replace(/\s+/g, "").replace(",", ".");
+      const parsed = Number.parseFloat(normalized);
+
+      if (Number.isFinite(parsed)) {
+        return parsed;
+      }
+    }
+  }
+
+  return undefined;
+}
+
+function normalizeProductUnit(value: string, fallback: string) {
+  return (value || fallback).trim().toUpperCase().replace("M²", "M2") || fallback;
+}
+
+function detectDelimitedTextDelimiter(lines: string[]) {
+  const sample = lines.slice(0, 12);
+  const semicolonHits = sample.reduce((sum, line) => sum + countDelimiter(line, ";"), 0);
+  const commaHits = sample.reduce((sum, line) => sum + countDelimiter(line, ","), 0);
+
+  if (semicolonHits === 0 && commaHits === 0) {
+    return null;
+  }
+
+  return semicolonHits >= commaHits ? ";" : ",";
+}
+
+function countDelimiter(line: string, delimiter: string) {
+  let count = 0;
+
+  for (const character of line) {
+    if (character === delimiter) {
+      count += 1;
+    }
+  }
+
+  return count;
+}
+
+function splitDelimitedLine(line: string, delimiter: string) {
+  return line.split(delimiter);
+}
+
+function slugifyPriceListId(value: string) {
+  return value
+    .toLowerCase()
+    .normalize("NFKD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .replace(/[^a-z0-9]+/g, "-")
+    .replace(/^-+|-+$/g, "") || "produkt";
+}
+
 function supplierLabelFromFileName(fileName: string) {
   const normalized = fileName.toLowerCase();
 

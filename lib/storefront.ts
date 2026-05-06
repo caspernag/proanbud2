@@ -25,7 +25,6 @@ import type {
 import { slugify } from "@/lib/utils";
 
 const STOREFRONT_DEFAULT_PAGE_SIZE = 24;
-const MAX_STOREFRONT_DISCOUNT = 0.4;
 
 const CATEGORY_FILTER_ALIASES: Record<string, string[]> = {
   isolasjon: [
@@ -53,7 +52,7 @@ export async function getStorefrontProducts() {
   const [fromVectorStore, markups, priceListProducts] = await Promise.all([
     loadStorefrontProductsFromVectorStore(),
     getSupplierMarkups(),
-    getPriceListProducts(),
+    getPriceListProducts({ includeVectorStore: false }),
   ]);
 
   if (fromVectorStore.products.length > 0) {
@@ -689,29 +688,25 @@ function preferSearchText(primary: string, fallback: string, productName: string
 
 function applyStorefrontPricing(products: StorefrontProduct[], markups: SupplierMarkup[]): StorefrontProduct[] {
   return products.map((product) => {
-    // Salgs-/minpris: markup + MVA.
-    // Førpris = veiledende pris fra prisliste + MVA (ingen pålegg).
-    // Ikke tillat at salgsprisen overstiger førpris (veil.pris m/MVA).
-    const listWithVat = product.listPriceNok > 0 ? toVatInclusiveNok(product.listPriceNok) : 0;
-    const markedUnit = applyMarkup(product.unitPriceNok, product.supplierName, markups);
-    const unitWithVat = toVatInclusiveNok(markedUnit);
-    const cappedUnitWithVat = limitStorefrontDiscount(unitWithVat, listWithVat);
+    const prices = calculateStorefrontDisplayPrices(product, markups);
 
     return {
       ...product,
-      unitPriceNok: cappedUnitWithVat,
-      listPriceNok: listWithVat || cappedUnitWithVat,
+      unitPriceNok: prices.unitPriceNok,
+      listPriceNok: prices.listPriceNok,
     };
   });
 }
 
-export function limitStorefrontDiscount(unitWithVat: number, listWithVat: number) {
-  if (listWithVat <= 0 || unitWithVat <= 0) {
-    return unitWithVat;
-  }
+export function calculateStorefrontDisplayPrices(
+  product: Pick<StorefrontProduct, "unitPriceNok" | "listPriceNok" | "supplierName">,
+  markups: SupplierMarkup[],
+) {
+  const currentPriceWithMarkup = applyMarkup(product.unitPriceNok, product.supplierName, markups);
+  const unitPriceNok = toVatInclusiveNok(currentPriceWithMarkup);
+  const listPriceNok = product.listPriceNok > 0 ? toVatInclusiveNok(product.listPriceNok) : unitPriceNok;
 
-  const lowestAllowedPrice = Math.round(listWithVat * (1 - MAX_STOREFRONT_DISCOUNT));
-  return Math.min(Math.max(unitWithVat, lowestAllowedPrice), listWithVat);
+  return { unitPriceNok, listPriceNok };
 }
 
 function dedupeStorefrontProducts(products: StorefrontProduct[]) {

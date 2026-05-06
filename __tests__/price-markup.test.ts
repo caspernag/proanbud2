@@ -1,7 +1,7 @@
 import { describe, it, expect } from "vitest";
 
 import { applyMarkup, applyMarkupForSupplierKey, type SupplierMarkup } from "@/lib/price-markup";
-import { limitStorefrontDiscount } from "@/lib/storefront";
+import { calculateStorefrontDisplayPrices } from "@/lib/storefront";
 
 const SAMPLE_MARKUPS: SupplierMarkup[] = [
   { supplier_name: "Byggmakker", markup_percentage: 10, markup_fixed: 0 },
@@ -76,16 +76,32 @@ describe("applyMarkup (by supplier name string)", () => {
   });
 });
 
-describe("limitStorefrontDiscount", () => {
-  it("does not allow more than 40 percent discount against list price", () => {
-    expect(limitStorefrontDiscount(400, 1000)).toBe(600);
+describe("calculateStorefrontDisplayPrices", () => {
+  it("uses list price plus VAT as before price", () => {
+    const prices = calculateStorefrontDisplayPrices(
+      { unitPriceNok: 890, listPriceNok: 1190, supplierName: "Byggmakker" },
+      SAMPLE_MARKUPS,
+    );
+
+    expect(prices.listPriceNok).toBe(1487.5);
   });
 
-  it("keeps valid discounts unchanged", () => {
-    expect(limitStorefrontDiscount(750, 1000)).toBe(750);
+  it("uses discounted price plus markup and VAT as current price", () => {
+    const prices = calculateStorefrontDisplayPrices(
+      { unitPriceNok: 890, listPriceNok: 1190, supplierName: "Byggmakker" },
+      SAMPLE_MARKUPS,
+    );
+
+    expect(prices.unitPriceNok).toBe(1223.75);
   });
 
-  it("does not allow sale price above list price", () => {
-    expect(limitStorefrontDiscount(1200, 1000)).toBe(1000);
+  it("does not cap current price to before price", () => {
+    const prices = calculateStorefrontDisplayPrices(
+      { unitPriceNok: 1100, listPriceNok: 1000, supplierName: "XL-Bygg" },
+      SAMPLE_MARKUPS,
+    );
+
+    expect(prices.unitPriceNok).toBe(1665);
+    expect(prices.listPriceNok).toBe(1250);
   });
 });

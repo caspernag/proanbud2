@@ -15,7 +15,7 @@ describe("material list AI attachment context", () => {
     expect(context.userContentParts).toHaveLength(1);
     expect(context.userContentParts[0]).toMatchObject({
       type: "image",
-      detail: "high",
+      detail: "auto",
       text: expect.stringContaining("Bildet er sendt til AI"),
     });
 

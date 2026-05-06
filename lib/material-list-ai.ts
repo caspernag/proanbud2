@@ -172,7 +172,7 @@ export async function buildAttachmentContext(files: File[]): Promise<PreparedAtt
           ? {
               type: "image" as const,
               imageUrl,
-              detail: "high" as const,
+              detail: "auto" as const,
               text: `Bildevedlegg: ${file.name} (${Math.max(1, Math.round(file.size / 1024))} KB). Bildet er sendt til AI for tolkning av mål, byggdeler og materialbehov.`,
             }
           : {
@@ -1024,15 +1024,14 @@ async function requestFromPromptTemplate(
                   {
                     type: "file_search" as const,
                     vector_store_ids: [catalogVectorStoreId],
-                    max_num_results: 30,
+                    max_num_results: 12,
                     ranking_options: {
                       ranker: "auto" as const,
                     },
                   },
                 ],
                 tool_choice: "auto" as const,
-                max_tool_calls: 10,
-                include: ["file_search_call.results" as const],
+                max_tool_calls: 3,
               }
             : {}),
         },
