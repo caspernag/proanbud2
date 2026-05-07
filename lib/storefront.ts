@@ -52,7 +52,7 @@ export async function getStorefrontProducts() {
   const [fromVectorStore, markups, priceListProducts] = await Promise.all([
     loadStorefrontProductsFromVectorStore(),
     getSupplierMarkups(),
-    getPriceListProducts({ includeVectorStore: false }),
+    getPriceListProducts(),
   ]);
 
   if (fromVectorStore.products.length > 0) {
@@ -732,6 +732,40 @@ function dedupeStorefrontProducts(products: StorefrontProduct[]) {
   return Array.from(deduped.values());
 }
 
+/** Category popularity weight — higher = more frequently purchased. */
+const CATEGORY_POPULARITY: Record<string, number> = {
+  "Konstruksjonsvirke": 100,
+  "Festemidler": 95,
+  "Isolasjon": 90,
+  "Gips og plater": 85,
+  "Tetting og fukt": 75,
+  "Maling": 70,
+  "Overflatebehandling": 60,
+  "Terrasse": 50,
+  "Baderom": 45,
+  "Gulv": 40,
+  "Generelt": 20,
+};
+
+function popularityScore(
+  product: StorefrontProduct,
+  userProfile?: StorefrontProductQuery["userProfile"],
+) {
+  const categoryScore = CATEGORY_POPULARITY[product.category] ?? 20;
+
+  // Penalise accessories and minor variants (names starting with "+", "KARMSETT", etc.)
+  const name = product.productName.trim();
+  const isVariant = name.startsWith("+") || /^(KARMSETT|KARMSET)\b/i.test(name);
+  const variantPenalty = isVariant ? 40 : 0;
+
+  // Slight boost for products with a known list price discount (popular = on offer)
+  const hasDiscount = product.listPriceNok > product.unitPriceNok ? 5 : 0;
+
+  const profileScore = scoreStorefrontProductForUserProfile(product, userProfile);
+
+  return categoryScore - variantPenalty + hasDiscount + profileScore;
+}
+
 function sortStorefrontProducts(
   products: StorefrontProduct[],
   sort: StorefrontSortOption,
@@ -754,6 +788,16 @@ function sortStorefrontProducts(
     if (sort === "newest") {
       return (
         new Date(right.lastUpdated).getTime() - new Date(left.lastUpdated).getTime() ||
+        left.productName.localeCompare(right.productName, "nb-NO")
+      );
+    }
+
+    // Without a search query, surface the most commonly purchased products first.
+    if (!q) {
+      const leftPop = popularityScore(left, userProfile);
+      const rightPop = popularityScore(right, userProfile);
+      return (
+        rightPop - leftPop ||
         left.productName.localeCompare(right.productName, "nb-NO")
       );
     }

@@ -17,6 +17,175 @@ const MISS_CACHE_SECONDS = 60 * 5; // 5 min
 /** After this many days we will retry fetching a product that previously had no image. */
 const NULL_RETRY_DAYS = 1;
 
+const USER_AGENT =
+  "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/135.0.0.0 Safari/537.36";
+
+const CONTENT_TYPE_EXT: Record<string, string> = {
+  "image/jpeg": ".jpg",
+  "image/jpg": ".jpg",
+  "image/png": ".png",
+  "image/webp": ".webp",
+  "image/gif": ".gif",
+};
+
+function extForContentType(contentType: string): string {
+  const ct = contentType.split(";")[0].trim().toLowerCase();
+  return CONTENT_TYPE_EXT[ct] ?? ".jpg";
+}
+
+// ---------------------------------------------------------------------------
+// Supabase storage helpers
+// ---------------------------------------------------------------------------
+
+type SupabaseClient = NonNullable<ReturnType<typeof createSupabaseAdminClient>>;
+
+async function findImageInSupabase(
+  supabase: SupabaseClient,
+  nobb: string,
+): Promise<{ bytes: ArrayBuffer; contentType: string } | null> {
+  const { data: files } = await supabase.storage.from(BUCKET).list("", {
+    search: nobb + ".",
+    limit: 10,
+  });
+  if (!files) return null;
+
+  const imageFile = files.find(
+    (f) => f.name.startsWith(nobb + ".") && /\.(jpg|jpeg|png|webp|gif)$/i.test(f.name),
+  );
+  if (!imageFile) return null;
+
+  const { data, error } = await supabase.storage.from(BUCKET).download(imageFile.name);
+  if (error || !data) return null;
+
+  const ct = imageFile.name.endsWith(".png")
+    ? "image/png"
+    : imageFile.name.endsWith(".webp")
+      ? "image/webp"
+      : imageFile.name.endsWith(".gif")
+        ? "image/gif"
+        : "image/jpeg";
+
+  return { bytes: await data.arrayBuffer(), contentType: ct };
+}
+
+async function checkNullMarker(supabase: SupabaseClient, nobb: string): Promise<boolean> {
+  const { data } = await supabase.storage.from(BUCKET).download(`${nobb}.null`);
+  if (!data) return false;
+
+  const text = await data.text();
+  const ts = parseInt(text.trim(), 10);
+  if (isNaN(ts)) return true; // old-style empty marker → treat as fresh
+
+  const ageMs = Date.now() - ts;
+  return ageMs < NULL_RETRY_DAYS * 24 * 60 * 60 * 1000;
+}
+
+async function saveImageToSupabase(
+  supabase: SupabaseClient,
+  nobb: string,
+  bytes: ArrayBuffer,
+  contentType: string,
+): Promise<void> {
+  const ext = extForContentType(contentType);
+  await supabase.storage.from(BUCKET).upload(`${nobb}${ext}`, bytes, {
+    contentType,
+    upsert: true,
+  });
+}
+
+async function saveNullMarker(supabase: SupabaseClient, nobb: string): Promise<void> {
+  const ts = String(Date.now());
+  await supabase.storage
+    .from(BUCKET)
+    .upload(`${nobb}.null`, new TextEncoder().encode(ts), { contentType: "text/plain", upsert: true });
+}
+
+// ---------------------------------------------------------------------------
+// External image sources
+// ---------------------------------------------------------------------------
+
+interface ImageResult {
+  bytes: ArrayBuffer;
+  contentType: string;
+}
+
+async function fetchNobbExport(nobb: string): Promise<ImageResult | null> {
+  const authHeader = hasNobbExportEnv()
+    ? "Basic " + btoa(`${env.nobbExportUsername}:${env.nobbExportPassword}`)
+    : null;
+
+  const endpoints = [
+    `https://export.byggtjeneste.no/api/v1/media/images/items/${encodeURIComponent(nobb)}/SQUARE`,
+    `https://export.byggtjeneste.no/api/v2/media/images/items/${encodeURIComponent(nobb)}/Mb?imagesize=SQUARE`,
+  ];
+
+  for (const url of endpoints) {
+    try {
+      const res = await fetch(url, {
+        headers: {
+          "User-Agent": USER_AGENT,
+          ...(authHeader ? { Authorization: authHeader } : {}),
+        },
+      });
+      if (!res.ok) continue;
+      const ct = res.headers.get("content-type") ?? "";
+      if (!ct.toLowerCase().startsWith("image/")) continue;
+      return { bytes: await res.arrayBuffer(), contentType: ct };
+    } catch {
+      continue;
+    }
+  }
+  return null;
+}
+
+async function fetchOptimera(nobb: string): Promise<ImageResult | null> {
+  try {
+    const searchUrl = `https://www.optimera.no/sok?q=${encodeURIComponent(nobb)}`;
+    const res = await fetch(searchUrl, {
+      headers: { "User-Agent": USER_AGENT, Accept: "text/html,*/*" },
+    });
+    if (!res.ok) return null;
+
+    const html = await res.text();
+    // Strict NOBB match required to prevent cross-product contamination.
+    if (!new RegExp(`"nobbNumber"\\s*:\\s*"${nobb}"`).test(html)) return null;
+
+    const imgMatch = html.match(
+      /https:\/\/media\.optimera\.no\/[^"'\s?]+\.(?:jpg|jpeg|png|webp)/i,
+    );
+    if (!imgMatch) return null;
+
+    const imgRes = await fetch(imgMatch[0], { headers: { "User-Agent": USER_AGENT } });
+    if (!imgRes.ok) return null;
+    const ct = imgRes.headers.get("content-type") ?? "";
+    if (!ct.toLowerCase().startsWith("image/")) return null;
+    return { bytes: await imgRes.arrayBuffer(), contentType: ct };
+  } catch {
+    return null;
+  }
+}
+
+async function fetchByggmakker(nobb: string): Promise<ImageResult | null> {
+  const candidates = [
+    `https://bilder.byggmakker.no/img/${nobb}-1-800x800.jpg`,
+    `https://bilder.byggmakker.no/img/${nobb}-800x800.jpg`,
+    `https://bilder.byggmakker.no/img/${nobb}.jpg`,
+  ];
+
+  for (const url of candidates) {
+    try {
+      const res = await fetch(url, { headers: { "User-Agent": USER_AGENT } });
+      if (!res.ok) continue;
+      const ct = res.headers.get("content-type") ?? "";
+      if (!ct.toLowerCase().startsWith("image/")) continue;
+      return { bytes: await res.arrayBuffer(), contentType: ct };
+    } catch {
+      continue;
+    }
+  }
+  return null;
+}
+
 // ---------------------------------------------------------------------------
 // Route handler
 // ---------------------------------------------------------------------------
@@ -27,420 +196,63 @@ type RouteContext = {
   }>;
 };
 
-export async function GET(_request: Request, context: RouteContext) {
-  const { nobb } = await context.params;
-  // Sanitise: only digits (NOBB numbers are numeric)
-  const nobbNumber = nobb.trim().replace(/[^\d]/g, "");
+export async function GET(_req: Request, { params }: RouteContext) {
+  const { nobb } = await params;
 
-  if (!nobbNumber) {
-    return Response.redirect(STORE_IMAGE_FALLBACK_URL, 307);
+  if (!/^\d+$/.test(nobb)) {
+    return new Response("Bad Request", { status: 400 });
   }
 
-  // 1. Redirect to Supabase Storage public URL if cached ----------------------
-  const cachedUrl = await getStoragePublicUrl(nobbNumber);
-  if (cachedUrl) {
-    // 301 = permanent redirect — browsers cache this and skip the API route
-    // entirely on subsequent page loads for the same NOBB.
-    return Response.redirect(cachedUrl, 301);
+  const supabase = createSupabaseAdminClient();
+
+  // 1. Check Supabase cache
+  if (supabase) {
+    const cached = await findImageInSupabase(supabase, nobb);
+    if (cached) {
+      return new Response(cached.bytes, {
+        headers: {
+          "Content-Type": cached.contentType,
+          "Cache-Control": `public, max-age=${HIT_CACHE_SECONDS}, immutable`,
+        },
+      });
+    }
+
+    // 2. Check null marker (no image found previously)
+    const isNull = await checkNullMarker(supabase, nobb);
+    if (isNull) {
+      return Response.redirect(STORE_IMAGE_FALLBACK_URL, 302);
+    }
   }
 
-  // 2. Skip re-fetch if we tried recently and found nothing --------------------
-  if (await isRecentlyNull(nobbNumber)) {
-    return buildPlaceholderResponse();
+  // 3. Fetch from external sources
+  const result =
+    (await fetchNobbExport(nobb)) ??
+    (await fetchOptimera(nobb)) ??
+    (await fetchByggmakker(nobb));
+
+  // 4. Persist result to Supabase
+  if (supabase) {
+    if (result) {
+      await saveImageToSupabase(supabase, nobb, result.bytes, result.contentType);
+    } else {
+      await saveNullMarker(supabase, nobb);
+    }
   }
 
-  // 3. Upstream resolution — deduplicated per NOBB to prevent thundering herd -
-  const resolved = await resolveUpstreamImage(nobbNumber);
-
-  if (resolved.kind === "image") {
-    return new Response(resolved.buffer, {
-      status: 200,
+  if (result) {
+    return new Response(result.bytes, {
       headers: {
-        "Content-Type": resolved.contentType,
-        "Cache-Control": `public, max-age=${HIT_CACHE_SECONDS}, s-maxage=${HIT_CACHE_SECONDS}${resolved.source === "nobb-export" ? ", immutable" : ""}`,
-        "X-Image-Source": resolved.source,
+        "Content-Type": result.contentType,
+        "Cache-Control": `public, max-age=${HIT_CACHE_SECONDS}, immutable`,
       },
     });
   }
 
-  return buildPlaceholderResponse();
-}
-
-// ---------------------------------------------------------------------------
-// Upstream resolver (with in-flight deduplication)
-// ---------------------------------------------------------------------------
-
-type UpstreamResolution =
-  | {
-      kind: "image";
-      buffer: ArrayBuffer;
-      contentType: string;
-      source: "nobb-export" | "optimera-scrape" | "byggmakker-scrape";
-    }
-  | { kind: "none" };
-
-/**
- * Per-process in-flight map. When 100 concurrent requests ask for the same
- * uncached NOBB, we only fire ONE upstream chain and share its result with
- * all waiters. This prevents hammering upstream services (and getting rate
- * limited) during cold-cache bursts.
- */
-const inFlightUpstream = new Map<string, Promise<UpstreamResolution>>();
-
-async function resolveUpstreamImage(nobb: string): Promise<UpstreamResolution> {
-  const existing = inFlightUpstream.get(nobb);
-  if (existing) return existing;
-
-  const promise = (async (): Promise<UpstreamResolution> => {
-    // Try NOBB Export (priority 1) — requires Basic auth
-    const exportImage = await fetchNobbExportImage(nobb);
-    if (exportImage) {
-      await persistImage(nobb, exportImage.buffer, exportImage.contentType);
-      return { kind: "image", source: "nobb-export", ...exportImage };
-    }
-
-    // Fallback 1: Optimera SSR search scrape (no creds needed)
-    const optimeraImage = await fetchOptimeraImage(nobb);
-    if (optimeraImage) {
-      await persistImage(nobb, optimeraImage.buffer, optimeraImage.contentType);
-      return { kind: "image", source: "optimera-scrape", ...optimeraImage };
-    }
-
-    // Fallback 2: Byggmakker CDN/scrape
-    const bmImage = await fetchByggmakkerImage(nobb);
-    if (bmImage) {
-      await persistImage(nobb, bmImage.buffer, bmImage.contentType);
-      return { kind: "image", source: "byggmakker-scrape", ...bmImage };
-    }
-
-    // Nothing worked — mark as null so we skip retry for NULL_RETRY_DAYS
-    await writeNullMarker(nobb);
-    return { kind: "none" };
-  })();
-
-  inFlightUpstream.set(nobb, promise);
-  try {
-    return await promise;
-  } finally {
-    inFlightUpstream.delete(nobb);
-  }
-}
-
-// ---------------------------------------------------------------------------
-// Supabase DB + Storage helpers
-// ---------------------------------------------------------------------------
-
-/**
- * Returns the Supabase Storage public URL for a NOBB image if it exists in the
- * nobb_images lookup table — single DB query, no HEAD requests.
- */
-async function getStoragePublicUrl(nobb: string): Promise<string | null> {
-  const supabase = createSupabaseAdminClient();
-  if (!supabase) return null;
-
-  const { data } = await supabase
-    .from("nobb_images")
-    .select("storage_path")
-    .eq("nobb_number", nobb)
-    .not("storage_path", "is", null)
-    .maybeSingle();
-
-  if (!data?.storage_path) return null;
-
-  const { data: urlData } = supabase.storage
-    .from(BUCKET)
-    .getPublicUrl(data.storage_path);
-
-  return urlData.publicUrl;
-}
-
-async function persistImage(nobb: string, data: ArrayBuffer, contentType: string): Promise<void> {
-  const supabase = createSupabaseAdminClient();
-  if (!supabase) return;
-
-  const ext = contentTypeToExt(contentType);
-  const storagePath = `${nobb}${ext}`;
-
-  await supabase.storage.from(BUCKET).upload(storagePath, data, {
-    contentType,
-    upsert: true,
+  return new Response(null, {
+    status: 302,
+    headers: {
+      Location: STORE_IMAGE_FALLBACK_URL,
+      "Cache-Control": `public, max-age=${MISS_CACHE_SECONDS}`,
+    },
   });
-
-  // Record in lookup table so future requests skip the HEAD loop
-  await supabase.from("nobb_images").upsert(
-    { nobb_number: nobb, storage_path: storagePath, null_until: null, updated_at: new Date().toISOString() },
-    { onConflict: "nobb_number" },
-  );
 }
-
-async function isRecentlyNull(nobb: string): Promise<boolean> {
-  const supabase = createSupabaseAdminClient();
-  if (!supabase) return false;
-
-  const { data } = await supabase
-    .from("nobb_images")
-    .select("null_until")
-    .eq("nobb_number", nobb)
-    .maybeSingle();
-
-  if (!data?.null_until) return false;
-  return new Date(data.null_until) > new Date();
-}
-
-async function writeNullMarker(nobb: string): Promise<void> {
-  const supabase = createSupabaseAdminClient();
-  if (!supabase) return;
-
-  const nullUntil = new Date(Date.now() + NULL_RETRY_DAYS * 24 * 60 * 60 * 1000).toISOString();
-  await supabase.from("nobb_images").upsert(
-    { nobb_number: nobb, storage_path: null, null_until: nullUntil, updated_at: new Date().toISOString() },
-    { onConflict: "nobb_number" },
-  );
-}
-
-function contentTypeToExt(ct: string): string {
-  if (ct.includes("png")) return ".png";
-  if (ct.includes("webp")) return ".webp";
-  if (ct.includes("gif")) return ".gif";
-  return ".jpg";
-}
-
-// ---------------------------------------------------------------------------
-// Upstream image fetchers
-// ---------------------------------------------------------------------------
-
-type ImageData = { buffer: ArrayBuffer; contentType: string };
-
-/**
- * Fetch a product image from the NOBB export CDN (Byggtjeneste).
- *
- * In practice this endpoint serves public images WITHOUT authentication —
- * credentials are only needed for v2 metadata endpoints, not for /media/images.
- * We still send the Authorization header when credentials are configured
- * (harmless — the CDN accepts both authed and unauthed requests).
- *
- * Tries v1 SQUARE first (preferred quality), then v2 Mb as fallback.
- */
-async function fetchNobbExportImage(nobb: string): Promise<ImageData | null> {
-  const authHeader = hasNobbExportEnv()
-    ? `Basic ${Buffer.from(`${env.nobbExportUsername}:${env.nobbExportPassword}`).toString("base64")}`
-    : null;
-
-  const candidates = [
-    `https://export.byggtjeneste.no/api/v1/media/images/items/${encodeURIComponent(nobb)}/SQUARE`,
-    `https://export.byggtjeneste.no/api/v2/media/images/items/${encodeURIComponent(nobb)}/Mb?imagesize=SQUARE`,
-  ];
-
-  for (const url of candidates) {
-    try {
-      const res = await fetchWithSoftTimeout(url, {
-        headers: authHeader ? { Authorization: authHeader } : undefined,
-        cache: "no-store",
-      }, 8000);
-      if (!res) continue;
-      if (!res.ok) continue;
-      const contentType = res.headers.get("content-type") ?? "";
-      if (!contentType.startsWith("image/")) continue;
-      return { buffer: await res.arrayBuffer(), contentType };
-    } catch {
-      continue;
-    }
-  }
-  return null;
-}
-
-/**
- * Fetch a product image from Optimera.no.
- *
- * Optimera's search page is server-rendered (Next.js) and embeds product data
- * including `"nobbNumber": "<n>"` and the `media.optimera.no` image URL directly
- * in the HTML response. We only accept the image when we can verify that the
- * exact NOBB number appears in the HTML, so we never return a similar-but-wrong
- * product's picture.
- *
- * No credentials required. Works for most NOBB numbers present in Optimera's
- * catalog (trelast, plater, isolasjon, festemidler, etc.).
- */
-async function fetchOptimeraImage(nobb: string): Promise<ImageData | null> {
-  try {
-    const html = await fetchHtml(
-      `https://www.optimera.no/sok?q=${encodeURIComponent(nobb)}`,
-    );
-    if (!html) return null;
-
-    // Require exact NOBB match somewhere in the server-rendered payload.
-    // Pattern: "nobbNumber": "25410978"
-    const nobbMatcher = new RegExp(`"nobbNumber"\\s*:\\s*"${nobb}"`);
-    if (!nobbMatcher.test(html)) return null;
-
-    // Grab the first media.optimera.no image URL (unqualified — we prefer the
-    // original over the transformed webp variants so we can persist full quality).
-    const imageMatch = html.match(
-      /https:\/\/media\.optimera\.no\/[^"'\s?]+\.(?:jpg|jpeg|png|webp)/i,
-    );
-    if (!imageMatch?.[0]) return null;
-
-    return await tryFetchImageUrl(imageMatch[0]);
-  } catch {
-    return null;
-  }
-}
-
-
-/**
- * Attempt to scrape a product image from Byggmakker.no.
- *
- * Strategy:
- *  1. Try common Byggmakker CDN URL patterns directly (fast).
- *  2. If that fails, hit their product search page and parse the first product
- *     link, then fetch the product page to extract the primary image from
- *     JSON-LD or open-graph meta tags.
- */
-async function fetchByggmakkerImage(nobb: string): Promise<ImageData | null> {
-  // --- 1. Direct CDN guesses (no HTML round-trip needed) --------------------
-  const cdnCandidates = [
-    `https://bilder.byggmakker.no/img/${nobb}-1-800x800.jpg`,
-    `https://www.byggmakker.no/globalassets/produktbilder/${nobb}/${nobb}-1.jpg`,
-    `https://cdn.byggmakker.no/ProductImages/${nobb}/Main.jpg`,
-  ];
-
-  for (const url of cdnCandidates) {
-    const result = await tryFetchImageUrl(url);
-    if (result) return result;
-  }
-
-  // --- 2. Scrape product search page ----------------------------------------
-  try {
-    const searchHtml = await fetchHtml(
-      `https://www.byggmakker.no/sok?q=${encodeURIComponent(nobb)}`,
-    );
-    if (!searchHtml) return null;
-
-    // Find the first /produkt/ link in the search results
-    const productPathMatch = searchHtml.match(/href="(\/produkt\/[^"?#]+)"/i);
-    if (!productPathMatch?.[1]) return null;
-
-    const productUrl = `https://www.byggmakker.no${productPathMatch[1]}`;
-    const productHtml = await fetchHtml(productUrl);
-    if (!productHtml) return null;
-
-    const imageUrl = extractPrimaryImageFromHtml(productHtml);
-    if (!imageUrl) return null;
-
-    return await tryFetchImageUrl(imageUrl);
-  } catch {
-    return null;
-  }
-}
-
-/** Download a URL and return its bytes only if it looks like an image. */
-async function tryFetchImageUrl(url: string): Promise<ImageData | null> {
-  try {
-    const res = await fetchWithSoftTimeout(url, {}, 6000);
-    if (!res) return null;
-    if (!res.ok) return null;
-    const contentType = res.headers.get("content-type") ?? "";
-    if (!contentType.startsWith("image/")) return null;
-    return { buffer: await res.arrayBuffer(), contentType };
-  } catch {
-    return null;
-  }
-}
-
-/** Fetch a URL as text/html with a browser-like User-Agent. */
-async function fetchHtml(url: string): Promise<string | null> {
-  try {
-    const res = await fetchWithSoftTimeout(url, {
-      headers: {
-        "User-Agent":
-          "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36",
-        Accept: "text/html,application/xhtml+xml",
-      },
-    }, 8000);
-    if (!res) return null;
-    if (!res.ok) return null;
-    return res.text();
-  } catch {
-    return null;
-  }
-}
-
-/**
- * Extract the primary product image URL from an HTML page.
- * Checks JSON-LD Product schema first, then og:image.
- */
-function extractPrimaryImageFromHtml(html: string): string | null {
-  // Try JSON-LD blocks
-  const jsonLdRegex = /<script[^>]+type=["']application\/ld\+json["'][^>]*>([\s\S]*?)<\/script>/gi;
-  let match: RegExpExecArray | null;
-  while ((match = jsonLdRegex.exec(html)) !== null) {
-    try {
-      const data = JSON.parse(match[1]) as Record<string, unknown>;
-      const imageField = data.image;
-      if (typeof imageField === "string" && imageField.startsWith("http")) {
-        return imageField;
-      }
-      if (Array.isArray(imageField) && typeof imageField[0] === "string") {
-        return imageField[0] as string;
-      }
-    } catch {
-      // malformed JSON-LD, skip
-    }
-  }
-
-  // Try og:image
-  const ogMatches = [
-    /<meta[^>]+property=["']og:image["'][^>]+content=["']([^"']+)["']/i,
-    /<meta[^>]+content=["']([^"']+)["'][^>]+property=["']og:image["']/i,
-  ];
-  for (const re of ogMatches) {
-    const m = html.match(re);
-    if (m?.[1]?.startsWith("http")) {
-      const url = m[1];
-      // Skip generic site assets
-      if (!url.includes("logo") && !url.includes("favicon") && !url.includes("banner")) {
-        return url;
-      }
-    }
-  }
-
-  return null;
-}
-
-// ---------------------------------------------------------------------------
-// Placeholder response
-// ---------------------------------------------------------------------------
-
-async function buildPlaceholderResponse(): Promise<Response> {
-  try {
-    const res = await fetchWithSoftTimeout(STORE_IMAGE_FALLBACK_URL, {
-      cache: "force-cache",
-    }, 4000);
-    if (!res) return Response.redirect(STORE_IMAGE_FALLBACK_URL, 307);
-    if (res.ok) {
-      const contentType = res.headers.get("content-type") ?? "image/svg+xml";
-      return new Response(await res.arrayBuffer(), {
-        status: 200,
-        headers: {
-          "Content-Type": contentType,
-          "Cache-Control": `public, max-age=${MISS_CACHE_SECONDS}, s-maxage=${MISS_CACHE_SECONDS}`,
-        },
-      });
-    }
-  } catch {
-    // fall through
-  }
-  return Response.redirect(STORE_IMAGE_FALLBACK_URL, 307);
-}
-
-function fetchWithSoftTimeout(input: RequestInfo | URL, init: RequestInit, timeoutMs: number) {
-  let timeout: ReturnType<typeof setTimeout>;
-
-  return Promise.race<Response | null>([
-    fetch(input, init).catch(() => null),
-    new Promise<null>((resolve) => {
-      timeout = setTimeout(() => resolve(null), timeoutMs);
-    }),
-  ]).finally(() => clearTimeout(timeout));
-}
-

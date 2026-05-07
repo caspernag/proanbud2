@@ -1,5 +1,4 @@
 import "server-only";
-import { promises as fs } from "node:fs";
 import path from "node:path";
 
 import OpenAI from "openai";
@@ -38,42 +37,11 @@ export type PriceListProduct = {
   lastUpdated: string;
 };
 
-const PRIVATE_PRICE_LIST_DIR = path.join(process.cwd(), ".private", "prislister");
-const LEGACY_PRICE_LIST_DIR = path.join(process.cwd(), "prislister");
-
-type GetPriceListProductsOptions = {
-  includeVectorStore?: boolean;
-};
-
-export async function getPriceListProducts(options: GetPriceListProductsOptions = {}) {
+export async function getPriceListProducts() {
   "use cache";
   cacheLife("minutes");
 
-  const includeVectorStore = options.includeVectorStore ?? true;
-  const csvPaths = await resolvePriceListCsvPaths();
-  const [localProducts, vectorProducts] = await Promise.all([
-    csvPaths.length > 0
-      ? Promise.all(csvPaths.map((csvPath) => parseSupplierCsv(csvPath))).then((groups) => groups.flat())
-      : Promise.resolve([] as PriceListProduct[]),
-    includeVectorStore ? getOpenAiVectorStorePriceListProducts() : Promise.resolve([] as PriceListProduct[]),
-  ]);
-
-  if (vectorProducts.length === 0) {
-    return localProducts;
-  }
-
-  return mergePriceListProducts(vectorProducts, localProducts);
-}
-
-function decodePriceListCsv(rawBuffer: Buffer) {
-  const utf8 = rawBuffer.toString("utf8");
-
-  // Some supplier exports are ISO-8859/Windows-1252; UTF-8 decoding then corrupts ae/oe/aa.
-  if (utf8.includes("\uFFFD") || /Ã¦|Ã¸|Ã¥|Ã†|Ã˜|Ã…/.test(utf8)) {
-    return rawBuffer.toString("latin1");
-  }
-
-  return utf8;
+  return getOpenAiVectorStorePriceListProducts();
 }
 
 export async function getPriceListProductByNobb(nobbNumber: string) {
@@ -91,126 +59,6 @@ export async function getPriceListProductByNobb(nobbNumber: string) {
   }
 
   return matches.reduce((best, current) => (current.priceNok < best.priceNok ? current : best));
-}
-
-async function resolvePriceListCsvPaths() {
-  const privatePaths = await listCsvFilesInDir(PRIVATE_PRICE_LIST_DIR);
-
-  if (privatePaths.length > 0) {
-    return privatePaths;
-  }
-
-  return listCsvFilesInDir(LEGACY_PRICE_LIST_DIR);
-}
-
-async function listCsvFilesInDir(dirPath: string) {
-  try {
-    const entries = await fs.readdir(dirPath, { withFileTypes: true });
-
-    return entries
-      .filter((entry) => entry.isFile() && entry.name.toLowerCase().endsWith(".csv"))
-      .map((entry) => path.join(dirPath, entry.name))
-      .sort((left, right) => left.localeCompare(right));
-  } catch {
-    return [];
-  }
-}
-
-async function parseSupplierCsv(csvPath: string): Promise<PriceListProduct[]> {
-  try {
-    const [rawBuffer, stats] = await Promise.all([fs.readFile(csvPath), fs.stat(csvPath)]);
-    const raw = decodePriceListCsv(rawBuffer);
-    const supplierKey = path.basename(csvPath, ".csv").toLowerCase();
-    const supplierName = supplierLabelFromFileName(supplierKey);
-    const lines = raw.split(/\r?\n/).filter((line) => line.trim().length > 0);
-    const lastUpdated = stats.mtime.toISOString().slice(0, 10);
-    const products: PriceListProduct[] = [];
-
-    for (const line of lines) {
-      const columns = line.split(";");
-      const categoryCode = normalizeColumn(columns[0]);
-      const eanRaw = normalizeColumn(columns[1]);
-      const nobbCandidate = normalizeColumn(columns[2]);
-      const productName = normalizeColumn(columns[4]);
-      const pricePrimary = normalizeColumn(columns[6]);
-      const priceSecondary = normalizeColumn(columns[5]);
-      const priceUnit = normalizeColumn(columns[7]);
-      const descriptionRaw = normalizeColumn(columns[9]);
-      const salesUnit = normalizeColumn(columns[10]);
-      const salesUnitQuantityRaw = normalizeColumn(columns[11]);
-      const brandOrSeries = normalizeColumn(columns[9]);
-      const altNobbCandidate = normalizeColumn(columns[14]);
-
-      const nobbNumber = pickNobbNumber(nobbCandidate, altNobbCandidate);
-
-      if (!nobbNumber || !productName) {
-        continue;
-      }
-
-      const normalizedPriceUnit = (priceUnit || salesUnit || "STK").toUpperCase();
-      const normalizedSalesUnit = (salesUnit || normalizedPriceUnit).toUpperCase();
-      const salesUnitQuantity = parseSalesUnitQuantity(
-        descriptionRaw,
-        normalizedPriceUnit,
-        normalizedSalesUnit,
-        salesUnitQuantityRaw,
-      );
-      const packageAreaSqm = normalizedPriceUnit === "M2" ? salesUnitQuantity : undefined;
-      const unit = normalizedSalesUnit;
-      const priceUnitPriceNok = parsePriceNok(pricePrimary) ?? parsePriceNok(priceSecondary) ?? 0;
-      const listPriceUnitNok = parsePriceNok(priceSecondary) ?? priceUnitPriceNok;
-      const priceNok = priceForSalesUnit(priceUnitPriceNok, {
-        priceUnit: normalizedPriceUnit,
-        salesUnit: normalizedSalesUnit,
-        salesUnitQuantity,
-      });
-      const listPriceNok = priceForSalesUnit(listPriceUnitNok, {
-        priceUnit: normalizedPriceUnit,
-        salesUnit: normalizedSalesUnit,
-        salesUnitQuantity,
-      });
-      const sectionTitle = inferSectionTitle(categoryCode, productName);
-      const category = inferCategory(categoryCode, productName);
-      const salesUnitQuantityDetail = describeSalesUnitQuantity({
-        priceUnit: normalizedPriceUnit,
-        salesUnit: normalizedSalesUnit,
-        salesUnitQuantity,
-      });
-      const technicalDetails = [
-        descriptionRaw,
-        `Prisenhet: ${normalizedPriceUnit}`,
-        `Salgsenhet: ${normalizedSalesUnit}`,
-        salesUnitQuantityDetail,
-      ].filter((value) => value.length > 0);
-
-      products.push({
-        id: `${supplierKey}-${nobbNumber}`,
-        nobbNumber,
-        productName,
-        supplierName,
-        brand: inferBrand(brandOrSeries, productName),
-        unit,
-        priceUnit: normalizedPriceUnit,
-        salesUnit: normalizedSalesUnit,
-        ...(salesUnitQuantity ? { salesUnitQuantity } : {}),
-        ...(packageAreaSqm ? { packageAreaSqm } : {}),
-        priceNok,
-        listPriceNok,
-        sectionTitle,
-        category,
-        description: descriptionRaw || productName,
-        ean: parseEan(eanRaw) ?? undefined,
-        technicalDetails,
-        quantitySuggestion: inferQuantitySuggestion(unit, sectionTitle),
-        quantityReason: inferQuantityReason(unit, sectionTitle, supplierName),
-        lastUpdated,
-      });
-    }
-
-    return products;
-  } catch {
-    return [];
-  }
 }
 
 async function getOpenAiVectorStorePriceListProducts() {
@@ -502,26 +350,6 @@ function parsePriceListProductsFromDelimitedText(rawContent: string, fileName: s
   }
 
   return products;
-}
-
-function mergePriceListProducts(primaryProducts: PriceListProduct[], fallbackProducts: PriceListProduct[]) {
-  const merged = new Map<string, PriceListProduct>();
-
-  for (const product of [...primaryProducts, ...fallbackProducts]) {
-    const key = `${product.supplierName.toLowerCase()}::${product.nobbNumber.replace(/\D/g, "")}`;
-    const existing = merged.get(key);
-
-    if (!existing) {
-      merged.set(key, product);
-      continue;
-    }
-
-    if (existing.priceNok <= 0 && product.priceNok > 0) {
-      merged.set(key, product);
-    }
-  }
-
-  return Array.from(merged.values());
 }
 
 async function resolveVectorStoreFileName(

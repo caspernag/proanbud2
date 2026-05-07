@@ -205,7 +205,6 @@ export default async function StorefrontPage({ searchParams }: StorefrontPagePro
       />
       {showLanding ? (
         <>
-          <HeroSection total={result.total} />
           {featuredCategories.length > 0 ? (
             <CategoryTiles tiles={featuredCategories} counts={result.categoryCounts} />
           ) : null}
@@ -300,56 +299,6 @@ export default async function StorefrontPage({ searchParams }: StorefrontPagePro
           ) : null}
         </div>
       </section>
-    </div>
-  );
-}
-
-function HeroSection({ total }: { total: number }) {
-  return (
-    <section className="border border-stone-200 bg-white px-4 py-3 shadow-[0_4px_16px_rgba(32,25,15,0.035)] sm:px-5 lg:px-6">
-      <div className="grid gap-4 xl:grid-cols-[minmax(0,1fr)_420px] xl:items-center">
-        <div className="min-w-0">
-          <div className="flex flex-wrap items-center gap-2 text-[11px] font-semibold uppercase tracking-[0.14em]">
-            <span className="rounded-sm bg-[#d9ff7a] px-2 py-1 text-[#123321]">Partnerpris</span>
-            <span className="text-stone-500">Innkjøpsflate for byggevarer</span>
-          </div>
-
-          <h1 className="mt-2 max-w-3xl text-xl font-semibold leading-tight text-stone-950 sm:text-2xl">
-            Proffpris på byggevarer, lagerstatus og handlekurv på ett sted.
-          </h1>
-          <p className="mt-2 max-w-2xl text-sm leading-6 text-stone-600">
-            Finn varer fra prislisten, sjekk tilgjengelighet og legg produkter direkte i handlekurven.
-          </p>
-
-          <div className="mt-4 flex flex-wrap gap-2">
-            <Link href="/?inStock=1" className="inline-flex h-9 items-center justify-center rounded-md bg-[#15452d] px-4 text-sm font-semibold text-white! hover:bg-[#0f321f]">
-              Se varer på lager
-            </Link>
-            <Link href="/?sort=price_asc" className="inline-flex h-9 items-center justify-center rounded-md border border-stone-300 bg-white px-4 text-sm font-semibold text-stone-800 hover:border-[#15452d] hover:text-[#15452d]">
-              Laveste pris først
-            </Link>
-          </div>
-        </div>
-
-        <div className="grid grid-cols-3 gap-2 border-t border-stone-200 pt-3 xl:border-l xl:border-t-0 xl:pl-5 xl:pt-0">
-          <HeroMetric label="Varer" value={total.toLocaleString("nb-NO")} />
-          <HeroMetric label="Prisnivå" value="-20-60%" />
-          <HeroMetric label="Flyt" value="Kurv" />
-          <div className="col-span-3 flex items-center justify-between border-t border-stone-200 pt-3 text-xs text-stone-600">
-            <span>Pris inkl. mva, NOBB-data og Byggmakker-lagerstatus.</span>
-            <span className="font-semibold text-[#15452d]">Oppdatert</span>
-          </div>
-        </div>
-      </div>
-    </section>
-  );
-}
-
-function HeroMetric({ label, value }: { label: string; value: string }) {
-  return (
-    <div className="border border-stone-200 bg-stone-50 px-3 py-2">
-      <p className="text-[10px] font-semibold uppercase tracking-[0.14em] text-stone-500">{label}</p>
-      <p className="mt-1 text-base font-semibold text-stone-950">{value}</p>
     </div>
   );
 }
