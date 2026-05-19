@@ -20,15 +20,37 @@ type CheckoutProductsResponse = {
   stockByProductId?: Record<string, StockInfo>;
 };
 
-type StockStatus = "in-stock" | "backorder" | "unknown";
+type StockStatus = "in-stock" | "store-stock" | "backorder" | "unknown";
 type StockInfo = {
   status: StockStatus;
   netQuantity: number | null;
+  storeCount?: number;
 };
 
 const UNKNOWN_STOCK_INFO: StockInfo = {
   status: "unknown",
   netQuantity: null,
+};
+
+const CHECKOUT_DRAFT_STORAGE_KEY = "proanbud_storefront_checkout_draft_v1";
+
+type CheckoutDraft = {
+  email: string;
+  fullName: string;
+  phone: string;
+  addressLine1: string;
+  postalCode: string;
+  city: string;
+  notes: string;
+  checkoutFlow: "pay_now" | "klarna";
+};
+
+type AddressSuggestion = {
+  label: string;
+  addressLine1: string;
+  postalCode: string;
+  city: string;
+  municipality: string | null;
 };
 
 export function StorefrontCheckoutClient({ paymentCancelled }: { paymentCancelled: boolean }) {
@@ -48,11 +70,99 @@ export function StorefrontCheckoutClient({ paymentCancelled }: { paymentCancelle
   const [city, setCity] = useState("");
   const [notes, setNotes] = useState("");
   const [checkoutFlow, setCheckoutFlow] = useState<"pay_now" | "klarna">("pay_now");
+  const [draftLoaded, setDraftLoaded] = useState(false);
+  const [addressFocused, setAddressFocused] = useState(false);
+  const [addressPending, setAddressPending] = useState(false);
+  const [addressSuggestions, setAddressSuggestions] = useState<AddressSuggestion[]>([]);
+  const addressBlurTimeoutRef = useRef<number | null>(null);
+
+  useEffect(() => {
+    try {
+      const raw = window.localStorage.getItem(CHECKOUT_DRAFT_STORAGE_KEY);
+      if (!raw) {
+        setDraftLoaded(true);
+        return;
+      }
+
+      const parsed = JSON.parse(raw) as Partial<CheckoutDraft>;
+      setEmail(typeof parsed.email === "string" ? parsed.email : "");
+      setFullName(typeof parsed.fullName === "string" ? parsed.fullName : "");
+      setPhone(typeof parsed.phone === "string" ? parsed.phone : "");
+      setAddressLine1(typeof parsed.addressLine1 === "string" ? parsed.addressLine1 : "");
+      setPostalCode(typeof parsed.postalCode === "string" ? parsed.postalCode : "");
+      setCity(typeof parsed.city === "string" ? parsed.city : "");
+      setNotes(typeof parsed.notes === "string" ? parsed.notes : "");
+      setCheckoutFlow(parsed.checkoutFlow === "klarna" ? "klarna" : "pay_now");
+    } catch {
+      // Ignore malformed checkout drafts.
+    } finally {
+      setDraftLoaded(true);
+    }
+  }, []);
+
+  useEffect(() => {
+    if (!draftLoaded) {
+      return;
+    }
+
+    const draft: CheckoutDraft = {
+      email,
+      fullName,
+      phone,
+      addressLine1,
+      postalCode,
+      city,
+      notes,
+      checkoutFlow,
+    };
+
+    window.localStorage.setItem(CHECKOUT_DRAFT_STORAGE_KEY, JSON.stringify(draft));
+  }, [addressLine1, checkoutFlow, city, draftLoaded, email, fullName, notes, phone, postalCode]);
+
+  useEffect(() => {
+    if (!addressFocused || addressLine1.trim().length < 3) {
+      setAddressSuggestions([]);
+      setAddressPending(false);
+      return;
+    }
+
+    const abortController = new AbortController();
+    const timeout = window.setTimeout(() => {
+      setAddressPending(true);
+      void fetch(`/api/addresses/search?q=${encodeURIComponent(addressLine1.trim())}`, {
+        signal: abortController.signal,
+      })
+        .then((response) => (response.ok ? response.json() : null))
+        .then((payload: { items?: AddressSuggestion[] } | null) => {
+          setAddressSuggestions(Array.isArray(payload?.items) ? payload.items : []);
+        })
+        .catch(() => undefined)
+        .finally(() => {
+          if (!abortController.signal.aborted) {
+            setAddressPending(false);
+          }
+        });
+    }, 180);
+
+    return () => {
+      abortController.abort();
+      window.clearTimeout(timeout);
+    };
+  }, [addressFocused, addressLine1]);
+
+  useEffect(() => {
+    return () => {
+      if (addressBlurTimeoutRef.current) {
+        window.clearTimeout(addressBlurTimeoutRef.current);
+      }
+    };
+  }, []);
 
   useEffect(() => {
     if (items.length === 0) {
       setProducts([]);
       setStockByProductId(new Map());
+      setLoading(false);
       return;
     }
 
@@ -60,45 +170,65 @@ export function StorefrontCheckoutClient({ paymentCancelled }: { paymentCancelle
     const stockCache = stockCacheRef.current;
     const wantedIds = items.map((item) => item.productId);
     const missingIds = wantedIds.filter((id) => !cache.has(id));
-
-    // All products already cached — update immediately without a network call
-    if (missingIds.length === 0) {
-      setProducts(wantedIds.map((id) => cache.get(id)!).filter(Boolean));
-      setStockByProductId(new Map(wantedIds.map((id) => [id, stockCache.get(id) ?? UNKNOWN_STOCK_INFO])));
-      return;
-    }
+    const missingStockIds = wantedIds.filter((id) => !stockCache.has(id));
 
     const abortController = new AbortController();
 
-    startTransition(() => {
-      setLoading(true);
-      setMessage("");
-    });
+    setProducts(wantedIds.map((id) => cache.get(id)!).filter(Boolean));
+    setStockByProductId(new Map(wantedIds.map((id) => [id, stockCache.get(id) ?? UNKNOWN_STOCK_INFO])));
+
+    if (missingIds.length > 0) {
+      startTransition(() => {
+        setLoading(true);
+        setMessage("");
+      });
+    }
 
     void (async () => {
       try {
-        const ids = missingIds.join(",");
-        const response = await fetch(`/api/store/products?ids=${encodeURIComponent(ids)}`, {
-          signal: abortController.signal,
-        });
-        const payload = (await response.json()) as CheckoutProductsResponse;
+        if (missingIds.length > 0) {
+          const ids = missingIds.join(",");
+          const response = await fetch(`/api/store/products?ids=${encodeURIComponent(ids)}&stock=0`, {
+            signal: abortController.signal,
+          });
+          const payload = (await response.json()) as CheckoutProductsResponse;
 
-        if (!response.ok || !Array.isArray(payload.items)) {
-          setProducts([]);
-          setMessage("Kunne ikke hente produktene i handlekurven akkurat nå.");
+          if (!response.ok || !Array.isArray(payload.items)) {
+            setProducts([]);
+            setMessage("Kunne ikke hente produktene i handlekurven akkurat nå.");
+            return;
+          }
+
+          for (const product of payload.items) {
+            cache.set(product.id, product);
+          }
+
+          setProducts(wantedIds.map((id) => cache.get(id)!).filter(Boolean));
+          setLoading(false);
+        }
+
+        if (missingStockIds.length === 0) {
           return;
         }
 
-        // Populate cache with newly fetched products
-        for (const product of payload.items) {
+        const stockIds = missingStockIds.join(",");
+        const stockResponse = await fetch(`/api/store/products?ids=${encodeURIComponent(stockIds)}`, {
+          signal: abortController.signal,
+        });
+        const stockPayload = (await stockResponse.json()) as CheckoutProductsResponse;
+
+        if (!stockResponse.ok) {
+          return;
+        }
+
+        for (const product of stockPayload.items ?? []) {
           cache.set(product.id, product);
         }
 
-        for (const [productId, stockInfo] of Object.entries(payload.stockByProductId ?? {})) {
+        for (const [productId, stockInfo] of Object.entries(stockPayload.stockByProductId ?? {})) {
           stockCache.set(productId, stockInfo);
         }
 
-        // Build full product list from cache (includes previously cached + new)
         setProducts(wantedIds.map((id) => cache.get(id)!).filter(Boolean));
         setStockByProductId(new Map(wantedIds.map((id) => [id, stockCache.get(id) ?? UNKNOWN_STOCK_INFO])));
       } catch {
@@ -148,6 +278,9 @@ export function StorefrontCheckoutClient({ paymentCancelled }: { paymentCancelle
   const effectiveShippingNok = freeShipping ? 0 : shippingNok;
   const totalNok = subtotalNok + effectiveShippingNok;
   const vatNok = Math.round(totalNok * 0.2);
+  const missingRequiredFields = [email, fullName, phone, addressLine1, postalCode, city].filter(
+    (value) => value.trim().length === 0,
+  ).length;
 
   async function submitCheckout() {
     if (lineItems.length === 0) {
@@ -394,12 +527,49 @@ export function StorefrontCheckoutClient({ paymentCancelled }: { paymentCancelle
             <h2 className="text-base font-semibold text-stone-900">Kontakt og levering</h2>
           </div>
           <div className="mt-4 grid gap-3 sm:grid-cols-2">
-            <FieldInput label="E-post" type="email" value={email} onChange={setEmail} />
-            <FieldInput label="Fullt navn" value={fullName} onChange={setFullName} />
-            <FieldInput label="Telefon" value={phone} onChange={setPhone} />
-            <FieldInput label="Adresse" value={addressLine1} onChange={setAddressLine1} className="sm:col-span-2" />
-            <FieldInput label="Postnummer" value={postalCode} onChange={setPostalCode} />
-            <FieldInput label="By" value={city} onChange={setCity} />
+            <FieldInput label="E-post" type="email" value={email} onChange={setEmail} autoComplete="email" />
+            <FieldInput label="Fullt navn" value={fullName} onChange={setFullName} autoComplete="name" />
+            <FieldInput label="Telefon" type="tel" value={phone} onChange={setPhone} autoComplete="tel" />
+            <label className="relative flex flex-col gap-1.5 text-xs font-semibold text-stone-700 sm:col-span-2">
+              Adresse
+              <input
+                type="text"
+                value={addressLine1}
+                onChange={(event) => setAddressLine1(event.target.value)}
+                onFocus={() => {
+                  if (addressBlurTimeoutRef.current) window.clearTimeout(addressBlurTimeoutRef.current);
+                  setAddressFocused(true);
+                }}
+                onBlur={() => {
+                  addressBlurTimeoutRef.current = window.setTimeout(() => setAddressFocused(false), 120);
+                }}
+                autoComplete="street-address"
+                className="h-10 w-full rounded-xl border border-stone-300 bg-white px-3 text-sm font-normal text-stone-900 outline-none transition focus:border-[#15452d] focus:ring-2 focus:ring-[#15452d]/20"
+              />
+              {addressFocused && (addressPending || addressSuggestions.length > 0) ? (
+                <div className="absolute left-0 right-0 top-full z-20 mt-1 overflow-hidden rounded-xl border border-stone-200 bg-white shadow-[0_14px_34px_rgba(32,25,15,0.16)]">
+                  {addressPending ? <p className="px-3 py-2 text-xs font-medium text-stone-400">Søker adresse...</p> : null}
+                  {addressSuggestions.map((suggestion) => (
+                    <button
+                      key={`${suggestion.addressLine1}-${suggestion.postalCode}-${suggestion.city}`}
+                      type="button"
+                      onClick={() => {
+                        setAddressLine1(suggestion.addressLine1);
+                        setPostalCode(suggestion.postalCode);
+                        setCity(suggestion.city);
+                        setAddressFocused(false);
+                      }}
+                      className="block w-full px-3 py-2 text-left text-sm transition hover:bg-stone-50"
+                    >
+                      <span className="font-semibold text-stone-900">{suggestion.addressLine1}</span>
+                      <span className="ml-1 text-stone-500">{suggestion.postalCode} {suggestion.city}</span>
+                    </button>
+                  ))}
+                </div>
+              ) : null}
+            </label>
+            <FieldInput label="Postnummer" value={postalCode} onChange={setPostalCode} autoComplete="postal-code" />
+            <FieldInput label="By" value={city} onChange={setCity} autoComplete="address-level2" />
             <label className="flex flex-col gap-1.5 text-xs font-semibold text-stone-700 sm:col-span-2">
               Kommentar til bestillingen
               <textarea
@@ -407,10 +577,14 @@ export function StorefrontCheckoutClient({ paymentCancelled }: { paymentCancelle
                 onChange={(event) => setNotes(event.target.value)}
                 rows={3}
                 placeholder="Portkode, leveringsinstruks, byggeplass-adresse…"
+                autoComplete="off"
                 className="w-full rounded-xl border border-stone-300 bg-white px-3 py-2 text-sm font-normal text-stone-900 outline-none transition placeholder:text-stone-400 focus:border-[#15452d] focus:ring-2 focus:ring-[#15452d]/20"
               />
             </label>
           </div>
+          <p className="mt-3 rounded-xl bg-stone-50 px-3 py-2 text-xs font-medium text-stone-500">
+            {draftLoaded ? "Leveringsinfo lagres på denne enheten." : "Henter lagret leveringsinfo..."}
+          </p>
         </div>
       </section>
 
@@ -463,6 +637,12 @@ export function StorefrontCheckoutClient({ paymentCancelled }: { paymentCancelle
               <span className="text-xl font-bold text-[#0f321f]">{formatCurrency(totalNok)}</span>
             </div>
 
+            <p className={`mt-3 rounded-lg px-3 py-2 text-xs font-semibold ${missingRequiredFields === 0 ? "bg-emerald-50 text-emerald-700" : "bg-amber-50 text-amber-700"}`}>
+              {missingRequiredFields === 0
+                ? "Leveringsinfo er klar."
+                : `${missingRequiredFields} felt mangler før betaling.`}
+            </p>
+
             <button
               type="button"
               onClick={() => {
@@ -497,7 +677,11 @@ export function StorefrontCheckoutClient({ paymentCancelled }: { paymentCancelle
             </div>
             <div className="flex items-center gap-2">
               <span className="text-base">🚚</span>
-              <span className="font-medium text-stone-700">24-48t levering</span>
+              <span className="font-medium text-stone-700">
+                {lineItems.some((li) => li.stockInfo.status === "store-stock")
+                  ? "Levering bekreftes"
+                  : "24-48t levering"}
+              </span>
             </div>
             <div className="flex items-center gap-2">
               <span className="text-base">↩︎</span>
@@ -581,7 +765,16 @@ function StockChip({ stock }: { stock: StockInfo }) {
     return (
       <span className="inline-flex shrink-0 items-center gap-1 rounded-full bg-stone-100 px-2 py-0.5 text-[11px] font-semibold text-stone-600 ring-1 ring-stone-200">
         <span className="h-1.5 w-1.5 rounded-full bg-stone-400" aria-hidden />
-        Ikke på nettlager
+        Skaffes på forespørsel
+      </span>
+    );
+  }
+
+  if (stock.status === "store-stock") {
+    return (
+      <span className="inline-flex shrink-0 items-center gap-1 rounded-full bg-amber-50 px-2 py-0.5 text-[11px] font-semibold text-amber-800 ring-1 ring-amber-200">
+        <span className="h-1.5 w-1.5 rounded-full bg-amber-500" aria-hidden />
+        På lager i {stock.storeCount ?? 0} butikk{(stock.storeCount ?? 0) === 1 ? "" : "er"}
       </span>
     );
   }
@@ -631,12 +824,14 @@ function FieldInput({
   onChange,
   type = "text",
   className = "",
+  autoComplete,
 }: {
   label: string;
   value: string;
   onChange: (value: string) => void;
   type?: string;
   className?: string;
+  autoComplete?: string;
 }) {
   return (
     <label className={`flex flex-col gap-1.5 text-xs font-semibold text-stone-700 ${className}`}>
@@ -645,6 +840,7 @@ function FieldInput({
         type={type}
         value={value}
         onChange={(event) => onChange(event.target.value)}
+        autoComplete={autoComplete}
         className="h-10 w-full rounded-xl border border-stone-300 bg-white px-3 text-sm font-normal text-stone-900 outline-none transition focus:border-[#15452d] focus:ring-2 focus:ring-[#15452d]/20"
       />
     </label>

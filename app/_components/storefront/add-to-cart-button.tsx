@@ -9,17 +9,23 @@ export function AddToCartButton({
   quantity = 1,
   tone = "primary",
   fullWidth = false,
+  compact = false,
+  label = "Legg i kurv",
+  addedLabel = "Lagt til",
 }: {
   productId: string;
   quantity?: number;
   tone?: "primary" | "secondary";
   fullWidth?: boolean;
+  compact?: boolean;
+  label?: string;
+  addedLabel?: string;
 }) {
   const { addItem } = useStorefront();
   const [recentlyAdded, setRecentlyAdded] = useState(false);
 
   const base =
-    `inline-flex h-10 items-center justify-center gap-1.5 rounded-md px-3.5 text-[13px] font-semibold whitespace-nowrap shadow-sm transition active:scale-[0.98] ${fullWidth ? "w-full" : ""}`;
+    `inline-flex h-10 items-center justify-center gap-1.5 rounded-md ${compact ? "px-2 text-[12px]" : "px-3.5 text-[13px]"} font-semibold whitespace-nowrap shadow-sm transition active:scale-[0.98] ${fullWidth ? "w-full" : ""}`;
   const palette =
     tone === "primary"
       ? recentlyAdded
@@ -43,7 +49,7 @@ export function AddToCartButton({
           <svg viewBox="0 0 20 20" fill="currentColor" className="h-4 w-4">
             <path d="M7.5 13.5l-3-3 1.4-1.4 1.6 1.6L13.1 4.7l1.4 1.4z" />
           </svg>
-          Lagt til
+          {addedLabel}
         </>
       ) : (
         <>
@@ -52,7 +58,7 @@ export function AddToCartButton({
             <circle cx="8" cy="18" r="1" fill="currentColor" stroke="none" />
             <circle cx="15" cy="18" r="1" fill="currentColor" stroke="none" />
           </svg>
-          Legg i kurv
+          {label}
         </>
       )}
     </button>

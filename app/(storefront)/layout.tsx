@@ -30,7 +30,7 @@ function StorefrontHeaderFallback() {
               <span className="inline-flex h-4 items-center rounded-sm bg-[#d9ff7a] px-1.5 text-[10px] font-bold text-[#0f321f]">PARTNERPRIS</span>
               Byggevarer til <strong className="text-[#d9ff7a]">proffpris</strong>
             </span>
-            <span>Gratis frakt over 15 000 kr</span>
+            <span>Gratis frakt over 5 000 kr</span>
           </div>
         </div>
       </div>

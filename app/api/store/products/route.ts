@@ -4,10 +4,11 @@ import { getByggmakkerAvailabilityBatch } from "@/lib/byggmakker-availability";
 import { getStorefrontProductsByIds, queryStorefrontProducts } from "@/lib/storefront";
 import type { StorefrontSortOption } from "@/lib/storefront-types";
 
-type StockStatus = "in-stock" | "backorder";
+type StockStatus = "in-stock" | "store-stock" | "backorder";
 type CheckoutStockInfo = {
   status: StockStatus;
   netQuantity: number | null;
+  storeCount: number;
 };
 
 export async function GET(request: Request) {
@@ -19,6 +20,12 @@ export async function GET(request: Request) {
 
   if (ids.length > 0) {
     const items = await getStorefrontProductsByIds(ids);
+    const includeStock = requestUrl.searchParams.get("stock") !== "0";
+
+    if (!includeStock) {
+      return NextResponse.json({ items, stockByProductId: {} });
+    }
+
     const availabilityMap = await getByggmakkerAvailabilityBatch(
       items.flatMap((product) => (product.ean ? [product.ean] : [])),
     );
@@ -30,8 +37,9 @@ export async function GET(request: Request) {
       if (!availability) continue;
 
       stockByProductId[product.id] = {
-        status: availability.netAvailable ? "in-stock" : "backorder",
+        status: availability.netAvailable ? "in-stock" : availability.storeAvailable ? "store-stock" : "backorder",
         netQuantity: availability.netQuantity,
+        storeCount: availability.storeCount,
       };
     }
 

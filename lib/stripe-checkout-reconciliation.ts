@@ -291,7 +291,7 @@ async function sendOrderEmailForByggmakker(
     customerNote: orderData.customer_note ?? null,
     paidAt,
     items: resolvedItems.map((item) => ({
-      nobbNumber: item.nobb_number,
+      nobbNumber: item.nobb_number ?? "",
       productName: item.product_name,
       quantity: item.quantity,
       unit: item.unit,

@@ -2,7 +2,9 @@ import Link from "next/link";
 import { cookies } from "next/headers";
 import { notFound } from "next/navigation";
 
+import { AddToMaterialListButton } from "@/app/_components/storefront/add-to-material-list-button";
 import { ProductPurchaseControls } from "@/app/_components/storefront/product-purchase-controls";
+import { StorePickupDropdown } from "@/app/_components/storefront/store-pickup-dropdown";
 import { StorefrontProfileTracker } from "@/app/_components/storefront/storefront-profile-tracker";
 import { StorefrontProductImage } from "@/app/_components/storefront/storefront-product-image";
 import { getByggmakkerAvailability } from "@/lib/byggmakker-availability";
@@ -48,6 +50,7 @@ export default async function StorefrontProductPage({ params }: StorefrontProduc
   const salesUnitLabel = formatUnitLabel(product.salesUnit ?? product.unit);
   const pricePerPriceUnitNok = product.packageAreaSqm ? product.unitPriceNok / product.packageAreaSqm : 0;
   const isVerifiedNetAvailable = Boolean(byggmakkerAvailability?.netAvailable);
+  const isStoreAvailable = Boolean(byggmakkerAvailability?.storeAvailable);
 
   return (
     <div className="space-y-5">
@@ -135,33 +138,36 @@ export default async function StorefrontProductPage({ params }: StorefrontProduc
                 priceUnit={product.priceUnit}
                 salesUnit={product.salesUnit ?? product.unit}
                 packageAreaSqm={product.packageAreaSqm}
+                secondaryAction={<AddToMaterialListButton {...buildMaterialListProduct(product)} />}
               />
-              <div className="flex flex-wrap items-center gap-x-4 gap-y-2 rounded-md border border-stone-200 bg-white px-3 py-2.5 text-xs font-medium">
-                {isVerifiedNetAvailable ? (
-                  <span className="inline-flex items-center gap-1.5 text-emerald-700">
-                    <span className="relative flex h-2 w-2">
-                      <span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-emerald-400 opacity-75" />
-                      <span className="relative inline-flex h-2 w-2 rounded-full bg-emerald-500" />
+              {isStoreAvailable && byggmakkerAvailability ? (
+                <StorePickupDropdown stores={byggmakkerAvailability.stores} />
+              ) : (
+                <div className="flex flex-wrap items-center gap-x-4 gap-y-2 rounded-md border border-stone-200 bg-white px-3 py-2.5 text-xs font-medium">
+                  {isVerifiedNetAvailable ? (
+                    <span className="inline-flex items-center gap-1.5 text-emerald-700">
+                      <span className="relative flex h-2 w-2">
+                        <span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-emerald-400 opacity-75" />
+                        <span className="relative inline-flex h-2 w-2 rounded-full bg-emerald-500" />
+                      </span>
+                      På lager
                     </span>
-                    På lager
+                  ) : byggmakkerAvailability ? (
+                    <span className="inline-flex items-center gap-1.5 text-stone-600">
+                      <span className="relative inline-flex h-2 w-2 rounded-full bg-stone-400" />
+                      Skaffes på forespørsel
+                    </span>
+                  ) : (
+                    <span className="inline-flex items-center gap-1.5 text-stone-500">
+                      <span className="relative inline-flex h-2 w-2 rounded-full bg-stone-400" />
+                      Sjekk levering
+                    </span>
+                  )}
+                  <span className="text-stone-500">
+                    {isVerifiedNetAvailable ? "24-48t hjemlevering" : "Hjemlevering"}
                   </span>
-                ) : byggmakkerAvailability ? (
-                  <span className="inline-flex items-center gap-1.5 text-stone-500">
-                    <span className="relative inline-flex h-2 w-2 rounded-full bg-stone-400" />
-                    Utsolgt
-                  </span>
-                ) : (
-                  <span className="inline-flex items-center gap-1.5 text-stone-500">
-                    <span className="relative inline-flex h-2 w-2 rounded-full bg-stone-400" />
-                    Sjekk levering
-                  </span>
-                )}
-                <span className="text-stone-500">
-                  {isVerifiedNetAvailable
-                    ? "24-48t hjemlevering"
-                    : "Hjemlevering"}
-                </span>
-              </div>
+                </div>
+              )}
             </div>
           </div>
 
@@ -176,10 +182,15 @@ export default async function StorefrontProductPage({ params }: StorefrontProduc
                     <p className="font-semibold text-stone-900">24-48 timers levering</p>
                     <p className="text-xs text-stone-500">Sendes fra Proanbud-lager neste virkedag. Gratis frakt over 5 000 kr.</p>
                   </>
+                ) : isStoreAvailable ? (
+                  <>
+                    <p className="font-semibold text-stone-900">Lagerført i byggevarehus</p>
+                    <p className="text-xs text-stone-500">Kan skaffes fra butikk/lager. Levering bekreftes etter bestilling.</p>
+                  </>
                 ) : byggmakkerAvailability ? (
                   <>
-                    <p className="font-semibold text-stone-900">Restock forventet snart</p>
-                    <p className="text-xs text-stone-500">Legg i handlekurv så holder vi deg oppdatert på leveringstid.</p>
+                    <p className="font-semibold text-stone-900">Skaffes på forespørsel</p>
+                    <p className="text-xs text-stone-500">Legg i handlekurv så bekrefter vi leveringstid før videre oppfølging.</p>
                   </>
                 ) : (
                   <>
@@ -300,7 +311,32 @@ function mapProductForProfile(product: StorefrontProfileProductSource) {
   };
 }
 
+function buildMaterialListProduct(product: StorefrontProfileProductSource & {
+  unit: string;
+  salesUnit?: string;
+  unitPriceNok: number;
+  imageUrl?: string;
+}) {
+  const salesUnitLabel = formatUnitLabel(product.salesUnit ?? product.unit);
+
+  return {
+    source: "catalog" as const,
+    productName: product.productName,
+    quantity: `1 ${salesUnitLabel}`,
+    comment: "Lagt til fra nettbutikken.",
+    quantityReason: "Valgt manuelt fra Proanbud nettbutikk.",
+    nobbNumber: product.nobbNumber,
+    supplierName: product.supplierName,
+    unitPriceNok: product.unitPriceNok,
+    productUrl: `/${product.slug}`,
+    imageUrl: getStorefrontImageUrl(product),
+    sectionTitle: product.sectionTitle,
+    category: product.category,
+  };
+}
+
 type StorefrontProfileProductSource = {
+  slug: string;
   nobbNumber: string;
   productName: string;
   category: string;

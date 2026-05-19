@@ -1,8 +1,8 @@
 "use client";
 
-import { useState } from "react";
+import { useState, type ReactNode } from "react";
 
-import { AddToCartButton } from "@/app/_components/storefront/add-to-cart-button";
+import { AddToCartWithQuantity } from "@/app/_components/storefront/add-to-cart-with-quantity";
 import { ProductUnitCalculator } from "@/app/_components/storefront/product-unit-calculator";
 
 type ProductPurchaseControlsProps = {
@@ -11,6 +11,7 @@ type ProductPurchaseControlsProps = {
   priceUnit?: string;
   salesUnit?: string;
   packageAreaSqm?: number;
+  secondaryAction?: ReactNode;
 };
 
 export function ProductPurchaseControls({
@@ -19,6 +20,7 @@ export function ProductPurchaseControls({
   priceUnit,
   salesUnit,
   packageAreaSqm,
+  secondaryAction,
 }: ProductPurchaseControlsProps) {
   const [quantity, setQuantity] = useState(1);
 
@@ -33,7 +35,12 @@ export function ProductPurchaseControls({
       />
 
       <div className="mt-4">
-        <AddToCartButton productId={productId} quantity={quantity} fullWidth />
+        <AddToCartWithQuantity
+          productId={productId}
+          quantity={quantity}
+          onQuantityChange={setQuantity}
+          secondaryAction={secondaryAction}
+        />
       </div>
     </div>
   );

@@ -137,11 +137,11 @@ async function SuccessPageContent({ searchParams }: SuccessPageProps) {
               Betaling bekreftet
             </div>
             <h1 className="mt-5 max-w-3xl text-4xl font-semibold leading-tight sm:text-5xl">
-              {isShopOrder ? "Ordren er lagt inn på Min side." : isMaterialOrder ? "Bestillingen er registrert." : "Prosjektet er klart."}
+              {isShopOrder ? "Ordre mottatt — vi har fått bestillingen din." : isMaterialOrder ? "Bestillingen er registrert." : "Prosjektet er klart."}
             </h1>
             <p className="mt-4 max-w-2xl text-sm leading-6 text-[#e8f2ea] sm:text-base">
               {isShopOrder
-                ? "Du kan følge betaling, transport, meldinger og ordrelogg under Bestillinger på Min side."
+                ? "Ordrebekreftelse er sendt på e-post. Du kan spore betaling og transport nedenfor — ingen innlogging nødvendig."
                 : isMaterialOrder
                   ? "Materialbestillingen sendes videre for behandling når betalingen er bekreftet."
                   : "Materialliste, PDF og bestilling er tilgjengelig fra prosjektet ditt."}
@@ -155,9 +155,20 @@ async function SuccessPageContent({ searchParams }: SuccessPageProps) {
 
             <div className="mt-7 flex flex-col gap-3 sm:flex-row">
               {isShopOrder ? (
-                <Link href={shopOrderHref} className="inline-flex h-11 items-center justify-center rounded-md bg-[#d9ff7a] px-5 text-sm font-bold text-[#0f321f]! transition hover:bg-[#c9f15c]">
-                  Åpne på Min side
-                </Link>
+                <>
+                  <Link
+                    href={shopOrderKey ? `/ordre/${encodeURIComponent(shopOrderKey)}` : "/"}
+                    className="inline-flex h-11 items-center justify-center rounded-md bg-[#d9ff7a] px-5 text-sm font-bold text-[#0f321f]! transition hover:bg-[#c9f15c]"
+                  >
+                    Spor bestillingen →
+                  </Link>
+                  <Link
+                    href={shopOrderHref}
+                    className="inline-flex h-11 items-center justify-center rounded-md border border-white/25 px-5 text-sm font-semibold text-white transition hover:border-white/45 hover:bg-white/10"
+                  >
+                    Min side
+                  </Link>
+                </>
               ) : isMaterialOrder ? (
                 <Link
                   href={

@@ -263,7 +263,7 @@ export async function sendMaterialOrderEmail(payload: OrderEmailPayload): Promis
 
 function buildShopOrderHtml(p: ShopOrderEmailPayload): string {
   const orderReference = p.orderSlug ?? `#${p.orderId.slice(0, 8).toUpperCase()}`;
-  const orderUrl = publicUrl(`/min-side/bestillinger/${encodeURIComponent(p.orderSlug ?? p.orderId)}`);
+  const orderUrl = publicUrl(`/ordre/${encodeURIComponent(p.orderSlug ?? p.orderId)}`);
   const logoUrl = "https://app.proanbud.no/logo/light/logo-primary.svg";
   const paidDate = fmtDate(p.paidAt);
   const itemRows = p.items
@@ -400,7 +400,7 @@ function buildShopOrderHtml(p: ShopOrderEmailPayload): string {
           <tr>
             <td style="padding:18px 28px 24px;background:#fffefb;border-top:1px solid #ece6dc;font-size:11px;line-height:1.65;color:#a8a29e">
               Proanbud AS &nbsp;·&nbsp; post@proanbud.no<br/>
-              Betalt ${paidDate} via Stripe. Ordren kan følges på <a href="${orderUrl}" style="color:#163f2a;font-weight:700;text-decoration:none">Min side</a>.
+              Betalt ${paidDate} via Stripe. Ordren kan følges på <a href="${orderUrl}" style="color:#163f2a;font-weight:700;text-decoration:none">ordresiden</a> (ingen innlogging nødvendig).
             </td>
           </tr>
         </table>
