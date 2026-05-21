@@ -44,7 +44,7 @@ export function StorefrontViewControls({
 
   return (
     <div className="flex flex-wrap items-center gap-3">
-      <label className="inline-flex h-9 cursor-pointer items-center gap-2 rounded-full border border-stone-300 bg-white px-3 text-sm font-semibold text-stone-700 transition hover:border-[#15452d] hover:text-[#15452d] has-disabled:cursor-wait has-disabled:bg-stone-50">
+      <label className="hidden! inline-flex h-9 cursor-pointer items-center gap-2 rounded-full border border-stone-300 bg-white px-3 text-sm font-semibold text-stone-700 transition hover:border-[#15452d] hover:text-[#15452d] has-disabled:cursor-wait has-disabled:bg-stone-50">
         <input
           type="checkbox"
           checked={inStockOnly}
@@ -66,7 +66,7 @@ export function StorefrontViewControls({
           value={sort}
           disabled={isPending}
           onChange={(event) => updateViewParam("sort", event.target.value)}
-          className="h-9 rounded-full border border-stone-300 bg-white px-3 text-sm text-stone-900 outline-none transition focus:border-[#15452d] disabled:cursor-wait disabled:bg-stone-50"
+          className="h-9 rounded-full! border border-stone-300 bg-white px-2 text-sm text-stone-900 outline-none transition focus:border-[#15452d] disabled:cursor-wait disabled:bg-stone-50"
         >
           <option value="relevance">Mest relevant</option>
           <option value="price_asc">Laveste pris</option>

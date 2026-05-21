@@ -203,7 +203,7 @@ export default async function StorefrontPage({ searchParams }: StorefrontPagePro
       {showLanding ? (
         <>
           {featuredCategories.length > 0 ? (
-            <CategoryTiles tiles={featuredCategories} counts={result.categoryCounts} />
+            <CategoryTiles tiles={featuredCategories} counts={broadCategoryCounts} />
           ) : null}
           {featuredDeals.length > 0 ? (
             <Suspense fallback={<DealsStrip deals={featuredDeals} stockByEan={EMPTY_STOCK_MAP} />}>
