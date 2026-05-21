@@ -68,7 +68,7 @@ export default function SjefenPanelLayout({ children }: { children: ReactNode })
         {/* Brand */}
         <div className="px-5 py-6 border-b border-stone-200">
           <span className="text-lg font-bold tracking-tight text-stone-900">
-            proanbud<span className="text-amber-500">.</span>
+            prisbygg<span className="text-amber-500">.</span>
           </span>
           <p className="text-[10px] text-stone-400 uppercase tracking-widest mt-0.5">Admin Panel</p>
         </div>

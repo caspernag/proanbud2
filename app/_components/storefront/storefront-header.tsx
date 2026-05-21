@@ -12,14 +12,14 @@ import { useStorefront } from "@/app/_components/storefront/storefront-provider"
 // som "Verktøy" og "Tak" treffer flere nærliggende kategorier (Elverktøy, Håndverktøy;
 // Takbeslag, Taktekking) uten å miste presisjon.
 const TOP_CATEGORIES: Array<{ label: string; href: string; highlight?: boolean }> = [
-  { label: "Konstruksjonsvirke", href: "/?category=Konstruksjonsvirke" },
+  { label: "Trelast", href: "/?category=Trelast" },
+  { label: "Plater", href: "/?category=Plater" },
   { label: "Isolasjon", href: "/?category=Isolasjon" },
-  { label: "Gips og plater", href: "/?category=Gips%20og%20plater" },
-  { label: "Festemidler", href: "/?category=Festemidler" },
-  { label: "Maling", href: "/?category=Maling" },
-  { label: "Verktøy", href: "/?category=verkt%C3%B8y" },
-  { label: "Tak", href: "/?category=tak" },
   { label: "Kledning", href: "/?category=Kledning" },
+  { label: "Tak", href: "/?category=Tak" },
+  { label: "Maling", href: "/?category=Maling" },
+  { label: "Festemidler", href: "/?category=Festemidler" },
+  { label: "Verktøy", href: "/?category=Verkt%C3%B8y" },
 ];
 
 const QUICK_SEARCHES = ["gipsplate", "terrassebord", "48x98", "isolasjon"];
@@ -106,28 +106,17 @@ export function StorefrontHeader() {
         </div>
       </div>
 
-      <div className="mx-auto flex w-full max-w-[1500px] flex-col gap-2 px-3 py-2.5 sm:px-6 md:py-3 lg:flex-row lg:items-center lg:gap-6 lg:px-8">
-        <div className="flex min-w-0 items-center gap-2 lg:contents">
+      <div className="mx-auto flex w-full max-w-[1500px] flex-col gap-2 px-3 py-2.5 sm:px-6 md:py-3 lg:flex-row lg:items-center lg:gap-30 lg:px-8">
+        <div className="flex min-w-0 items-center gap-10 lg:contents">
           <Link href="/" className="flex shrink-0 items-center gap-2">
             <Image
-              src="/logo/light/icon-primary.svg"
-              alt="Proanbud"
-              width={32}
-              height={32}
-              className="h-8 w-8 sm:hidden"
-              priority
-            />
-            <Image
-              src="/logo/light/logo-primary.svg"
-              alt="Proanbud"
+              src="/logo/light/logo-primary.png"
+              alt="Prisbygg"
               width={160}
               height={34}
-              className="hidden h-8 w-auto sm:block lg:h-9"
+              className="h-8 w-auto lg:h-9"
               priority
             />
-            <span className="hidden rounded-sm bg-[#d9ff7a] px-1.5 py-0.5 text-[10px] font-bold uppercase tracking-[0.14em] text-[#0f321f] lg:inline-flex">
-              Partnerpris
-            </span>
           </Link>
 
           <div className="ml-auto flex min-w-0 items-center gap-1.5 lg:hidden">

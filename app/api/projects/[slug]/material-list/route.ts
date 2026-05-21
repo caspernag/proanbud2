@@ -91,6 +91,7 @@ function parseMaterialSections(value: unknown): MaterialSection[] | null {
       const quantity = parseString(rawItem.quantity, 80);
       const note = parseString(rawItem.note, 220) ?? "";
       const quantityReason = parseString(rawItem.quantityReason, 280);
+      const nobb = parseNobb(rawItem.nobb);
       const sourceUrl = parseHttpUrl(rawItem.sourceUrl);
       const imageUrl = parseHttpUrl(rawItem.imageUrl);
       const supplierName = parseString(rawItem.supplierName, 120);
@@ -105,6 +106,7 @@ function parseMaterialSections(value: unknown): MaterialSection[] | null {
         quantity,
         note,
         ...(quantityReason ? { quantityReason } : {}),
+        ...(nobb ? { nobb } : {}),
         ...(sourceUrl ? { sourceUrl } : {}),
         ...(imageUrl ? { imageUrl } : {}),
         ...(supplierName ? { supplierName } : {}),
@@ -172,4 +174,18 @@ function parseNonNegativeInteger(value: unknown) {
   }
 
   return null;
+}
+
+function parseNobb(value: unknown) {
+  if (typeof value !== "string") {
+    return "";
+  }
+
+  const normalized = value.replace(/\D/g, "");
+
+  if (normalized.length < 6 || normalized.length > 10) {
+    return "";
+  }
+
+  return normalized;
 }

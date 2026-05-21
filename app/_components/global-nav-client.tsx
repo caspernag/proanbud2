@@ -29,7 +29,7 @@ export function GlobalNavClient({ isLoggedIn, userEmail }: GlobalNavClientProps)
     <header className="border-b border-stone-200 bg-white/95 backdrop-blur">
       <div className="mx-auto flex w-full max-w-[1500px] flex-wrap items-center justify-between gap-2 px-3 py-2.5 sm:px-6 lg:px-8">
         <Link href="/" className="inline-flex items-center">
-          <Image src="/logo/light/logo-primary.svg" alt="proanbud" width={146} height={32} className="h-6 w-auto sm:h-7" />
+          <Image src="/logo/light/logo-primary.png" alt="prisbygg" width={146} height={32} className="h-6 w-auto sm:h-7" />
         </Link>
         <nav className="flex w-full items-center justify-end gap-1.5 sm:w-auto sm:gap-2">
           <Link

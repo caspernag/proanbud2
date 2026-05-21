@@ -13,6 +13,7 @@ import {
   getStorefrontImageUrl,
   getStorefrontProducts,
   getStorefrontProductsByNobb,
+  matchesStorefrontCategory,
   queryStorefrontProducts,
 } from "@/lib/storefront";
 import { parseStorefrontUserProfileCookie, STOREFRONT_USER_PROFILE_COOKIE } from "@/lib/storefront-user-profile";
@@ -57,55 +58,61 @@ const MOST_POPULAR_NOBB = [
   "60743886", // KONSTRUKSJONSKRUE WAF 6X40
 ];
 
-// Curated visual categories shown on the landing hero. Labels og match-arrays
-// speiler de ekte kategorinavnene i prislistens Varekategori-felt, som er
-// autoritativ kilde. `match` sammenlignes case-insensitivt med substring mot
-// de faktiske kategoriene, så korte nøkkelord fanger flere relaterte kategorier
-// (f.eks. "verktøy" matcher både Elverktøy og Håndverktøy).
+// Curated visual categories shown on the landing hero. `filter` is the URL param,
+// `match` sammenlignes case-insensitivt med substring mot de faktiske kategoriene.
 const FEATURED_CATEGORIES: Array<{
   label: string;
+  filter: string;
   match: string[];
   tone: string;
 }> = [
   {
-    label: "Konstruksjonsvirke",
-    match: ["konstruksjonsvirke", "limtre"],
+    label: "Trelast",
+    filter: "Trelast",
+    match: ["konstruksjonsvirke", "trelast", "limtre"],
     tone: "from-[#c48a4d] to-[#8a5c2b]",
   },
   {
+    label: "Plater",
+    filter: "Plater",
+    match: ["plater", "gips", "osb", "spon"],
+    tone: "from-[#7c9474] to-[#3f5c3a]",
+  },
+  {
     label: "Isolasjon",
+    filter: "Isolasjon",
     match: ["isolasjon"],
     tone: "from-[#d9b779] to-[#b08a42]",
   },
   {
-    label: "Gips og plater",
-    match: ["gips og plater"],
-    tone: "from-[#7c9474] to-[#3f5c3a]",
+    label: "Kledning & Fasade",
+    filter: "Kledning",
+    match: ["kledning", "fasade"],
+    tone: "from-[#4a7fa7] to-[#234a6c]",
   },
   {
-    label: "Festemidler",
-    match: ["festemidler"],
-    tone: "from-[#8796a6] to-[#445566]",
+    label: "Tak",
+    filter: "Tak",
+    match: ["tak"],
+    tone: "from-[#5c6b57] to-[#2e3a2a]",
   },
   {
-    label: "Maling",
+    label: "Maling & Overflate",
+    filter: "Maling",
     match: ["maling", "overflatebehandling"],
     tone: "from-[#b15b47] to-[#7a3523]",
   },
   {
+    label: "Festemidler",
+    filter: "Festemidler",
+    match: ["festemidler"],
+    tone: "from-[#8796a6] to-[#445566]",
+  },
+  {
     label: "Verktøy",
+    filter: "Verktøy",
     match: ["verktøy"],
     tone: "from-[#8a6a3b] to-[#4d3818]",
-  },
-  {
-    label: "Tak",
-    match: ["takbeslag", "taktekking"],
-    tone: "from-[#5c6b57] to-[#2e3a2a]",
-  },
-  {
-    label: "Kledning",
-    match: ["kledning"],
-    tone: "from-[#4a7fa7] to-[#234a6c]",
   },
 ];
 
@@ -132,13 +139,20 @@ export default async function StorefrontPage({ searchParams }: StorefrontPagePro
 
   const hasFilters = Boolean(q || category || supplier || inStockOnly);
   const showLanding = !hasFilters && result.page === 1;
-  const { products: allProducts } = showLanding
-    ? await getStorefrontProducts()
-    : { products: [] as StorefrontProduct[] };
+  // Always fetch all products (cached) – used for landing tiles, deals, and accurate broad counts
+  const { products: allProducts } = await getStorefrontProducts();
   const featuredDeals = showLanding ? await getStorefrontProductsByNobb(MOST_POPULAR_NOBB) : [];
   const featuredCategories = showLanding
     ? resolveFeaturedCategories(result.categories, allProducts)
     : [];
+
+  // Accurate broad category counts: run the same matching logic used by the actual filter
+  const broadCategoryCounts: Record<string, number> = {};
+  for (const group of FEATURED_CATEGORIES) {
+    broadCategoryCounts[group.filter] = allProducts.filter(
+      (p) => matchesStorefrontCategory(p, group.filter),
+    ).length;
+  }
 
   const stockFilterCandidates = inStockOnly
     ? await queryStorefrontProducts({
@@ -212,6 +226,7 @@ export default async function StorefrontPage({ searchParams }: StorefrontPagePro
             cols={cols}
             categories={result.categories}
             categoryCounts={result.categoryCounts}
+            broadCategoryCounts={broadCategoryCounts}
             priceRange={result.priceRange}
           />
 
@@ -234,6 +249,7 @@ export default async function StorefrontPage({ searchParams }: StorefrontPagePro
                 cols={cols}
                 categories={result.categories}
                 categoryCounts={result.categoryCounts}
+                broadCategoryCounts={broadCategoryCounts}
                 priceRange={result.priceRange}
               />
             </StorefrontMobileControls>
@@ -592,7 +608,7 @@ function buildMaterialListProduct(product: StorefrontProduct) {
     productName: product.productName,
     quantity: `1 ${salesUnitLabel}`,
     comment: "Lagt til fra nettbutikken.",
-    quantityReason: "Valgt manuelt fra Proanbud nettbutikk.",
+    quantityReason: "Valgt manuelt fra Prisbygg nettbutikk.",
     nobbNumber: product.nobbNumber,
     supplierName: product.supplierName,
     unitPriceNok: product.unitPriceNok,
@@ -720,6 +736,7 @@ function FilterPanel({
   cols,
   categories,
   categoryCounts,
+  broadCategoryCounts,
   priceRange,
 }: {
   q: string;
@@ -730,8 +747,16 @@ function FilterPanel({
   cols: number;
   categories: string[];
   categoryCounts: Record<string, number>;
+  broadCategoryCounts: Record<string, number>;
   priceRange: { min: number; max: number };
 }) {
+  const broadItems = FEATURED_CATEGORIES
+    .filter((group) => (broadCategoryCounts[group.filter] ?? 0) > 0)
+    .map((group) => group.filter);
+  const broadLabelMap = Object.fromEntries(
+    FEATURED_CATEGORIES.map((group) => [group.filter, group.label]),
+  );
+
   return (
     <div className="bg-white lg:rounded-xl lg:border lg:border-stone-200 lg:p-4 lg:shadow-[0_8px_20px_rgba(32,25,15,0.06)]">
       <div className="flex items-center justify-end lg:justify-between">
@@ -746,10 +771,11 @@ function FilterPanel({
       <div className="mt-4 space-y-5">
         <FilterGroup
           title="Kategori"
-          items={categories}
-          counts={categoryCounts}
+          items={broadItems}
+          counts={broadCategoryCounts}
           currentValue={category}
           whiteText
+          labelMap={broadLabelMap}
           buildHref={(value) => buildStoreHref({ q, category: value, supplier, sort, inStock: inStockOnly ? 1 : undefined, cols })}
         />
 
@@ -829,7 +855,7 @@ function TrustCard() {
   ];
   return (
     <div className="rounded-xl border border-stone-200 bg-gradient-to-br from-[#15452d] to-[#0f321f] p-4 text-white shadow-[0_8px_20px_rgba(18,36,25,0.18)]">
-      <p className="text-xs font-semibold uppercase tracking-[0.14em] text-[#d9ff7a]">Derfor ProAnbud</p>
+      <p className="text-xs font-semibold uppercase tracking-[0.14em] text-[#d9ff7a]">Derfor Prisbygg</p>
       <ul className="mt-3 space-y-3">
         {items.map((item) => (
           <li key={item.title} className="flex items-start gap-2.5">
@@ -931,7 +957,7 @@ function resolveFeaturedCategories(
     if (matched) {
       tiles.push({
         label: featured.label,
-        category: matched,
+        category: featured.filter,
         tone: featured.tone,
         imageUrl: pickImageForCategory(matched),
       });
@@ -1076,6 +1102,7 @@ function FilterGroup({
   currentValue,
   whiteText = false,
   buildHref,
+  labelMap,
 }: {
   title: string;
   items: string[];
@@ -1083,6 +1110,7 @@ function FilterGroup({
   currentValue: string;
   whiteText?: boolean;
   buildHref: (value: string) => string;
+  labelMap?: Record<string, string>;
 }) {
   const visibleItems = items.slice(0, 12);
   return (
@@ -1122,7 +1150,7 @@ function FilterGroup({
                     : "text-stone-700 hover:bg-stone-100"
               }`}
             >
-              <span className="line-clamp-1">{item}</span>
+              <span className="line-clamp-1">{labelMap?.[item] ?? item}</span>
               <span className={`text-xs ${active || whiteText ? "text-white/70" : "text-stone-400"}`}>
                 {counts[item] ?? 0}
               </span>

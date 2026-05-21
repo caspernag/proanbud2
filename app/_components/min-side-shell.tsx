@@ -73,8 +73,8 @@ export function MinSideShell({ children, userEmail }: MinSideShellProps) {
             onClick={() => setMobileOpen(false)}
           >
             <Image
-              src="/logo/dark/logo-primary.svg"
-              alt="proanbud"
+              src="/logo/dark/logo-primary.png"
+              alt="prisbygg"
               width={162}
               height={36}
               className="h-6 w-auto"
@@ -144,8 +144,8 @@ export function MinSideShell({ children, userEmail }: MinSideShellProps) {
               className="inline-flex items-center"
             >
               <Image
-                src="/logo/dark/logo-primary.svg"
-                alt="proanbud"
+                src="/logo/dark/logo-primary.png"
+                alt="prisbygg"
                 width={120}
                 height={28}
                 className="h-5 w-auto"

@@ -1,6 +1,6 @@
 import type { StorefrontProduct } from "@/lib/storefront-types";
 
-export const STOREFRONT_USER_PROFILE_COOKIE = "proanbud_storefront_profile_v1";
+export const STOREFRONT_USER_PROFILE_COOKIE = "prisbygg_storefront_profile_v1";
 
 const MAX_PROFILE_SIGNALS = 16;
 const MAX_RECENT_NOBBS = 24;

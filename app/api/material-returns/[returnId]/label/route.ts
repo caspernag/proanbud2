@@ -45,7 +45,7 @@ export async function GET(_request: Request, { params }: RouteContext) {
   const tracking = returnCase.tracking_number ?? `TRK-${returnCase.id.slice(0, 8).toUpperCase()}`;
 
   const label = [
-    "PROANBUD RETURLAPP",
+    "PRISBYGG RETURLAPP",
     "",
     `Retursak: ${returnCase.id}`,
     `Ordre: ${returnCase.order_id}`,
@@ -59,7 +59,7 @@ export async function GET(_request: Request, { params }: RouteContext) {
     "",
     "Mottaker:",
     `${returnCase.supplier_label ?? "Leverandor"} - Returavdeling`,
-    "c/o ProAnbud",
+    "c/o Prisbygg",
     "Postboks 100",
     "0150 Oslo",
   ].join("\n");

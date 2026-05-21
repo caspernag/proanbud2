@@ -194,7 +194,7 @@ export default async function SjefenBestillingDetaljPage({ params }: PageProps) 
     await admin.from("shop_order_messages").insert({
       order_id: orderId,
       author_type: "admin",
-      author_name: "ProAnbud support",
+      author_name: "Prisbygg support",
       author_email: null,
       body,
     });
@@ -203,7 +203,7 @@ export default async function SjefenBestillingDetaljPage({ params }: PageProps) 
       orderId,
       eventType: "admin_message_created",
       actorType: "admin",
-      actorLabel: "ProAnbud support",
+      actorLabel: "Prisbygg support",
       message: "Support svarte kunden.",
       payload: { messageLength: body.length },
     });

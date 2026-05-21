@@ -12,11 +12,11 @@ const inter = Inter({
 
 export const metadata: Metadata = {
   title: {
-    default: "Proanbud",
-    template: "%s | Proanbud",
+    default: "Prisbygg",
+    template: "%s | Prisbygg",
   },
   description:
-    "Proanbud gir privatkunder AI-materiallister, partnerpris på byggevarer og bestilling gjennom én innkjøpskanal.",
+    "Prisbygg selger byggevarer til konkurransedyktige priser, med fokus på trelast, plater, isolasjon, kledning, tak, maling, festemidler og verktøy. Vi tilbyr et nøye utvalgt sortiment av kvalitetsprodukter for både profesjonelle og private kunder. Med enkel nettbutikk og rask levering gjør vi det enkelt å få tak i det du trenger for ditt byggeprosjekt. Vi er billigere enn byggevarehusene, og tilbyr et bredt utvalg av byggevarer til konkurransedyktige priser. Enten du er en profesjonell entreprenør eller en gjør-det-selv entusiast, har vi det du trenger for å få jobben gjort. Vi tilbyr alt fra trelast og plater til isolasjon, kledning, tak, maling, festemidler og verktøy. Med vår brukervennlige nettbutikk og raske leveringstjeneste, gjør vi det enkelt for deg å få tak i de beste byggevarene til de beste prisene.",
 };
 
 export const viewport: Viewport = {

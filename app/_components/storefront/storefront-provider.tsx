@@ -3,7 +3,7 @@
 import Link from "next/link";
 import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 
-export const STOREFRONT_CART_STORAGE_KEY = "proanbud_storefront_cart_v2";
+export const STOREFRONT_CART_STORAGE_KEY = "prisbygg_storefront_cart_v2";
 
 export type StorefrontCartItem = {
   productId: string;

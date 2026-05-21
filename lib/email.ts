@@ -3,10 +3,10 @@ import { Resend } from "resend";
 import { env } from "@/lib/env";
 
 const BYGGMAKKER_DEMO_EMAIL = "casper@nagsoftware.no";
-const PROANBUD_CC_EMAIL = "post@proanbud.no";
-const FROM_ADDRESS = "Proanbud <post@proanbud.no>";
+const PRISBYGG_CC_EMAIL = "post@proanbud.no";
+const FROM_ADDRESS = "Prisbygg <post@proanbud.no>";
 const TREBYGG_ORDER_FROM_ADDRESS = "Trebygg Strand AS <post@proanbud.no>";
-const DEFAULT_PUBLIC_ORIGIN = "https://www.proanbud.no";
+const DEFAULT_PUBLIC_ORIGIN = "https://www.prisbygg.no";
 
 function getResend(): Resend | null {
   if (!env.resendApiKey) return null;
@@ -154,7 +154,7 @@ function buildOrderHtml(p: OrderEmailPayload): string {
 
   return `<!DOCTYPE html>
 <html lang="no">
-<head><meta charset="UTF-8"><title>Bestillingsforespørsel fra Proanbud</title></head>
+<head><meta charset="UTF-8"><title>Bestillingsforespørsel fra Prisbygg</title></head>
 <body style="margin:0;padding:0;background:#f4f4f0;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif">
   <div style="max-width:700px;margin:32px auto;background:#ffffff;border-radius:10px;overflow:hidden;border:1px solid #ddd">
 
@@ -163,7 +163,7 @@ function buildOrderHtml(p: OrderEmailPayload): string {
       <img src="${TREBYGGSTRAND_LOGO}" alt="Trebyggstrand" style="height:52px;width:auto;display:block" />
       <div style="border-left:1px solid #e5e7eb;padding-left:16px">
         <div style="font-size:18px;font-weight:700;color:#1a1a1a">Bestillingsforespørsel</div>
-        <div style="font-size:12px;color:#6b7280;margin-top:2px">Fra Proanbud &nbsp;·&nbsp; Ref. #${p.orderId.slice(0, 8).toUpperCase()}</div>
+        <div style="font-size:12px;color:#6b7280;margin-top:2px">Fra Prisbygg &nbsp;·&nbsp; Ref. #${p.orderId.slice(0, 8).toUpperCase()}</div>
       </div>
     </div>
 
@@ -223,7 +223,7 @@ function buildOrderHtml(p: OrderEmailPayload): string {
       </div>
 
       <p style="font-size:11px;color:#9ca3af;margin:0;padding-top:16px;border-top:1px solid #f3f4f6">
-        Bestilt ${fmtDate(p.paidAt)} via Proanbud - Nag Software (org.nr. 936593127) &nbsp;·&nbsp; post@proanbud.no
+        Bestilt ${fmtDate(p.paidAt)} via Prisbygg - Nag Software (org.nr. 936593127) &nbsp;·&nbsp; post@proanbud.no
         <br/>Prisene er min-priser fra prislisten ex. MVA og uten påslag.
       </p>
     </div>
@@ -233,7 +233,7 @@ function buildOrderHtml(p: OrderEmailPayload): string {
 }
 
 /**
- * Sends a material order notification to Byggmakker (demo) with CC to Proanbud.
+ * Sends a material order notification to Byggmakker (demo) with CC to Prisbygg.
  * Silently returns if RESEND_API_KEY is not set (safe for dev/test).
  */
 export async function sendMaterialOrderEmail(payload: OrderEmailPayload): Promise<void> {
@@ -243,12 +243,12 @@ export async function sendMaterialOrderEmail(payload: OrderEmailPayload): Promis
     return;
   }
 
-  console.log(`[email] Sender e-post for ordre ${payload.orderId} til ${BYGGMAKKER_DEMO_EMAIL} (cc: ${PROANBUD_CC_EMAIL})`);
+  console.log(`[email] Sender e-post for ordre ${payload.orderId} til ${BYGGMAKKER_DEMO_EMAIL} (cc: ${PRISBYGG_CC_EMAIL})`);
 
   const result = await resend.emails.send({
     from: FROM_ADDRESS,
     to: BYGGMAKKER_DEMO_EMAIL,
-    cc: PROANBUD_CC_EMAIL,
+    cc: PRISBYGG_CC_EMAIL,
     subject: `Ny bestilling #${payload.orderId.slice(0, 8).toUpperCase()} – ${payload.customerName}`,
     html: buildOrderHtml(payload),
   });
@@ -264,7 +264,7 @@ export async function sendMaterialOrderEmail(payload: OrderEmailPayload): Promis
 function buildShopOrderHtml(p: ShopOrderEmailPayload): string {
   const orderReference = p.orderSlug ?? `#${p.orderId.slice(0, 8).toUpperCase()}`;
   const orderUrl = publicUrl(`/ordre/${encodeURIComponent(p.orderSlug ?? p.orderId)}`);
-  const logoUrl = "https://app.proanbud.no/logo/light/logo-primary.svg";
+  const logoUrl = "logo/light/logo-primary.png";
   const paidDate = fmtDate(p.paidAt);
   const itemRows = p.items
     .map(
@@ -282,9 +282,9 @@ function buildShopOrderHtml(p: ShopOrderEmailPayload): string {
 
   return `<!DOCTYPE html>
 <html lang="no">
-<head><meta charset="UTF-8"><title>Ordrebekreftelse fra Proanbud</title></head>
+<head><meta charset="UTF-8"><title>Ordrebekreftelse fra Prisbygg</title></head>
 <body style="margin:0;padding:0;background:#f3f1ec;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Arial,sans-serif;color:#171412">
-  <div style="display:none;max-height:0;overflow:hidden;opacity:0;color:transparent">Betalingen er registrert. Her er ordrebekreftelsen fra Proanbud.</div>
+  <div style="display:none;max-height:0;overflow:hidden;opacity:0;color:transparent">Betalingen er registrert. Her er ordrebekreftelsen fra Prisbygg.</div>
 
   <table role="presentation" width="100%" cellspacing="0" cellpadding="0" style="background:#f3f1ec;border-collapse:collapse">
     <tr>
@@ -295,7 +295,7 @@ function buildShopOrderHtml(p: ShopOrderEmailPayload): string {
               <table role="presentation" width="100%" cellspacing="0" cellpadding="0" style="border-collapse:collapse">
                 <tr>
                   <td style="vertical-align:middle">
-                    <img src="${logoUrl}" width="178" alt="Proanbud" style="display:block;width:178px;max-width:178px;height:auto;border:0;outline:none;text-decoration:none" />
+                    <img src="${logoUrl}" width="178" alt="Prisbygg" style="display:block;width:178px;max-width:178px;height:auto;border:0;outline:none;text-decoration:none" />
                   </td>
                   <td align="right" style="vertical-align:middle;font-size:12px;line-height:1.5;color:#78716c">
                     Ordre<br/>
@@ -392,14 +392,14 @@ function buildShopOrderHtml(p: ShopOrderEmailPayload): string {
       <div style="clear:both"></div>
 
               <div style="margin:24px 0 0;padding:14px 16px;border:1px solid #e7e2d8;border-radius:10px;background:#faf8f3;font-size:12px;line-height:1.65;color:#57534e">
-                Stripe sender egen betalingskvittering for kortbetalingen. Denne e-posten er Proanbuds ordrebekreftelse for varene og leveringen.
+                Stripe sender egen betalingskvittering for kortbetalingen. Denne e-posten er Prisbyggs ordrebekreftelse for varene og leveringen.
               </div>
             </td>
           </tr>
 
           <tr>
             <td style="padding:18px 28px 24px;background:#fffefb;border-top:1px solid #ece6dc;font-size:11px;line-height:1.65;color:#a8a29e">
-              Proanbud &nbsp;·&nbsp; post@proanbud.no<br/>
+              Prisbygg &nbsp;·&nbsp; post@proanbud.no<br/>
               Betalt ${paidDate} via Stripe. Ordren kan følges på <a href="${orderUrl}" style="color:#163f2a;font-weight:700;text-decoration:none">ordresiden</a> (ingen innlogging nødvendig).
             </td>
           </tr>
@@ -418,12 +418,12 @@ export async function sendShopOrderEmail(payload: ShopOrderEmailPayload): Promis
     return;
   }
 
-  console.log(`[email] Sender butikkordre ${payload.orderId} til ${payload.customerEmail} (bcc: ${PROANBUD_CC_EMAIL})`);
+  console.log(`[email] Sender butikkordre ${payload.orderId} til ${payload.customerEmail} (bcc: ${PRISBYGG_CC_EMAIL})`);
 
   const result = await resend.emails.send({
     from: FROM_ADDRESS,
     to: payload.customerEmail,
-    bcc: PROANBUD_CC_EMAIL,
+    bcc: PRISBYGG_CC_EMAIL,
     subject: `Ordrebekreftelse ${payload.orderSlug ?? `#${payload.orderId.slice(0, 8).toUpperCase()}`}`,
     html: buildShopOrderHtml(payload),
   });
@@ -440,7 +440,7 @@ function buildByggmakkerShopOrderHtml(p: ByggmakkerShopOrderEmailPayload): strin
   const orderReference = p.orderSlug ?? `#${p.orderId.slice(0, 8).toUpperCase()}`;
   const orderDate = fmtSupplierOrderDate(p.paidAt);
   const shippingInstruction = p.customerNote?.trim() || "Ønsker levering.";
-  const logoUrl = "https://scontent.fsvg1-1.fna.fbcdn.net/v/t39.30808-6/495159835_3128346780658589_2723926462117955993_n.jpg";
+  const logoUrl = "/trebygg-logo.png";
   const itemRows = p.items
     .map(
       (item) => `
@@ -542,12 +542,12 @@ export async function sendByggmakkerShopOrderEmail(payload: ByggmakkerShopOrderE
 
   const replyTo = env.trebyggOrderFromEmail.trim();
   const orderReference = payload.orderSlug ?? `#${payload.orderId.slice(0, 8).toUpperCase()}`;
-  console.log(`[email] Sender Byggmakker-ordre ${payload.orderId} fra ${TREBYGG_ORDER_FROM_ADDRESS} til ${recipient} (bcc: ${PROANBUD_CC_EMAIL})`);
+  console.log(`[email] Sender Byggmakker-ordre ${payload.orderId} fra ${TREBYGG_ORDER_FROM_ADDRESS} til ${recipient} (bcc: ${PRISBYGG_CC_EMAIL})`);
 
   const result = await resend.emails.send({
     from: TREBYGG_ORDER_FROM_ADDRESS,
     to: recipient,
-    bcc: PROANBUD_CC_EMAIL,
+    bcc: PRISBYGG_CC_EMAIL,
     ...(replyTo ? { replyTo } : {}),
     subject: `Trebygg bestilling ${orderReference} – vurder transport`,
     html: buildByggmakkerShopOrderHtml(payload),

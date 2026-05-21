@@ -69,7 +69,7 @@ async function fetchNobbItemImageUrlFromPage(itemUrl: string) {
           Accept: "text/html,application/xhtml+xml",
           "Accept-Language": "nb-NO,nb;q=0.9,en;q=0.8",
           Referer: "https://nobb.no/",
-          "User-Agent": "Mozilla/5.0 (compatible; ProAnbudBot/1.0)",
+          "User-Agent": "Mozilla/5.0 (compatible; PrisbyggBot/1.0)",
         },
         cache: "no-store",
         signal: abortController.signal,

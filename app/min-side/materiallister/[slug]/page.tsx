@@ -342,7 +342,7 @@ function UnlockCard({
         <p className="eyebrow">Lås opp</p>
       </div>
       <h2 className="mt-3 text-lg font-semibold leading-tight text-stone-900 sm:text-xl">
-        Lås opp full materialliste og bestill til partnerpris gjennom Proanbud.
+        Lås opp full materialliste og bestill til partnerpris gjennom Prisbygg.
       </h2>
 
       <div className="mt-4 flex items-baseline gap-2">
@@ -365,7 +365,7 @@ function UnlockCard({
       <ul className="mt-4 space-y-1.5 text-xs text-stone-600">
         <FeatureRow>Full oversikt over alle materiallinjer</FeatureRow>
         <FeatureRow>Rediger og eksporter PDF ubegrenset</FeatureRow>
-        <FeatureRow>Bestill direkte gjennom Proanbuds innkjøpspartner</FeatureRow>
+        <FeatureRow>Bestill direkte gjennom Prisbyggs innkjøpspartner</FeatureRow>
       </ul>
 
       {paymentCancelled ? (
@@ -402,7 +402,7 @@ function OrderCard({
         <p className="eyebrow">Klar til bestilling</p>
       </div>
       <h2 className="mt-3 text-lg font-semibold leading-tight text-stone-900 sm:text-xl">
-        Bestill materialene direkte gjennom Proanbud.
+        Bestill materialene direkte gjennom Prisbygg.
       </h2>
       <p className="mt-2 text-xs leading-5 text-stone-600">
         Vi bruker partnerprislisten, sjekker tilgjengelighet og sender bestillingen videre i samme kanal.

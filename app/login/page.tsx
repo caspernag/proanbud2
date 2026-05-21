@@ -50,8 +50,8 @@ export default function LoginPage({ searchParams }: LoginPageProps) {
 
       <div className="w-full max-w-sm">
         <div className="mb-8 flex justify-center">
-          <Link href="/" className="inline-flex items-center" aria-label="proanbud">
-            <Image src="/logo/light/logo-primary.svg" alt="proanbud" width={180} height={80} className="h-10 w-auto" priority />
+          <Link href="/" className="inline-flex items-center" aria-label="prisbygg">
+            <Image src="/logo/light/logo-primary.png" alt="prisbygg" width={180} height={80} className="h-10 w-auto" priority />
           </Link>
         </div>
 

@@ -101,7 +101,7 @@ function drawHeader(doc: PDFKit.PDFDocument, layout: Layout, project: ProjectVie
   }
 
   if (!renderedLogo) {
-    doc.fillColor(colors.text).font("Helvetica-Bold").fontSize(18).text("Proanbud", layout.left, startY + 3);
+    doc.fillColor(colors.text).font("Helvetica-Bold").fontSize(18).text("Prisbygg", layout.left, startY + 3);
   }
 
   const generatedAt = new Date().toLocaleString("nb-NO", {
@@ -341,7 +341,7 @@ function drawPageFooters(doc: PDFKit.PDFDocument, layout: Layout) {
       .fillColor(colors.muted)
       .font("Helvetica")
       .fontSize(8)
-      .text(`ProAnbud materialliste  •  Side ${index + 1} av ${pages.count}`, layout.left, footerY, {
+      .text(`Prisbygg materialliste  •  Side ${index + 1} av ${pages.count}`, layout.left, footerY, {
         width: layout.width,
         align: "left",
         lineBreak: false,
@@ -415,7 +415,7 @@ async function ensurePdfkitDataFiles() {
 }
 
 async function loadLogoSvg() {
-  const logoPath = path.join(process.cwd(), "public", "logo", "light", "logo-primary.svg");
+  const logoPath = path.join(process.cwd(), "public", "logo", "light", "logo-primary.png");
   try {
     return await readFile(logoPath, "utf8");
   } catch {

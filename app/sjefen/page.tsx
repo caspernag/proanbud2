@@ -23,7 +23,7 @@ export default async function SjefenPage() {
         {/* Logo / wordmark */}
         <div className="mb-10 text-center">
           <span className="text-2xl font-bold tracking-tight text-stone-900">
-            proanbud<span className="text-amber-500">.</span>
+            prisbygg<span className="text-amber-500">.</span>
           </span>
           <p className="mt-1 text-xs text-stone-400 uppercase tracking-widest">Admin</p>
         </div>

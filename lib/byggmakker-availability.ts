@@ -219,14 +219,12 @@ async function fetchAvailabilityBatch(eans: string[]): Promise<AvailabilityPaylo
 }
 
 function fetchWithSoftTimeout(input: RequestInfo | URL, init: RequestInit, timeoutMs: number) {
-  let timeout: ReturnType<typeof setTimeout>;
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort(), timeoutMs);
 
-  return Promise.race<Response | null>([
-    fetch(input, init).catch(() => null),
-    new Promise<null>((resolve) => {
-      timeout = setTimeout(() => resolve(null), timeoutMs);
-    }),
-  ]).finally(() => clearTimeout(timeout));
+  return fetch(input, { ...init, signal: controller.signal })
+    .catch(() => null)
+    .finally(() => clearTimeout(timeout));
 }
 
 function parseAvailabilityPayload(

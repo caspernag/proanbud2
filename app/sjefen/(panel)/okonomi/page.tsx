@@ -72,7 +72,7 @@ export default async function OkonomiPage() {
     <div className="p-8 space-y-8">
       <div>
         <h1 className="text-2xl font-bold text-stone-900">Økonomi</h1>
-        <p className="text-sm text-stone-400 mt-0.5">Inntektssammendrag for proanbud</p>
+        <p className="text-sm text-stone-400 mt-0.5">Inntektssammendrag for prisbygg</p>
       </div>
 
       {/* Top KPIs */}

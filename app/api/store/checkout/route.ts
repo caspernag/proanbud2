@@ -216,7 +216,7 @@ export async function POST(request: Request) {
                   currency: "nok",
                   product_data: {
                     name: "Frakt og håndtering",
-                    description: "Standard levering fra ProAnbud nettbutikk.",
+                    description: "Standard levering fra Prisbygg nettbutikk.",
                   },
                   unit_amount: shippingNok * 100,
                 },

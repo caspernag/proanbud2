@@ -2,7 +2,7 @@
 
 import { useState } from "react";
 
-const CART_STORAGE_KEY = "proanbud_storefront_cart_v2";
+const CART_STORAGE_KEY = "prisbygg_storefront_cart_v2";
 
 type CartItem = {
   productId: string;

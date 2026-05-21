@@ -80,7 +80,7 @@ export async function POST(request: Request, { params }: RouteContext) {
 
   if ((order.subtotal_nok ?? 0) < MINIMUM_ORDER_VALUE_NOK) {
     return NextResponse.json(
-      { error: `Minste bestillingsverdi for ProAnbud er ${MINIMUM_ORDER_VALUE_NOK} kr.` },
+      { error: `Minste bestillingsverdi for Prisbygg er ${MINIMUM_ORDER_VALUE_NOK} kr.` },
       { status: 400 },
     );
   }

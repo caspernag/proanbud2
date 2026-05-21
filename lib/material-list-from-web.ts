@@ -185,7 +185,7 @@ async function fetchPageSnapshot(url: string): Promise<PageSnapshot | null> {
       redirect: "follow",
       signal: controller.signal,
       headers: {
-        "User-Agent": "ProanbudBot/1.0 (+https://proanbud.no)",
+        "User-Agent": "PrisbyggBot/1.0 (+https://prisbygg.no)",
         Accept: "text/html,application/xhtml+xml",
       },
     });

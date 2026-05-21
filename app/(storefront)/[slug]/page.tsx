@@ -180,7 +180,7 @@ export default async function StorefrontProductPage({ params }: StorefrontProduc
                 {isVerifiedNetAvailable ? (
                   <>
                     <p className="font-semibold text-stone-900">24-48 timers levering</p>
-                    <p className="text-xs text-stone-500">Sendes fra Proanbud-lager neste virkedag. Gratis frakt over 5 000 kr.</p>
+                    <p className="text-xs text-stone-500">Sendes fra Prisbygg-lager neste virkedag. Gratis frakt over 5 000 kr.</p>
                   </>
                 ) : isStoreAvailable ? (
                   <>
@@ -324,7 +324,7 @@ function buildMaterialListProduct(product: StorefrontProfileProductSource & {
     productName: product.productName,
     quantity: `1 ${salesUnitLabel}`,
     comment: "Lagt til fra nettbutikken.",
-    quantityReason: "Valgt manuelt fra Proanbud nettbutikk.",
+    quantityReason: "Valgt manuelt fra Prisbygg nettbutikk.",
     nobbNumber: product.nobbNumber,
     supplierName: product.supplierName,
     unitPriceNok: product.unitPriceNok,

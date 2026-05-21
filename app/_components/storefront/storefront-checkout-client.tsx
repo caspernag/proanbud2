@@ -32,7 +32,7 @@ const UNKNOWN_STOCK_INFO: StockInfo = {
   netQuantity: null,
 };
 
-const CHECKOUT_DRAFT_STORAGE_KEY = "proanbud_storefront_checkout_draft_v1";
+const CHECKOUT_DRAFT_STORAGE_KEY = "prisbygg_storefront_checkout_draft_v1";
 
 type CheckoutDraft = {
   email: string;

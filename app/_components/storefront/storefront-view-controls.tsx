@@ -85,7 +85,7 @@ export function StorefrontViewControls({
               disabled={isPending}
               onClick={() => updateViewParam("cols", String(value))}
               className={`inline-flex h-7 min-w-[32px] items-center justify-center rounded-full px-2 text-xs font-semibold transition ${
-                active ? "bg-[#15452d] text-white!" : "text-stone-600 hover:text-stone-900"
+                active ? "bg-[#15452d] text-white! rounded-full!" : "text-stone-600 hover:text-stone-900"
               }`}
               aria-pressed={active}
               aria-label={`${value} kolonner`}

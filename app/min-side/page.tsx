@@ -137,7 +137,7 @@ export default async function MinSideOverviewPage() {
               {greeting(user?.email ?? null)}
             </h1>
             <p className="mt-2 hidden max-w-xl text-sm leading-6 text-emerald-50/80 sm:block">
-              Generer materiallister med AI og bestill til partnerpris gjennom Proanbud.
+              Generer materiallister med AI og bestill til partnerpris gjennom Prisbygg.
             </p>
 
             <div className="mt-4 flex flex-wrap gap-2">

@@ -1,5 +1,5 @@
-export const STOREFRONT_SELECTED_STORE_COOKIE = "proanbud_selected_store";
-export const STOREFRONT_SELECTED_STORE_STORAGE_KEY = "proanbud_selected_store_v1";
+export const STOREFRONT_SELECTED_STORE_COOKIE = "prisbygg_selected_store";
+export const STOREFRONT_SELECTED_STORE_STORAGE_KEY = "prisbygg_selected_store_v1";
 
 export type StorefrontStoreOption = {
   id: string;

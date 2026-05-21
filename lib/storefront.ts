@@ -43,6 +43,23 @@ const CATEGORY_FILTER_ALIASES: Record<string, string[]> = {
     "vintermatte",
     "lydreduksjonsbøyle",
   ],
+  trelast: [
+    "konstruksjonsvirke",
+    "trelast",
+    "limtre",
+    "lekt",
+    "plank",
+    "bord",
+    "terrassebord",
+  ],
+  plater: [
+    "gipsplater",
+    "gips og plater",
+    "osb",
+    "sponplater",
+    "kryssfiner",
+    "hardbordplater",
+  ],
 };
 
 export async function getStorefrontProducts() {
@@ -1029,7 +1046,7 @@ function fieldMatchesToken(fieldValue: string, token: string) {
   });
 }
 
-function matchesStorefrontCategory(product: StorefrontProduct, category: string) {
+export function matchesStorefrontCategory(product: StorefrontProduct, category: string) {
   const needle = category.trim().toLowerCase();
 
   if (!needle) {
