@@ -1,8 +1,10 @@
 import "server-only";
 
+import { cacheLife } from "next/cache";
+
 const AVAILABILITY_API_BASE_URL = "https://www.byggmakker.no/api/availability";
 const SEARCH_BASE_URL = "https://www.byggmakker.no/sok";
-const REQUEST_TIMEOUT_MS = 8_000;
+const REQUEST_TIMEOUT_MS = 3_000;
 const CACHE_TTL_MS = 10 * 60 * 1000;
 
 type AvailabilityCacheEntry = {
@@ -112,7 +114,9 @@ export async function getByggmakkerAvailabilityBatch(
 
   if (pending.length === 0) return result;
 
-  const payloads = await fetchAvailabilityBatch(pending);
+  // Sort for a deterministic cache key so the same logical request always hits the same cache entry.
+  pending.sort();
+  const payloads = await fetchCachedBatch(pending);
   if (!payloads) return result;
 
   for (const entry of payloads) {
@@ -130,6 +134,17 @@ export async function getByggmakkerAvailabilityBatch(
   }
 
   return result;
+}
+
+/**
+ * Cached wrapper around the batch availability fetch.
+ * Keyed by the sorted EAN array – identical page shapes reuse the same entry
+ * across serverless invocations without an extra round-trip to Byggmakker.
+ */
+async function fetchCachedBatch(sortedEans: string[]): Promise<AvailabilityPayload[] | null> {
+  "use cache";
+  cacheLife({ revalidate: 300, expire: 600 }); // 5 min stale, 10 min hard expire
+  return fetchAvailabilityBatch(sortedEans);
 }
 
 async function fetchAvailabilityPayload(ean: string): Promise<AvailabilityPayload | null> {

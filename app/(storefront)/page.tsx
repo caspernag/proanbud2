@@ -31,6 +31,8 @@ const UNKNOWN_PRODUCT_STOCK: ProductStockInfo = {
   label: "Sjekk lager",
 };
 
+const EMPTY_STOCK_MAP = new Map<string, ProductStockInfo>();
+
 type StorefrontPageProps = {
   searchParams: Promise<Record<string, string | string[] | undefined>>;
 };
@@ -153,38 +155,30 @@ export default async function StorefrontPage({ searchParams }: StorefrontPagePro
   const shouldPrioritizeNetStock = !inStockOnly && hasFilters;
   const stockCandidateItems = stockFilterCandidates?.items ?? [];
 
-  // Batch-resolve real stock status for all products that may be rendered or
-  // filtered using EANs sourced directly from the price list.
-  const visibleEans = new Set<string>();
-  for (const product of result.items) {
-    if (product.ean) visibleEans.add(product.ean);
-  }
-  for (const product of stockCandidateItems) {
-    if (product.ean) visibleEans.add(product.ean);
-  }
-  for (const product of featuredDeals) {
-    if (product.ean) visibleEans.add(product.ean);
-  }
-  const availabilityMap = visibleEans.size
-    ? await getByggmakkerAvailabilityBatch(visibleEans)
-    : new Map();
+  // When inStockOnly, fetch stock immediately (required for filtering).
+  // Otherwise, stock is streamed in lazily via Suspense in StockedDealsStrip / StockedProductGrid.
   const stockByEan = new Map<string, ProductStockInfo>();
-  for (const [ean, info] of availabilityMap) {
-    stockByEan.set(ean, buildProductStockInfo(info));
+  if (inStockOnly) {
+    const candidateEans = new Set<string>();
+    for (const product of stockCandidateItems) {
+      if (product.ean) candidateEans.add(product.ean);
+    }
+    const availabilityMap = candidateEans.size
+      ? await getByggmakkerAvailabilityBatch(candidateEans)
+      : new Map<string, ByggmakkerAvailability>();
+    for (const [ean, info] of availabilityMap) {
+      stockByEan.set(ean, buildProductStockInfo(info));
+    }
   }
   const stockFilteredItems = inStockOnly
     ? stockCandidateItems.filter((product) => product.ean && isProductInStock(stockByEan.get(product.ean)))
     : result.items;
-  const stockAdjustedPaging = inStockOnly;
-  const filteredTotal = stockAdjustedPaging ? stockFilteredItems.length : result.total;
+  const filteredTotal = inStockOnly ? stockFilteredItems.length : result.total;
   const filteredTotalPages = Math.max(1, Math.ceil(filteredTotal / result.pageSize));
-  const filteredPage = stockAdjustedPaging ? Math.min(Math.max(1, page), filteredTotalPages) : result.page;
-  const displayItemsBeforeStockRanking = stockAdjustedPaging
+  const filteredPage = inStockOnly ? Math.min(Math.max(1, page), filteredTotalPages) : result.page;
+  const displayItems = inStockOnly
     ? stockFilteredItems.slice((filteredPage - 1) * result.pageSize, filteredPage * result.pageSize)
     : result.items;
-  const displayItems = shouldPrioritizeNetStock
-    ? prioritizeNetStock(displayItemsBeforeStockRanking, stockByEan)
-    : displayItemsBeforeStockRanking;
 
   return (
     <div className="space-y-6">
@@ -197,7 +191,11 @@ export default async function StorefrontPage({ searchParams }: StorefrontPagePro
           {featuredCategories.length > 0 ? (
             <CategoryTiles tiles={featuredCategories} counts={result.categoryCounts} />
           ) : null}
-          {featuredDeals.length > 0 ? <DealsStrip deals={featuredDeals} stockByEan={stockByEan} /> : null}
+          {featuredDeals.length > 0 ? (
+            <Suspense fallback={<DealsStrip deals={featuredDeals} stockByEan={EMPTY_STOCK_MAP} />}>
+              <StockedDealsStrip deals={featuredDeals} />
+            </Suspense>
+          ) : null}
           <div className="hidden sm:block"><ValuePropsBand /></div>
         </>
       ) : null}
@@ -262,7 +260,7 @@ export default async function StorefrontPage({ searchParams }: StorefrontPagePro
 
           {displayItems.length === 0 ? (
             <EmptyState q={q} />
-          ) : (
+          ) : inStockOnly ? (
             <div className={getGridClasses(cols)}>
               {displayItems.map((product) => (
                 <ProductCard
@@ -272,6 +270,18 @@ export default async function StorefrontPage({ searchParams }: StorefrontPagePro
                 />
               ))}
             </div>
+          ) : (
+            <Suspense
+              fallback={
+                <div className={getGridClasses(cols)}>
+                  {displayItems.map((product) => (
+                    <ProductCard key={product.id} product={product} stockInfo={UNKNOWN_PRODUCT_STOCK} />
+                  ))}
+                </div>
+              }
+            >
+              <StockedProductGrid items={displayItems} shouldPrioritize={shouldPrioritizeNetStock} cols={cols} />
+            </Suspense>
           )}
 
           {filteredTotalPages > 1 ? (
@@ -1141,4 +1151,47 @@ function buildStoreHref(params: Record<string, string | number | undefined>) {
 
   const query = searchParams.toString();
   return query ? `/?${query}` : "/";
+}
+
+async function StockedDealsStrip({ deals }: { deals: StorefrontProduct[] }) {
+  const eans = new Set(deals.map((p) => p.ean).filter((e): e is string => Boolean(e)));
+  const stockByEan = new Map<string, ProductStockInfo>();
+  if (eans.size > 0) {
+    const availabilityMap = await getByggmakkerAvailabilityBatch(eans);
+    for (const [ean, info] of availabilityMap) {
+      stockByEan.set(ean, buildProductStockInfo(info));
+    }
+  }
+  return <DealsStrip deals={deals} stockByEan={stockByEan} />;
+}
+
+async function StockedProductGrid({
+  items,
+  shouldPrioritize,
+  cols,
+}: {
+  items: StorefrontProduct[];
+  shouldPrioritize: boolean;
+  cols: number;
+}) {
+  const eans = new Set(items.map((p) => p.ean).filter((e): e is string => Boolean(e)));
+  const stockByEan = new Map<string, ProductStockInfo>();
+  if (eans.size > 0) {
+    const availabilityMap = await getByggmakkerAvailabilityBatch(eans);
+    for (const [ean, info] of availabilityMap) {
+      stockByEan.set(ean, buildProductStockInfo(info));
+    }
+  }
+  const displayItems = shouldPrioritize ? prioritizeNetStock(items, stockByEan) : items;
+  return (
+    <div className={getGridClasses(cols)}>
+      {displayItems.map((product) => (
+        <ProductCard
+          key={product.id}
+          product={product}
+          stockInfo={product.ean ? stockByEan.get(product.ean) ?? UNKNOWN_PRODUCT_STOCK : UNKNOWN_PRODUCT_STOCK}
+        />
+      ))}
+    </div>
+  );
 }

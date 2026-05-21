@@ -15,7 +15,7 @@ export type SupplierMarkup = {
 
 export async function getSupplierMarkups(): Promise<SupplierMarkup[]> {
   "use cache";
-  cacheLife("minutes");
+  cacheLife("hours");
 
   try {
     const adminClient = createSupabaseAdminClient();

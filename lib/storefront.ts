@@ -47,7 +47,7 @@ const CATEGORY_FILTER_ALIASES: Record<string, string[]> = {
 
 export async function getStorefrontProducts() {
   "use cache";
-  cacheLife("minutes");
+  cacheLife("hours");
 
   const [fromVectorStore, markups, priceListProducts] = await Promise.all([
     loadStorefrontProductsFromVectorStore(),

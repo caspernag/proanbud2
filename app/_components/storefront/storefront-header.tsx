@@ -172,19 +172,6 @@ export function StorefrontHeader() {
             </button>
           </form>
 
-          <div className="mt-1.5 hidden items-center gap-1.5 lg:flex">
-            <span className="text-[11px] font-semibold uppercase tracking-[0.12em] text-stone-400">Populært</span>
-            {QUICK_SEARCHES.map((query) => (
-              <Link
-                key={query}
-                href={`/?q=${encodeURIComponent(query)}`}
-                className="rounded-full bg-white px-2.5 py-1 text-xs font-semibold text-stone-600 ring-1 ring-stone-200 transition hover:text-[#15452d] hover:ring-[#15452d]"
-              >
-                {query}
-              </Link>
-            ))}
-          </div>
-
           {searchFocused && hasSuggestions ? (
             <SearchSuggestions
               suggestions={suggestions}
@@ -255,7 +242,7 @@ function SearchSuggestions({
     <div className="absolute left-0 right-0 top-[calc(100%+0.5rem)] z-50 overflow-hidden rounded-xl border border-stone-200 bg-white shadow-[0_18px_45px_rgba(32,25,15,0.18)]">
       <div className="flex items-center justify-between border-b border-stone-100 px-3 py-2">
         <p className="text-[11px] font-bold uppercase tracking-[0.14em] text-stone-500">
-          {normalizedQuery.length >= 2 ? "Beste treff" : "Populært nå"}
+          {normalizedQuery.length >= 2 ? "Beste treff" : "nå"}
         </p>
         {pending ? <span className="text-[11px] font-medium text-stone-400">Søker...</span> : null}
       </div>

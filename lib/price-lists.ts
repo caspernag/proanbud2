@@ -39,7 +39,7 @@ export type PriceListProduct = {
 
 export async function getPriceListProducts() {
   "use cache";
-  cacheLife("minutes");
+  cacheLife("hours");
 
   return getOpenAiVectorStorePriceListProducts();
 }

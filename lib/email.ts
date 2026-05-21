@@ -163,7 +163,7 @@ function buildOrderHtml(p: OrderEmailPayload): string {
       <img src="${TREBYGGSTRAND_LOGO}" alt="Trebyggstrand" style="height:52px;width:auto;display:block" />
       <div style="border-left:1px solid #e5e7eb;padding-left:16px">
         <div style="font-size:18px;font-weight:700;color:#1a1a1a">Bestillingsforespørsel</div>
-        <div style="font-size:12px;color:#6b7280;margin-top:2px">Fra Proanbud AS &nbsp;·&nbsp; Ref. #${p.orderId.slice(0, 8).toUpperCase()}</div>
+        <div style="font-size:12px;color:#6b7280;margin-top:2px">Fra Proanbud &nbsp;·&nbsp; Ref. #${p.orderId.slice(0, 8).toUpperCase()}</div>
       </div>
     </div>
 
@@ -223,7 +223,7 @@ function buildOrderHtml(p: OrderEmailPayload): string {
       </div>
 
       <p style="font-size:11px;color:#9ca3af;margin:0;padding-top:16px;border-top:1px solid #f3f4f6">
-        Bestilt ${fmtDate(p.paidAt)} via Proanbud AS (org.nr. 123 456 789) &nbsp;·&nbsp; post@proanbud.no
+        Bestilt ${fmtDate(p.paidAt)} via Proanbud - Nag Software (org.nr. 936593127) &nbsp;·&nbsp; post@proanbud.no
         <br/>Prisene er min-priser fra prislisten ex. MVA og uten påslag.
       </p>
     </div>
@@ -399,7 +399,7 @@ function buildShopOrderHtml(p: ShopOrderEmailPayload): string {
 
           <tr>
             <td style="padding:18px 28px 24px;background:#fffefb;border-top:1px solid #ece6dc;font-size:11px;line-height:1.65;color:#a8a29e">
-              Proanbud AS &nbsp;·&nbsp; post@proanbud.no<br/>
+              Proanbud &nbsp;·&nbsp; post@proanbud.no<br/>
               Betalt ${paidDate} via Stripe. Ordren kan følges på <a href="${orderUrl}" style="color:#163f2a;font-weight:700;text-decoration:none">ordresiden</a> (ingen innlogging nødvendig).
             </td>
           </tr>

@@ -1,10 +1,15 @@
 import { requireAdminUser } from "@/lib/admin-auth";
+import { getPriceListProducts } from "@/lib/price-lists";
 import { SHOP_ORDER_TRANSPORT_LABELS, type ShopOrderTransportStatus } from "@/lib/shop-order";
 import { createSupabaseAdminClient } from "@/lib/supabase/admin";
 import { createSupabaseServerClient } from "@/lib/supabase/server";
 
 function fmt(nok: number) {
   return new Intl.NumberFormat("nb-NO", { style: "currency", currency: "NOK", maximumFractionDigits: 0 }).format(nok);
+}
+
+function fmtPct(pct: number) {
+  return `${pct.toFixed(1)} %`;
 }
 
 const ORDER_STATUS: Record<string, { label: string; color: string }> = {
@@ -66,7 +71,55 @@ export default async function BestillingerPage({ searchParams }: PageProps) {
   );
   const partnerMap = Object.fromEntries((partners ?? []).map((p) => [p.id, p.name]));
 
+  // ── Profit calculation ─────────────────────────────────────────────────
+  const paidMatIds = (materialOrders ?? [])
+    .filter((o) => ["paid", "submitted", "fulfilled"].includes(o.status))
+    .map((o) => o.id);
+  const paidShopIds = (shopOrders ?? [])
+    .filter((o) => ["paid", "fulfilled"].includes(o.status))
+    .map((o) => o.id);
+
+  const [priceListProducts, shopItemsResult, matItemsResult] = await Promise.all([
+    getPriceListProducts(),
+    paidShopIds.length > 0
+      ? supabase!.from("shop_order_items").select("order_id, nobb_number, quantity, line_total_nok").in("order_id", paidShopIds)
+      : Promise.resolve({ data: [] as { order_id: string; nobb_number: string; quantity: number; line_total_nok: number }[] }),
+    paidMatIds.length > 0
+      ? supabase!.from("material_order_items").select("order_id, supplier_sku, quantity_value, line_total_nok").eq("is_included", true).in("order_id", paidMatIds)
+      : Promise.resolve({ data: [] as { order_id: string; supplier_sku: string | null; quantity_value: number; line_total_nok: number }[] }),
+  ]);
+
+  const nobbCostMap = new Map<string, number>();
+  for (const p of priceListProducts) {
+    if (p.nobbNumber) nobbCostMap.set(p.nobbNumber, p.priceNok);
+  }
+
+  // Per-order profit: revenue = line_total_nok (ex-VAT), cost = priceList × qty
+  const shopProfitMap = new Map<string, { revenue: number; cost: number }>();
+  for (const item of shopItemsResult.data ?? []) {
+    const costUnit = nobbCostMap.get(item.nobb_number);
+    if (!shopProfitMap.has(item.order_id)) shopProfitMap.set(item.order_id, { revenue: 0, cost: 0 });
+    const e = shopProfitMap.get(item.order_id)!;
+    e.revenue += item.line_total_nok;
+    if (costUnit != null) e.cost += Math.round(costUnit * item.quantity);
+  }
+
+  const matProfitMap = new Map<string, { revenue: number; cost: number }>();
+  for (const item of matItemsResult.data ?? []) {
+    const costUnit = item.supplier_sku ? nobbCostMap.get(item.supplier_sku) : undefined;
+    if (!matProfitMap.has(item.order_id)) matProfitMap.set(item.order_id, { revenue: 0, cost: 0 });
+    const e = matProfitMap.get(item.order_id)!;
+    e.revenue += item.line_total_nok;
+    if (costUnit != null) e.cost += Math.round(costUnit * Number(item.quantity_value));
+  }
+
   const isMaterial = type !== "shop";
+
+  const activeProfitMap = isMaterial ? matProfitMap : shopProfitMap;
+  const totalRevenue = [...activeProfitMap.values()].reduce((s, e) => s + e.revenue, 0);
+  const totalCost = [...activeProfitMap.values()].reduce((s, e) => s + e.cost, 0);
+  const totalProfit = totalRevenue - totalCost;
+  const avgMargin = totalRevenue > 0 ? (totalProfit / totalRevenue) * 100 : 0;
 
   const filteredMaterial = (materialOrders ?? []).filter(
     (o) => status === "all" || o.status === status
@@ -84,6 +137,22 @@ export default async function BestillingerPage({ searchParams }: PageProps) {
       <div>
         <h1 className="text-2xl font-bold text-stone-900">Bestillinger</h1>
         <p className="text-sm text-stone-400 mt-0.5">Alle ordre på plattformen</p>
+      </div>
+
+      {/* Profit KPIs */}
+      <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
+        {[
+          { label: "Omsetning (eks. MVA)", value: fmt(totalRevenue), sub: "betalte ordre" },
+          { label: "Innkjøp", value: fmt(totalCost), sub: "fra prisliste" },
+          { label: "Inntjening", value: fmt(totalProfit), sub: "bruttobidrag", highlight: true },
+          { label: "Margin", value: fmtPct(avgMargin), sub: "gjennomsnitt" },
+        ].map((kpi) => (
+          <div key={kpi.label} className={`rounded-2xl border px-5 py-4 space-y-0.5 ${kpi.highlight ? "bg-emerald-50 border-emerald-200" : "bg-white border-stone-200"}`}>
+            <p className="text-xs text-stone-400">{kpi.label}</p>
+            <p className={`text-xl font-bold tabular-nums ${kpi.highlight ? "text-emerald-700" : "text-stone-900"}`}>{kpi.value}</p>
+            <p className="text-[11px] text-stone-400">{kpi.sub}</p>
+          </div>
+        ))}
       </div>
 
       {/* Type toggle */}
@@ -142,12 +211,17 @@ export default async function BestillingerPage({ searchParams }: PageProps) {
                   <th className="px-5 py-3.5 text-xs text-stone-400 font-medium">Partner</th>
                   <th className="px-5 py-3.5 text-xs text-stone-400 font-medium">Levering</th>
                   <th className="px-5 py-3.5 text-xs text-stone-400 font-medium text-right">Beløp</th>
+                  <th className="px-5 py-3.5 text-xs text-stone-400 font-medium text-right">Inntjening</th>
+                  <th className="px-5 py-3.5 text-xs text-stone-400 font-medium text-right">Margin</th>
                 </tr>
               </thead>
               <tbody>
                 {filteredMaterial.map((o) => {
                   const sCfg = ORDER_STATUS[o.status] ?? { label: o.status, color: "bg-stone-200 text-stone-700" };
                   const pCfg = PARTNER_STATUS[o.partner_status] ?? { label: o.partner_status, color: "bg-stone-200 text-stone-700" };
+                  const profit = matProfitMap.get(o.id);
+                  const profitAmt = profit ? profit.revenue - profit.cost : null;
+                  const margin = profit && profit.revenue > 0 ? ((profit.revenue - profit.cost) / profit.revenue) * 100 : null;
                   return (
                     <tr key={o.id} className="border-b border-stone-200/70 hover:bg-stone-50/80 transition">
                       <td className="px-5 py-3 font-mono text-xs text-stone-500">{o.id.slice(0, 8)}…</td>
@@ -158,11 +232,17 @@ export default async function BestillingerPage({ searchParams }: PageProps) {
                       <td className="px-5 py-3 text-xs text-stone-500">{o.partner_id ? partnerMap[o.partner_id] ?? "—" : <span className="text-stone-400">Ingen</span>}</td>
                       <td className="px-5 py-3 text-xs text-stone-500">{o.delivery_mode === "pickup" ? "Henting" : "Levering"}</td>
                       <td className="px-5 py-3 text-right text-stone-800 font-semibold">{fmt(o.total_nok)}</td>
+                      <td className="px-5 py-3 text-right text-xs font-semibold tabular-nums">
+                        {profitAmt != null ? <span className={profitAmt >= 0 ? "text-emerald-600" : "text-red-500"}>{fmt(profitAmt)}</span> : <span className="text-stone-300">—</span>}
+                      </td>
+                      <td className="px-5 py-3 text-right text-xs tabular-nums text-stone-500">
+                        {margin != null ? fmtPct(margin) : <span className="text-stone-300">—</span>}
+                      </td>
                     </tr>
                   );
                 })}
                 {filteredMaterial.length === 0 && (
-                  <tr><td colSpan={8} className="px-5 py-10 text-center text-stone-400 text-sm">Ingen bestillinger.</td></tr>
+                  <tr><td colSpan={10} className="px-5 py-10 text-center text-stone-400 text-sm">Ingen bestillinger.</td></tr>
                 )}
               </tbody>
             </table>
@@ -178,6 +258,8 @@ export default async function BestillingerPage({ searchParams }: PageProps) {
                   <th className="px-5 py-3.5 text-xs text-stone-400 font-medium">Status</th>
                   <th className="px-5 py-3.5 text-xs text-stone-400 font-medium">Transport</th>
                   <th className="px-5 py-3.5 text-xs text-stone-400 font-medium text-right">Beløp</th>
+                  <th className="px-5 py-3.5 text-xs text-stone-400 font-medium text-right">Inntjening</th>
+                  <th className="px-5 py-3.5 text-xs text-stone-400 font-medium text-right">Margin</th>
                 </tr>
               </thead>
               <tbody>
@@ -186,6 +268,9 @@ export default async function BestillingerPage({ searchParams }: PageProps) {
                   const transportStatus = (o.transport_status ?? "pending") as ShopOrderTransportStatus;
                   const transportLabel = SHOP_ORDER_TRANSPORT_LABELS[transportStatus] ?? transportStatus;
                   const transportColor = TRANSPORT_STATUS_COLOR[transportStatus] ?? "bg-stone-200 text-stone-700";
+                  const profit = shopProfitMap.get(o.id);
+                  const profitAmt = profit ? profit.revenue - profit.cost : null;
+                  const margin = profit && profit.revenue > 0 ? ((profit.revenue - profit.cost) / profit.revenue) * 100 : null;
                   return (
                     <tr key={o.id} className="border-b border-stone-200/70 hover:bg-stone-50/80 transition">
                       <td className="px-5 py-3 font-mono text-xs text-stone-500">
@@ -200,11 +285,17 @@ export default async function BestillingerPage({ searchParams }: PageProps) {
                       <td className="px-5 py-3"><span className={`text-xs px-2 py-0.5 rounded-full font-medium ${sCfg.color}`}>{sCfg.label}</span></td>
                       <td className="px-5 py-3"><span className={`text-xs px-2 py-0.5 rounded-full font-medium ${transportColor}`}>{transportLabel}</span></td>
                       <td className="px-5 py-3 text-right text-stone-800 font-semibold">{fmt(o.total_nok)}</td>
+                      <td className="px-5 py-3 text-right text-xs font-semibold tabular-nums">
+                        {profitAmt != null ? <span className={profitAmt >= 0 ? "text-emerald-600" : "text-red-500"}>{fmt(profitAmt)}</span> : <span className="text-stone-300">—</span>}
+                      </td>
+                      <td className="px-5 py-3 text-right text-xs tabular-nums text-stone-500">
+                        {margin != null ? fmtPct(margin) : <span className="text-stone-300">—</span>}
+                      </td>
                     </tr>
                   );
                 })}
                 {filteredShop.length === 0 && (
-                  <tr><td colSpan={8} className="px-5 py-10 text-center text-stone-400 text-sm">Ingen butikkordre.</td></tr>
+                  <tr><td colSpan={10} className="px-5 py-10 text-center text-stone-400 text-sm">Ingen butikkordre.</td></tr>
                 )}
               </tbody>
             </table>
