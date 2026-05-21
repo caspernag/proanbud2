@@ -213,7 +213,7 @@ export async function POST(request: NextRequest) {
   // Fetch user info for email
   const userResult = await admin.auth.admin.getUserById(userId);
   const user = userResult.data?.user;
-  const customerEmail = user?.email ?? "demo@proanbud.no";
+  const customerEmail = user?.email ?? "demo@prisbygg.no";
   const customerName =
     (user?.user_metadata?.full_name as string | undefined) ??
     (user?.user_metadata?.name as string | undefined) ??

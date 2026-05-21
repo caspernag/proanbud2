@@ -5,7 +5,7 @@ import { env } from "@/lib/env";
 const BYGGMAKKER_DEMO_EMAIL = "casper@nagsoftware.no";
 const PRISBYGG_CC_EMAIL = "post@proanbud.no";
 const FROM_ADDRESS = "Prisbygg <post@proanbud.no>";
-const TREBYGG_ORDER_FROM_ADDRESS = "Trebygg Strand AS <post@proanbud.no>";
+const TREBYGG_ORDER_FROM_ADDRESS = "Trebygg Strand AS <post@trebyggstrand.no>";
 const DEFAULT_PUBLIC_ORIGIN = "https://www.prisbygg.no";
 
 function getResend(): Resend | null {
@@ -223,7 +223,7 @@ function buildOrderHtml(p: OrderEmailPayload): string {
       </div>
 
       <p style="font-size:11px;color:#9ca3af;margin:0;padding-top:16px;border-top:1px solid #f3f4f6">
-        Bestilt ${fmtDate(p.paidAt)} via Prisbygg - Nag Software (org.nr. 936593127) &nbsp;·&nbsp; post@proanbud.no
+        Bestilt ${fmtDate(p.paidAt)} via Prisbygg - Nag Software (org.nr. 936593127) &nbsp;·&nbsp; post@prisbygg.no
         <br/>Prisene er min-priser fra prislisten ex. MVA og uten påslag.
       </p>
     </div>
@@ -399,7 +399,7 @@ function buildShopOrderHtml(p: ShopOrderEmailPayload): string {
 
           <tr>
             <td style="padding:18px 28px 24px;background:#fffefb;border-top:1px solid #ece6dc;font-size:11px;line-height:1.65;color:#a8a29e">
-              Prisbygg &nbsp;·&nbsp; post@proanbud.no<br/>
+              Prisbygg &nbsp;·&nbsp; post@prisbygg.no<br/>
               Betalt ${paidDate} via Stripe. Ordren kan følges på <a href="${orderUrl}" style="color:#163f2a;font-weight:700;text-decoration:none">ordresiden</a> (ingen innlogging nødvendig).
             </td>
           </tr>

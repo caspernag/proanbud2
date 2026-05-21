@@ -394,7 +394,7 @@ async function sendOrderEmailForMaterialOrder(
     }
 
     const user = userResult.data?.user;
-    const customerEmail = user?.email ?? "ukjent@proanbud.no";
+    const customerEmail = user?.email ?? "ukjent@prisbygg.no";
     const customerName =
       (user?.user_metadata?.full_name as string | undefined) ??
       (user?.user_metadata?.name as string | undefined) ??

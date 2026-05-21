@@ -5,7 +5,7 @@ import { env, hasSupabaseEnv } from "@/lib/env";
 
 const PUBLIC_PATHS = new Set(["/login", "/auth/callback"]);
 
-const PROTECTED_PREFIXES = ["/min-side", "/prosjekter", "/betaling", "/admin"];
+const PROTECTED_PREFIXES = ["/min-side", "/prosjekter", "/admin"];
 
 // ---------------------------------------------------------------------------
 // Per-IP rate limiting for sensitive POST endpoints.
