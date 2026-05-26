@@ -2,7 +2,7 @@
   "crons": [
     {
       "path": "/api/storefront-images/prewarm",
-      "schedule": "*/20 * * * *"
+      "schedule": "0 3 * * *"
     }
   ]
 }
