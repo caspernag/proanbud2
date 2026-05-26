@@ -9,6 +9,8 @@ type NewProjectDialogProps = {
   initialOpen?: boolean;
 };
 
+// NEW DEPLOYMENT
+
 const ACCEPTED_FILE_TYPES = [
   ".pdf",
   ".doc",
