@@ -3,22 +3,73 @@
 import Image from "next/image";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
+import { useEffect, useMemo, useState } from "react";
 
 import { SignOutButton } from "@/app/_components/sign-out-button";
+import { createSupabaseBrowserClient } from "@/lib/supabase/browser";
 
-type GlobalNavClientProps = {
-  isLoggedIn: boolean;
-  userEmail: string | null;
-};
-
-export function GlobalNavClient({ isLoggedIn, userEmail }: GlobalNavClientProps) {
+export function GlobalNavClient() {
   const pathname = usePathname();
+  const supabase = useMemo(() => createSupabaseBrowserClient(), []);
+  const [isLoggedIn, setIsLoggedIn] = useState(false);
+  const [userEmail, setUserEmail] = useState<string | null>(null);
 
   // Only show GlobalNav on explicit app paths; all other paths are storefront routes
   const APP_NAV_PATHS = ["/betaling", "/prosjekter"];
   const shouldShow = APP_NAV_PATHS.some(
     (p) => pathname === p || pathname.startsWith(p + "/")
   );
+
+  useEffect(() => {
+    let cancelled = false;
+
+    if (!shouldShow || !supabase) {
+      setIsLoggedIn(false);
+      setUserEmail(null);
+      return;
+    }
+
+    const syncUser = async () => {
+      try {
+        const {
+          data: { user },
+        } = await supabase.auth.getUser();
+
+        if (cancelled) {
+          return;
+        }
+
+        setIsLoggedIn(Boolean(user));
+        setUserEmail(user?.email ?? null);
+      } catch {
+        if (cancelled) {
+          return;
+        }
+
+        setIsLoggedIn(false);
+        setUserEmail(null);
+      }
+    };
+
+    void syncUser();
+
+    const {
+      data: { subscription },
+    } = supabase.auth.onAuthStateChange((_event, session) => {
+      if (cancelled) {
+        return;
+      }
+
+      setIsLoggedIn(Boolean(session?.user));
+      setUserEmail(session?.user?.email ?? null);
+    });
+
+    return () => {
+      cancelled = true;
+      subscription.unsubscribe();
+    };
+  }, [shouldShow, supabase]);
+
   if (!shouldShow) return null;
 
   const isDashboardRoute = pathname === "/min-side" || pathname.startsWith("/min-side/");
