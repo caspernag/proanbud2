@@ -1,8 +1,3 @@
 {
-  "crons": [
-    {
-      "path": "/api/storefront-images/prewarm",
-      "schedule": "0 3 * * *"
-    }
-  ]
+  "crons": []
 }

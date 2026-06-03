@@ -18,6 +18,18 @@ type StorefrontProductPageProps = {
   }>;
 };
 
+export async function generateMetadata({ params }: StorefrontProductPageProps) {
+  const { slug } = await params;
+  const product = await getStorefrontProductBySlug(slug);
+  if (!product) return { title: "Produkt ikke funnet – Prisbygg" };
+  return {
+    title: `${product.productName} – Prisbygg`,
+    description: product.description
+      ? product.description.slice(0, 155)
+      : `Kjøp ${product.productName} til partnerpris hos Prisbygg.`,
+  };
+}
+
 export default async function StorefrontProductPage({ params }: StorefrontProductPageProps) {
   const { slug } = await params;
   const cookieStore = await cookies();

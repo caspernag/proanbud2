@@ -49,6 +49,27 @@ type ShopOrderItemSummary = {
   line_total_nok: number;
 };
 
+type MaterialOrderSummary = {
+  id: string;
+  delivery_mode: string;
+  delivery_address_line1: string | null;
+  delivery_postal_code: string | null;
+  delivery_city: string | null;
+  subtotal_nok: number;
+  delivery_fee_nok: number;
+  vat_nok: number;
+  total_nok: number;
+};
+
+type MaterialOrderItemSummary = {
+  id: string;
+  product_name: string;
+  supplier_label: string;
+  quantity: number;
+  unit: string;
+  total_price_nok: number;
+};
+
 async function SuccessPageContent({ searchParams }: SuccessPageProps) {
   const resolvedSearchParams = await searchParams;
   let slug = resolvedSearchParams.slug?.trim() || "";
@@ -64,6 +85,8 @@ async function SuccessPageContent({ searchParams }: SuccessPageProps) {
   let shopOrderId = "";
   let shopOrder: ShopOrderSummary | null = null;
   let shopOrderItems: ShopOrderItemSummary[] = [];
+  let materialOrder: MaterialOrderSummary | null = null;
+  let materialOrderItems: MaterialOrderItemSummary[] = [];
 
   if (stripe && sessionId) {
     try {
@@ -111,6 +134,31 @@ async function SuccessPageContent({ searchParams }: SuccessPageProps) {
       shopOrderItems = await withResolvedShopOrderUnits(itemData ?? []);
       shopOrderSlug = shopOrder?.slug ?? shopOrderSlug;
       shopOrderToken = shopOrder?.public_token ?? shopOrderToken;
+    }
+  }
+
+  if (isMaterialOrder && materialOrderId) {
+    const supabase = createSupabaseAdminClient();
+    if (supabase) {
+      const { data: moData } = await supabase
+        .from("material_orders")
+        .select("id, delivery_mode, delivery_address_line1, delivery_postal_code, delivery_city, subtotal_nok, delivery_fee_nok, vat_nok, total_nok")
+        .eq("id", materialOrderId)
+        .maybeSingle<MaterialOrderSummary>();
+
+      const { data: moItems } = moData
+        ? await supabase
+            .from("material_order_items")
+            .select("id, product_name, supplier_label, quantity, unit, total_price_nok")
+            .eq("order_id", moData.id)
+            .eq("is_included", true)
+            .order("supplier_label")
+            .limit(6)
+            .returns<MaterialOrderItemSummary[]>()
+        : { data: [] as MaterialOrderItemSummary[] };
+
+      materialOrder = moData ?? null;
+      materialOrderItems = moItems ?? [];
     }
   }
 
@@ -209,16 +257,66 @@ async function SuccessPageContent({ searchParams }: SuccessPageProps) {
                     <SummaryRow label="Totalt" value={formatCurrency(shopOrder.total_nok)} strong />
                   </div>
                 </>
+              ) : materialOrder ? (
+                <>
+                  {materialOrder.delivery_mode === "delivery" && materialOrder.delivery_address_line1 ? (
+                    <SummaryRow label="Levering" value={`${materialOrder.delivery_address_line1}, ${materialOrder.delivery_postal_code ?? ""} ${materialOrder.delivery_city ?? ""}`} />
+                  ) : materialOrder.delivery_mode === "pickup" ? (
+                    <SummaryRow label="Levering" value="Henting i varehus" />
+                  ) : null}
+                  <div className="border-t border-stone-200 pt-3">
+                    <SummaryRow label="Varer" value={formatCurrency(materialOrder.subtotal_nok)} />
+                    <SummaryRow label="Frakt" value={materialOrder.delivery_fee_nok === 0 ? "Gratis" : formatCurrency(materialOrder.delivery_fee_nok)} />
+                    <SummaryRow label="MVA inkl." value={formatCurrency(materialOrder.vat_nok)} />
+                    <SummaryRow label="Totalt" value={formatCurrency(materialOrder.total_nok)} strong />
+                  </div>
+                </>
               ) : (
                 <>
                   <SummaryRow label="Betalingsstatus" value={paymentStatus} strong />
-                  <SummaryRow label="Referanse" value={isShopOrder ? shopOrderKey || "Ukjent ordre" : slug || materialOrderId || "Ukjent"} />
+                  <SummaryRow label="Referanse" value={slug || materialOrderId || "Ukjent"} />
                 </>
               )}
             </div>
           </aside>
         </div>
       </section>
+
+      {isMaterialOrder && materialOrderItems.length > 0 ? (
+        <section className="mt-5 grid gap-5 lg:grid-cols-[minmax(0,1fr)_360px]">
+          <div className="rounded-2xl border border-stone-200 bg-white p-5 shadow-sm">
+            <div className="flex items-center justify-between gap-3">
+              <h2 className="text-sm font-semibold text-stone-900">Varer i bestillingen</h2>
+              <Link
+                href={slug ? `/min-side/materiallister/${slug}/bestilling${materialOrderId ? `?order=${encodeURIComponent(materialOrderId)}&paid=1` : "?paid=1"}` : "/min-side/materiallister"}
+                className="text-xs font-semibold text-stone-600 hover:text-stone-950"
+              >
+                Se full bestilling
+              </Link>
+            </div>
+            <div className="mt-3 divide-y divide-stone-100">
+              {materialOrderItems.map((item) => (
+                <div key={item.id} className="flex items-center justify-between gap-4 py-3">
+                  <div className="min-w-0">
+                    <p className="truncate text-sm font-semibold text-stone-900">{item.product_name}</p>
+                    <p className="mt-0.5 text-xs text-stone-500">{item.supplier_label} · {item.quantity} {item.unit}</p>
+                  </div>
+                  <p className="shrink-0 text-sm font-semibold tabular-nums text-stone-900">{formatCurrency(item.total_price_nok)}</p>
+                </div>
+              ))}
+            </div>
+          </div>
+          <div className="rounded-2xl border border-stone-200 bg-white p-5 shadow-sm">
+            <h2 className="text-sm font-semibold text-stone-900">Neste steg</h2>
+            <div className="mt-4 space-y-3">
+              <StepLine done label="Betaling registrert" />
+              <StepLine done label="Ordren videresendes" />
+              <StepLine done={false} label="Behandles av leverandør" />
+              <StepLine done={false} label="Leveres til deg" />
+            </div>
+          </div>
+        </section>
+      ) : null}
 
       {isShopOrder ? (
         <section className="mt-5 grid gap-5 lg:grid-cols-[minmax(0,1fr)_360px]">

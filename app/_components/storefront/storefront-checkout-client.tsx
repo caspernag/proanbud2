@@ -273,7 +273,7 @@ export function StorefrontCheckoutClient({ paymentCancelled }: { paymentCancelle
 
   const subtotalNok = lineItems.reduce((sum, item) => sum + item.lineTotalNok, 0);
   const totalSavingsNok = lineItems.reduce((sum, item) => sum + item.savingsNok, 0);
-  const shippingNok = subtotalNok > 0 ? Math.max(199, Math.min(999, Math.round(subtotalNok * 0.035))) : 0;
+  const shippingNok = subtotalNok > 0 ? 499 : 0;
   const freeShipping = subtotalNok >= 5000;
   const effectiveShippingNok = freeShipping ? 0 : shippingNok;
   const totalNok = subtotalNok + effectiveShippingNok;

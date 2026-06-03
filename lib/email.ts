@@ -440,7 +440,7 @@ function buildByggmakkerShopOrderHtml(p: ByggmakkerShopOrderEmailPayload): strin
   const orderReference = p.orderSlug ?? `#${p.orderId.slice(0, 8).toUpperCase()}`;
   const orderDate = fmtSupplierOrderDate(p.paidAt);
   const shippingInstruction = p.customerNote?.trim() || "Ønsker levering.";
-  const logoUrl = "/trebygg-logo.png";
+  const logoUrl = "https://prisbygg.no/trebygg-logo.png";
   const itemRows = p.items
     .map(
       (item) => `

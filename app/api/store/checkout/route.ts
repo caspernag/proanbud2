@@ -295,7 +295,7 @@ function calculateShippingNok(subtotalNok: number) {
     return 0;
   }
 
-  return Math.max(199, Math.min(999, Math.round(subtotalNok * 0.035)));
+  return 499;
 }
 
 function resolveCheckoutOrigin(requestUrl: string) {

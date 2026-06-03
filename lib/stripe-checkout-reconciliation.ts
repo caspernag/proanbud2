@@ -433,7 +433,17 @@ async function sendOrderEmailForMaterialOrder(
       }),
     });
   } catch (error) {
-    console.error("[webhook] sendOrderEmailForMaterialOrder feilet:", error);
+    const message = error instanceof Error ? error.message : String(error);
+    console.error("[webhook] sendOrderEmailForMaterialOrder feilet:", message);
+    await supabase
+      .from("material_order_events")
+      .insert({
+        order_id: orderId,
+        user_id: userId,
+        event_type: "order_email_failed",
+        payload: { paidAt, error: message },
+      })
+      .catch(() => {});
   }
 }
 

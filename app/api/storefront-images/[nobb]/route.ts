@@ -66,8 +66,18 @@ function buildHitCacheControl() {
   return `public, max-age=${HIT_BROWSER_CACHE_SECONDS}, s-maxage=${HIT_CDN_CACHE_SECONDS}, stale-while-revalidate=${HIT_STALE_WHILE_REVALIDATE_SECONDS}, immutable`;
 }
 
+// Explicit Vercel CDN directive — without this Vercel treats dynamic API routes
+// as uncacheable regardless of Cache-Control / s-maxage.
+function buildHitCdnCacheControl() {
+  return `public, max-age=${HIT_CDN_CACHE_SECONDS}, stale-while-revalidate=${HIT_STALE_WHILE_REVALIDATE_SECONDS}, immutable`;
+}
+
 function buildMissCacheControl() {
   return `public, max-age=${MISS_BROWSER_CACHE_SECONDS}, s-maxage=${MISS_CDN_CACHE_SECONDS}, stale-while-revalidate=${MISS_STALE_WHILE_REVALIDATE_SECONDS}`;
+}
+
+function buildMissCdnCacheControl() {
+  return `public, max-age=${MISS_CDN_CACHE_SECONDS}, stale-while-revalidate=${MISS_STALE_WHILE_REVALIDATE_SECONDS}`;
 }
 
 type SourceName = "supabase" | "nobb-export" | "optimera" | "byggmakker" | "fallback";
@@ -589,6 +599,10 @@ export async function GET(req: Request, { params }: RouteContext) {
     const headers = new Headers({
       "Content-Type": output.contentType,
       "Cache-Control": buildHitCacheControl(),
+      // Vercel-specific: forces edge CDN to cache this response.
+      // s-maxage alone is insufficient for dynamic App Router routes.
+      "CDN-Cache-Control": buildHitCdnCacheControl(),
+      "Vercel-CDN-Cache-Control": buildHitCdnCacheControl(),
     });
     applyResponseDiagnosticsHeaders(headers, {
       source: output.source,
@@ -602,6 +616,8 @@ export async function GET(req: Request, { params }: RouteContext) {
   const headers = new Headers({
     Location: output.location,
     "Cache-Control": buildMissCacheControl(),
+    "CDN-Cache-Control": buildMissCdnCacheControl(),
+    "Vercel-CDN-Cache-Control": buildMissCdnCacheControl(),
   });
   applyResponseDiagnosticsHeaders(headers, {
     source: output.source,
