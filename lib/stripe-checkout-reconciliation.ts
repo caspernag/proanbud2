@@ -435,15 +435,18 @@ async function sendOrderEmailForMaterialOrder(
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error);
     console.error("[webhook] sendOrderEmailForMaterialOrder feilet:", message);
-    await supabase
-      .from("material_order_events")
-      .insert({
-        order_id: orderId,
-        user_id: userId,
-        event_type: "order_email_failed",
-        payload: { paidAt, error: message },
-      })
-      .catch(() => {});
+    try {
+      await supabase
+        .from("material_order_events")
+        .insert({
+          order_id: orderId,
+          user_id: userId,
+          event_type: "order_email_failed",
+          payload: { paidAt, error: message },
+        });
+    } catch {
+      // Best-effort log — don't throw
+    }
   }
 }
 
