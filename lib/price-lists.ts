@@ -44,6 +44,16 @@ export async function getPriceListProducts() {
   return getOpenAiVectorStorePriceListProducts();
 }
 
+/**
+ * Loads price-list products directly from the OpenAI vector store.
+ * This is the EXPENSIVE path (downloads + parses every vector-store file) and
+ * must only run inside the scheduled catalog-refresh job — never on the request
+ * path. The request path reads the snapshot from Postgres instead.
+ */
+export async function loadPriceListProductsFromVectorStore() {
+  return getOpenAiVectorStorePriceListProducts();
+}
+
 export async function getPriceListProductByNobb(nobbNumber: string) {
   const normalized = nobbNumber.trim();
 

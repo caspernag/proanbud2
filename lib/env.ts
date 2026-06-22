@@ -16,6 +16,7 @@ export const env = {
   openAiVectorStoreIdStorefront:
     process.env.OPENAI_VECTOR_STORE_ID_STOREFRONT ?? "vs_69e881362da8819196c25789a50dee3d",
   storefrontImageWarmupSecret: process.env.STOREFRONT_IMAGE_WARMUP_SECRET ?? process.env.CRON_SECRET ?? "",
+  cronSecret: process.env.CRON_SECRET ?? "",
   resendApiKey: process.env.RESEND_API_KEY ?? "",
   byggmakkerOrderEmail: process.env.BYGGMAKKER_ORDER_EMAIL ?? "",
   trebyggOrderFromEmail: process.env.TREBYGG_ORDER_FROM_EMAIL ?? "",
@@ -55,4 +56,8 @@ export function hasOpenAiEnv() {
 
 export function hasStorefrontImageWarmupSecret() {
   return Boolean(env.storefrontImageWarmupSecret);
+}
+
+export function hasCronSecret() {
+  return Boolean(env.cronSecret);
 }

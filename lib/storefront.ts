@@ -12,7 +12,7 @@ import {
   parseSalesUnitQuantity,
   priceForSalesUnit,
 } from "@/lib/product-unit-pricing";
-import { getPriceListProducts, type PriceListProduct } from "@/lib/price-lists";
+import { loadPriceListProductsFromVectorStore, type PriceListProduct } from "@/lib/price-lists";
 import { filterStorefrontBlacklistedProducts } from "@/lib/storefront-product-blacklist";
 import { buildStorefrontNobbImagePath, isAllowedStorefrontImageUrl, STORE_IMAGE_FALLBACK_URL } from "@/lib/storefront-image";
 import { scoreStorefrontProductForUserProfile } from "@/lib/storefront-user-profile";
@@ -20,11 +20,61 @@ import type {
   StorefrontProduct,
   StorefrontProductQuery,
   StorefrontProductQueryResult,
+  StorefrontProductSource,
   StorefrontSortOption,
 } from "@/lib/storefront-types";
+import {
+  STOREFRONT_CATALOG_META_TABLE,
+  STOREFRONT_PRODUCT_COLUMNS,
+  STOREFRONT_PRODUCTS_TABLE,
+  buildPublicStorefrontImageUrl,
+  getStorefrontCatalogClient,
+  rowToStorefrontProduct,
+  type StorefrontProductRow,
+} from "@/lib/storefront-catalog-db";
 import { slugify } from "@/lib/utils";
 
 const STOREFRONT_DEFAULT_PAGE_SIZE = 24;
+
+/**
+ * Broad category filters shown on the storefront landing/sidebar. Used both for
+ * rendering (page.tsx FEATURED_CATEGORIES) and for precomputing broad category
+ * counts in the catalog-refresh job. Each value is matched via
+ * matchesStorefrontCategory (name/category/alias substring).
+ */
+export const STOREFRONT_BROAD_CATEGORY_FILTERS = [
+  "Trelast",
+  "Plater",
+  "Isolasjon",
+  "Kledning",
+  "Tak",
+  "Maling",
+  "Festemidler",
+  "Verktøy",
+] as const;
+
+/**
+ * Lowercased haystack mirroring the fields matchesStorefrontCategory inspects,
+ * stored as storefront_products.search_text so category/alias filtering can run
+ * in SQL (ILIKE over a trigram index).
+ */
+export function buildStorefrontSearchText(
+  product: Pick<
+    StorefrontProduct,
+    "category" | "sectionTitle" | "productName" | "brand" | "description" | "technicalDetails"
+  >,
+): string {
+  return [
+    product.category,
+    product.sectionTitle,
+    product.productName,
+    product.brand,
+    product.description,
+    ...product.technicalDetails,
+  ]
+    .join(" ")
+    .toLowerCase();
+}
 
 const CATEGORY_FILTER_ALIASES: Record<string, string[]> = {
   isolasjon: [
@@ -66,10 +116,67 @@ export async function getStorefrontProducts() {
   "use cache";
   cacheLife("hours");
 
+  return loadStorefrontCatalogFromDb();
+}
+
+/**
+ * Reads the full catalog snapshot from Postgres (paginated). Cheap compared to
+ * the vector-store build; backs text search, AI matching, and featured deals.
+ */
+async function loadStorefrontCatalogFromDb(): Promise<{
+  products: StorefrontProduct[];
+  source: StorefrontProductSource;
+  vectorStoreId: string | null;
+}> {
+  const client = getStorefrontCatalogClient();
+  const vectorStoreId = env.openAiVectorStoreIdStorefront || null;
+
+  if (!client) {
+    return { products: [], source: "vector_store", vectorStoreId };
+  }
+
+  const products: StorefrontProduct[] = [];
+  const pageSize = 1000;
+
+  for (let from = 0; ; from += pageSize) {
+    const { data, error } = await client
+      .from(STOREFRONT_PRODUCTS_TABLE)
+      .select(STOREFRONT_PRODUCT_COLUMNS)
+      .order("popularity_score", { ascending: false })
+      .order("product_name", { ascending: true })
+      .range(from, from + pageSize - 1);
+
+    if (error) {
+      console.error("[storefront] kunne ikke lese katalog fra Postgres:", error.message);
+      break;
+    }
+    if (!data || data.length === 0) {
+      break;
+    }
+
+    products.push(...(data as unknown as StorefrontProductRow[]).map(rowToStorefrontProduct));
+
+    if (data.length < pageSize) {
+      break;
+    }
+  }
+
+  return { products, source: "vector_store", vectorStoreId };
+}
+
+/**
+ * Builds the fully merged, marked-up, VAT-inclusive, blacklisted catalog by
+ * reading the OpenAI vector store + price lists.
+ *
+ * EXPENSIVE: downloads and parses every vector-store file (twice — storefront +
+ * price-list shapes). Only call from the scheduled catalog-refresh job
+ * (lib/storefront-catalog-refresh.ts), never on the request path.
+ */
+export async function buildStorefrontCatalogFromVectorStore() {
   const [fromVectorStore, markups, priceListProducts] = await Promise.all([
     loadStorefrontProductsFromVectorStore(),
     getSupplierMarkups(),
-    getPriceListProducts(),
+    loadPriceListProductsFromVectorStore(),
   ]);
 
   if (fromVectorStore.products.length > 0) {
@@ -104,8 +211,66 @@ export async function getStorefrontProducts() {
   };
 }
 
+export type StorefrontCatalogMeta = {
+  categories: string[];
+  suppliers: string[];
+  categoryCounts: Record<string, number>;
+  supplierCounts: Record<string, number>;
+  broadCategoryCounts: Record<string, number>;
+  priceMin: number;
+  priceMax: number;
+  productCount: number;
+};
+
+const EMPTY_CATALOG_META: StorefrontCatalogMeta = {
+  categories: [],
+  suppliers: [],
+  categoryCounts: {},
+  supplierCounts: {},
+  broadCategoryCounts: {},
+  priceMin: 0,
+  priceMax: 0,
+  productCount: 0,
+};
+
+// Above this page size we read the full (cached) catalog and paginate in memory
+// instead of issuing a huge SQL range — used by the "in stock only" candidate
+// fetch which requests every matching product at once.
+const STOREFRONT_BULK_PAGE_SIZE = 200;
+
+/** Precomputed catalog facets (categories, counts, price range). Cached. */
+export async function getStorefrontCatalogMeta(): Promise<StorefrontCatalogMeta> {
+  "use cache";
+  cacheLife("hours");
+
+  const client = getStorefrontCatalogClient();
+  if (!client) {
+    return EMPTY_CATALOG_META;
+  }
+
+  const { data, error } = await client
+    .from(STOREFRONT_CATALOG_META_TABLE)
+    .select("*")
+    .eq("id", 1)
+    .maybeSingle();
+
+  if (error || !data) {
+    return EMPTY_CATALOG_META;
+  }
+
+  return {
+    categories: (data.categories as string[]) ?? [],
+    suppliers: (data.suppliers as string[]) ?? [],
+    categoryCounts: (data.category_counts as Record<string, number>) ?? {},
+    supplierCounts: (data.supplier_counts as Record<string, number>) ?? {},
+    broadCategoryCounts: (data.broad_category_counts as Record<string, number>) ?? {},
+    priceMin: typeof data.price_min === "number" ? data.price_min : 0,
+    priceMax: typeof data.price_max === "number" ? data.price_max : 0,
+    productCount: typeof data.product_count === "number" ? data.product_count : 0,
+  };
+}
+
 export async function queryStorefrontProducts(query: StorefrontProductQuery): Promise<StorefrontProductQueryResult> {
-  const { products, source, vectorStoreId } = await getStorefrontProducts();
   const q = (query.q ?? "").trim();
   const category = (query.category ?? "").trim();
   const supplier = (query.supplier ?? "").trim();
@@ -115,72 +280,163 @@ export async function queryStorefrontProducts(query: StorefrontProductQuery): Pr
   const pageSize = clampNumber(query.pageSize ?? STOREFRONT_DEFAULT_PAGE_SIZE, 1, pageSizeLimit);
   const page = Math.max(1, Math.round(query.page ?? 1));
 
+  const meta = await getStorefrontCatalogMeta();
+
+  // Text search keeps the carefully-tuned JS relevance scoring (over the cached
+  // full catalog). Bulk fetches (in-stock candidates) also go in-memory.
+  // Plain browsing is served by cheap paginated SQL.
+  if (q.length > 0 || pageSize > STOREFRONT_BULK_PAGE_SIZE) {
+    return queryStorefrontProductsInMemory({ q, category, supplier, sort, userProfile, page, pageSize }, meta);
+  }
+
+  return browseStorefrontProductsFromDb({ category, supplier, sort, page, pageSize }, meta);
+}
+
+type BrowseArgs = {
+  category: string;
+  supplier: string;
+  sort: StorefrontSortOption;
+  page: number;
+  pageSize: number;
+};
+
+type InMemoryArgs = BrowseArgs & {
+  q: string;
+  userProfile: StorefrontProductQuery["userProfile"];
+};
+
+async function browseStorefrontProductsFromDb(
+  args: BrowseArgs,
+  meta: StorefrontCatalogMeta,
+): Promise<StorefrontProductQueryResult> {
+  const client = getStorefrontCatalogClient();
+  if (!client) {
+    return buildQueryResult([], 0, 1, args.pageSize, meta);
+  }
+
+  let filter = client.from(STOREFRONT_PRODUCTS_TABLE).select(STOREFRONT_PRODUCT_COLUMNS, { count: "exact" });
+
+  if (args.supplier) {
+    filter = filter.eq("supplier_name", args.supplier);
+  }
+
+  const categoryNeedle = args.category.trim().toLowerCase();
+  if (categoryNeedle) {
+    // search_text is the lowercased haystack — mirrors matchesStorefrontCategory.
+    // PostgREST .or() uses `*` as the ILIKE wildcard.
+    const aliases = CATEGORY_FILTER_ALIASES[categoryNeedle] ?? [];
+    const terms = Array.from(new Set([categoryNeedle, ...aliases]));
+    filter = filter.or(terms.map((term) => `search_text.ilike.*${term}*`).join(","));
+  }
+
+  const { column, ascending } = browseSortColumn(args.sort);
+  let ordered = filter.order(column, { ascending });
+  if (column !== "product_name") {
+    ordered = ordered.order("product_name", { ascending: true });
+  }
+
+  const start = (args.page - 1) * args.pageSize;
+  const { data, error, count } = await ordered.range(start, start + args.pageSize - 1);
+
+  if (error) {
+    console.error("[storefront] browse-spørring feilet:", error.message);
+    return buildQueryResult([], 0, 1, args.pageSize, meta);
+  }
+
+  const total = count ?? 0;
+  const totalPages = Math.max(1, Math.ceil(total / args.pageSize));
+  const safePage = Math.min(args.page, totalPages);
+  const items = ((data as unknown as StorefrontProductRow[]) ?? []).map(rowToStorefrontProduct);
+
+  return buildQueryResult(items, total, safePage, args.pageSize, meta);
+}
+
+async function queryStorefrontProductsInMemory(
+  args: InMemoryArgs,
+  meta: StorefrontCatalogMeta,
+): Promise<StorefrontProductQueryResult> {
+  const { products } = await getStorefrontProducts();
+
   const filtered = products.filter((product) => {
-    if (category && !matchesStorefrontCategory(product, category)) {
+    if (args.category && !matchesStorefrontCategory(product, args.category)) {
       return false;
     }
-
-    if (supplier && product.supplierName !== supplier) {
+    if (args.supplier && product.supplierName !== args.supplier) {
       return false;
     }
-
-    if (q.length > 0 && scoreStorefrontProduct(product, q) <= 0) {
+    if (args.q.length > 0 && scoreStorefrontProduct(product, args.q) <= 0) {
       return false;
     }
-
     return true;
   });
 
-  const sorted = sortStorefrontProducts(filtered, sort, q, userProfile);
+  const sorted = sortStorefrontProducts(filtered, args.sort, args.q, args.userProfile);
   const total = sorted.length;
+  const totalPages = Math.max(1, Math.ceil(total / args.pageSize));
+  const safePage = Math.min(args.page, totalPages);
+  const start = (safePage - 1) * args.pageSize;
+  const items = sorted.slice(start, start + args.pageSize);
+
+  return buildQueryResult(items, total, safePage, args.pageSize, meta);
+}
+
+function browseSortColumn(sort: StorefrontSortOption): { column: string; ascending: boolean } {
+  switch (sort) {
+    case "price_asc":
+      return { column: "unit_price_nok", ascending: true };
+    case "price_desc":
+      return { column: "unit_price_nok", ascending: false };
+    case "name_asc":
+      return { column: "product_name", ascending: true };
+    case "newest":
+      return { column: "last_updated", ascending: false };
+    default:
+      // "relevance" with no query → precomputed popularity ranking
+      return { column: "popularity_score", ascending: false };
+  }
+}
+
+function buildQueryResult(
+  items: StorefrontProduct[],
+  total: number,
+  page: number,
+  pageSize: number,
+  meta: StorefrontCatalogMeta,
+): StorefrontProductQueryResult {
   const totalPages = Math.max(1, Math.ceil(total / pageSize));
-  const safePage = Math.min(page, totalPages);
-  const start = (safePage - 1) * pageSize;
-  const items = sorted.slice(start, start + pageSize);
-
-  const categoryCounts: Record<string, number> = {};
-  const supplierCounts: Record<string, number> = {};
-  let minPrice = Number.POSITIVE_INFINITY;
-  let maxPrice = 0;
-  for (const product of products) {
-    if (product.category) {
-      categoryCounts[product.category] = (categoryCounts[product.category] ?? 0) + 1;
-    }
-    if (product.supplierName) {
-      supplierCounts[product.supplierName] = (supplierCounts[product.supplierName] ?? 0) + 1;
-    }
-    if (product.unitPriceNok > 0) {
-      if (product.unitPriceNok < minPrice) minPrice = product.unitPriceNok;
-      if (product.unitPriceNok > maxPrice) maxPrice = product.unitPriceNok;
-    }
-  }
-  if (!Number.isFinite(minPrice)) {
-    minPrice = 0;
-  }
-
   return {
     items,
     total,
-    page: safePage,
+    page,
     pageSize,
     totalPages,
-    categories: Array.from(new Set(products.map((product) => product.category))).sort((left, right) =>
-      left.localeCompare(right, "nb-NO"),
-    ),
-    suppliers: Array.from(new Set(products.map((product) => product.supplierName))).sort((left, right) =>
-      left.localeCompare(right, "nb-NO"),
-    ),
-    categoryCounts,
-    supplierCounts,
-    priceRange: { min: Math.floor(minPrice), max: Math.ceil(maxPrice) },
-    source,
-    vectorStoreId,
+    categories: meta.categories,
+    suppliers: meta.suppliers,
+    categoryCounts: meta.categoryCounts,
+    supplierCounts: meta.supplierCounts,
+    priceRange: { min: meta.priceMin, max: meta.priceMax },
+    source: "vector_store",
+    vectorStoreId: env.openAiVectorStoreIdStorefront || null,
   };
 }
 
 export async function getStorefrontProductBySlug(slug: string) {
-  const { products } = await getStorefrontProducts();
-  return products.find((product) => product.slug === slug) ?? null;
+  const client = getStorefrontCatalogClient();
+  if (!client) {
+    return null;
+  }
+
+  const { data, error } = await client
+    .from(STOREFRONT_PRODUCTS_TABLE)
+    .select(STOREFRONT_PRODUCT_COLUMNS)
+    .eq("slug", slug)
+    .maybeSingle();
+
+  if (error || !data) {
+    return null;
+  }
+
+  return rowToStorefrontProduct(data as unknown as StorefrontProductRow);
 }
 
 export async function getStorefrontFeaturedDeals(limit = 6): Promise<StorefrontProduct[]> {
@@ -201,9 +457,21 @@ export async function getStorefrontProductsByIds(ids: string[]) {
     return [] as StorefrontProduct[];
   }
 
-  const { products } = await getStorefrontProducts();
-  const wanted = new Set(ids);
-  return products.filter((product) => wanted.has(product.id));
+  const client = getStorefrontCatalogClient();
+  if (!client) {
+    return [] as StorefrontProduct[];
+  }
+
+  const { data, error } = await client
+    .from(STOREFRONT_PRODUCTS_TABLE)
+    .select(STOREFRONT_PRODUCT_COLUMNS)
+    .in("id", ids);
+
+  if (error || !data) {
+    return [] as StorefrontProduct[];
+  }
+
+  return (data as unknown as StorefrontProductRow[]).map(rowToStorefrontProduct);
 }
 
 export async function getStorefrontProductsByNobb(nobbNumbers: string[]): Promise<StorefrontProduct[]> {
@@ -211,18 +479,43 @@ export async function getStorefrontProductsByNobb(nobbNumbers: string[]): Promis
     return [];
   }
 
-  const { products } = await getStorefrontProducts();
+  const client = getStorefrontCatalogClient();
+  if (!client) {
+    return [];
+  }
+
+  const { data, error } = await client
+    .from(STOREFRONT_PRODUCTS_TABLE)
+    .select(STOREFRONT_PRODUCT_COLUMNS)
+    .in("nobb_number", nobbNumbers);
+
+  if (error || !data) {
+    return [];
+  }
+
   const wantedOrder = new Map(nobbNumbers.map((n, i) => [n, i]));
-  return products
+  return (data as unknown as StorefrontProductRow[])
+    .map(rowToStorefrontProduct)
     .filter((p) => wantedOrder.has(p.nobbNumber))
     .sort((a, b) => (wantedOrder.get(a.nobbNumber) ?? 99) - (wantedOrder.get(b.nobbNumber) ?? 99));
 }
 
-export function getStorefrontImageUrl(product: Pick<StorefrontProduct, "imageUrl" | "nobbNumber">): string {
+export function getStorefrontImageUrl(
+  product: Pick<StorefrontProduct, "imageUrl" | "imagePath" | "nobbNumber">,
+): string {
+  // Cached object in the public bucket → served directly by the Supabase CDN.
+  // This bypasses the /api/storefront-images proxy (no storage.search / objects
+  // lookup / function egress) for the ~thousands of already-cached images.
+  if (product.imagePath) {
+    return buildPublicStorefrontImageUrl(product.imagePath);
+  }
+
   if (product.imageUrl && isAllowedStorefrontImageUrl(product.imageUrl)) {
     return product.imageUrl;
   }
 
+  // No cached image yet → the proxy resolves + warms it (and serves a fallback
+  // redirect). Subsequent refreshes pick up the cached path.
   if (product.nobbNumber) {
     return buildStorefrontNobbImagePath(product.nobbNumber);
   }
@@ -764,7 +1057,7 @@ const CATEGORY_POPULARITY: Record<string, number> = {
   "Generelt": 20,
 };
 
-function popularityScore(
+export function popularityScore(
   product: StorefrontProduct,
   userProfile?: StorefrontProductQuery["userProfile"],
 ) {

@@ -22,6 +22,8 @@ export type StorefrontProduct = {
   ean?: string;
   datasheetUrl?: string;
   imageUrl?: string;
+  /** Path of the cached image object inside the public `material-images` bucket (CDN-served). */
+  imagePath?: string;
   technicalDetails: string[];
   quantitySuggestion: string;
   quantityReason: string;

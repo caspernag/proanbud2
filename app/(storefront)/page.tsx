@@ -10,10 +10,9 @@ import { StorefrontProductImage } from "@/app/_components/storefront/storefront-
 import { StorefrontViewControls } from "@/app/_components/storefront/storefront-view-controls";
 import { getByggmakkerAvailabilityBatch, type ByggmakkerAvailability } from "@/lib/byggmakker-availability";
 import {
+  getStorefrontCatalogMeta,
   getStorefrontImageUrl,
-  getStorefrontProducts,
   getStorefrontProductsByNobb,
-  matchesStorefrontCategory,
   queryStorefrontProducts,
 } from "@/lib/storefront";
 import { parseStorefrontUserProfileCookie, STOREFRONT_USER_PROFILE_COOKIE } from "@/lib/storefront-user-profile";
@@ -139,20 +138,15 @@ export default async function StorefrontPage({ searchParams }: StorefrontPagePro
 
   const hasFilters = Boolean(q || category || supplier || inStockOnly);
   const showLanding = !hasFilters && result.page === 1;
-  // Always fetch all products (cached) – used for landing tiles, deals, and accurate broad counts
-  const { products: allProducts } = await getStorefrontProducts();
+  // Precomputed facets — broad category counts live in storefront_catalog_meta
+  // (refreshed by the catalog job), so we never scan the full catalog per request.
+  const meta = await getStorefrontCatalogMeta();
+  const broadCategoryCounts = meta.broadCategoryCounts;
   const featuredDeals = showLanding ? await getStorefrontProductsByNobb(MOST_POPULAR_NOBB) : [];
+  // Representative tile images come from the already-loaded popular deals — no extra full-catalog read.
   const featuredCategories = showLanding
-    ? resolveFeaturedCategories(result.categories, allProducts)
+    ? resolveFeaturedCategories(result.categories, featuredDeals)
     : [];
-
-  // Accurate broad category counts: run the same matching logic used by the actual filter
-  const broadCategoryCounts: Record<string, number> = {};
-  for (const group of FEATURED_CATEGORIES) {
-    broadCategoryCounts[group.filter] = allProducts.filter(
-      (p) => matchesStorefrontCategory(p, group.filter),
-    ).length;
-  }
 
   const stockFilterCandidates = inStockOnly
     ? await queryStorefrontProducts({
