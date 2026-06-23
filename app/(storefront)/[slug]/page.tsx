@@ -9,6 +9,7 @@ import { StorefrontProfileTracker } from "@/app/_components/storefront/storefron
 import { StorefrontProductImage } from "@/app/_components/storefront/storefront-product-image";
 import { getByggmakkerAvailability } from "@/lib/byggmakker-availability";
 import { getStorefrontImageUrl, getStorefrontProductBySlug, queryStorefrontProducts } from "@/lib/storefront";
+import { departmentForCategory } from "@/lib/storefront-taxonomy";
 import { parseStorefrontUserProfileCookie, STOREFRONT_USER_PROFILE_COOKIE } from "@/lib/storefront-user-profile";
 import { formatCurrency } from "@/lib/utils";
 
@@ -53,6 +54,8 @@ export default async function StorefrontProductPage({ params }: StorefrontProduc
   const byggmakkerAvailability =
     isByggmakkerProduct && product.ean ? await getByggmakkerAvailability(product.ean) : null;
 
+  const department = departmentForCategory(product.category);
+  const showLeafCrumb = department.label.toLowerCase() !== product.category.toLowerCase();
   const hasDiscount = product.listPriceNok > product.unitPriceNok;
   const discountPct = hasDiscount
     ? Math.round(((product.listPriceNok - product.unitPriceNok) / product.listPriceNok) * 100)
@@ -74,11 +77,22 @@ export default async function StorefrontProductPage({ params }: StorefrontProduc
         </Link>
         <span className="text-stone-400">›</span>
         <Link
-          href={`/?category=${encodeURIComponent(product.category)}`}
+          href={`/?category=${encodeURIComponent(department.slug)}`}
           className="font-medium text-stone-700 hover:text-[#15452d]"
         >
-          {product.category}
+          {department.label}
         </Link>
+        {showLeafCrumb ? (
+          <>
+            <span className="text-stone-400">›</span>
+            <Link
+              href={`/?category=${encodeURIComponent(product.category)}`}
+              className="font-medium text-stone-700 hover:text-[#15452d]"
+            >
+              {product.category}
+            </Link>
+          </>
+        ) : null}
         <span className="text-stone-400">›</span>
         <span className="truncate text-stone-500">{product.productName}</span>
       </nav>

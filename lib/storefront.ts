@@ -16,6 +16,7 @@ import { loadPriceListProductsFromVectorStore, type PriceListProduct } from "@/l
 import { filterStorefrontBlacklistedProducts } from "@/lib/storefront-product-blacklist";
 import { buildStorefrontNobbImagePath, isAllowedStorefrontImageUrl, STORE_IMAGE_FALLBACK_URL } from "@/lib/storefront-image";
 import { scoreStorefrontProductForUserProfile } from "@/lib/storefront-user-profile";
+import { resolveStorefrontCategoryFilter } from "@/lib/storefront-taxonomy";
 import type {
   StorefrontProduct,
   StorefrontProductQuery,
@@ -75,42 +76,6 @@ export function buildStorefrontSearchText(
     .join(" ")
     .toLowerCase();
 }
-
-const CATEGORY_FILTER_ALIASES: Record<string, string[]> = {
-  isolasjon: [
-    "isolasjon",
-    "glava",
-    "rockwool",
-    "mineralull",
-    "jackofoam",
-    "jackopor",
-    "cellplast",
-    "eps",
-    "xps",
-    "flexi a-plate",
-    "i-plate",
-    "markplate",
-    "vintermatte",
-    "lydreduksjonsbøyle",
-  ],
-  trelast: [
-    "konstruksjonsvirke",
-    "trelast",
-    "limtre",
-    "lekt",
-    "plank",
-    "bord",
-    "terrassebord",
-  ],
-  plater: [
-    "gipsplater",
-    "gips og plater",
-    "osb",
-    "sponplater",
-    "kryssfiner",
-    "hardbordplater",
-  ],
-};
 
 export async function getStorefrontProducts() {
   "use cache";
@@ -320,13 +285,16 @@ async function browseStorefrontProductsFromDb(
     filter = filter.eq("supplier_name", args.supplier);
   }
 
-  const categoryNeedle = args.category.trim().toLowerCase();
-  if (categoryNeedle) {
-    // search_text is the lowercased haystack — mirrors matchesStorefrontCategory.
-    // PostgREST .or() uses `*` as the ILIKE wildcard.
-    const aliases = CATEGORY_FILTER_ALIASES[categoryNeedle] ?? [];
-    const terms = Array.from(new Set([categoryNeedle, ...aliases]));
-    filter = filter.or(terms.map((term) => `search_text.ilike.*${term}*`).join(","));
+  // Resolve the URL value to an exact set of leaf categories (department or
+  // single leaf) and filter on the indexed `category` column. This replaces the
+  // old substring/ILIKE matching, which mis-filed products (e.g. "tak" leaking
+  // into "kontakt"/"taklist").
+  const categoryFilter = resolveStorefrontCategoryFilter(args.category);
+  if (categoryFilter) {
+    filter =
+      categoryFilter.leaves.length === 1
+        ? filter.eq("category", categoryFilter.leaves[0])
+        : filter.in("category", categoryFilter.leaves);
   }
 
   const { column, ascending } = browseSortColumn(args.sort);
@@ -1340,29 +1308,15 @@ function fieldMatchesToken(fieldValue: string, token: string) {
 }
 
 export function matchesStorefrontCategory(product: StorefrontProduct, category: string) {
-  const needle = category.trim().toLowerCase();
+  const filter = resolveStorefrontCategoryFilter(category);
 
-  if (!needle) {
+  if (!filter) {
     return true;
   }
 
-  const haystack = [
-    product.category,
-    product.sectionTitle,
-    product.productName,
-    product.brand,
-    product.description,
-    ...product.technicalDetails,
-  ]
-    .join(" ")
-    .toLowerCase();
-
-  if (haystack.includes(needle)) {
-    return true;
-  }
-
-  const aliases = CATEGORY_FILTER_ALIASES[needle] ?? [];
-  return aliases.some((alias) => haystack.includes(alias));
+  // Exact membership against the canonical leaf categories — no substring leak.
+  const productCategory = product.category.trim().toLowerCase();
+  return filter.leaves.some((leaf) => leaf.trim().toLowerCase() === productCategory);
 }
 
 function normalizeStorefrontSort(value?: string): StorefrontSortOption {

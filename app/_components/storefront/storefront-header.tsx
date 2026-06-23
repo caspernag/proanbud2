@@ -7,19 +7,19 @@ import { useEffect, useMemo, useRef, useState } from "react";
 
 import { useStorefront } from "@/app/_components/storefront/storefront-provider";
 
-// Ekte kategorier fra prislistens Varekategori-felt. Bruker /?category=... (filter),
-// ikke /?q=... (søk). Filteret gjør case-insensitive includes-match, så korte navn
-// som "Verktøy" og "Tak" treffer flere nærliggende kategorier (Elverktøy, Håndverktøy;
-// Takbeslag, Taktekking) uten å miste presisjon.
+// Hurtignavigasjon til hovedkategoriene (avdelinger). `/?category=<slug>` slår
+// opp avdelingen i lib/storefront-taxonomy og filtrerer eksakt på de underliggende
+// varegruppene – ingen upresis substring-matching. Hele kategoritreet finnes i
+// sidefilteret og på forsiden; her viser vi et konsist utvalg.
 const TOP_CATEGORIES: Array<{ label: string; href: string; highlight?: boolean }> = [
-  { label: "Trelast", href: "/?category=Trelast" },
-  { label: "Plater", href: "/?category=Plater" },
-  { label: "Isolasjon", href: "/?category=Isolasjon" },
-  { label: "Kledning", href: "/?category=Kledning" },
-  { label: "Tak", href: "/?category=Tak" },
-  { label: "Maling", href: "/?category=Maling" },
-  { label: "Festemidler", href: "/?category=Festemidler" },
-  { label: "Verktøy", href: "/?category=Verkt%C3%B8y" },
+  { label: "Festemidler", href: "/?category=festemidler-og-beslag" },
+  { label: "Verktøy", href: "/?category=verktoy-og-maskiner" },
+  { label: "Maling", href: "/?category=maling-og-overflate" },
+  { label: "Lim & tetting", href: "/?category=lim-fuge-og-tetting" },
+  { label: "Tak", href: "/?category=tak-og-takrenner" },
+  { label: "Trelast", href: "/?category=trelast-og-byggevarer" },
+  { label: "Gulv & list", href: "/?category=gulv-og-listverk" },
+  { label: "Dør & vindu", href: "/?category=dor-og-vindu" },
 ];
 
 const QUICK_SEARCHES = ["gipsplate", "terrassebord", "48x98", "isolasjon"];

@@ -16,6 +16,13 @@ import {
   queryStorefrontProducts,
 } from "@/lib/storefront";
 import { parseStorefrontUserProfileCookie, STOREFRONT_USER_PROFILE_COOKIE } from "@/lib/storefront-user-profile";
+import {
+  computeDepartmentCounts,
+  leafCategoriesForDepartment,
+  orderedDepartments,
+  resolveStorefrontCategoryFilter,
+  type StorefrontCategoryFilter,
+} from "@/lib/storefront-taxonomy";
 import type { StorefrontProduct, StorefrontSortOption } from "@/lib/storefront-types";
 import { formatCurrency } from "@/lib/utils";
 
@@ -57,64 +64,6 @@ const MOST_POPULAR_NOBB = [
   "60743886", // KONSTRUKSJONSKRUE WAF 6X40
 ];
 
-// Curated visual categories shown on the landing hero. `filter` is the URL param,
-// `match` sammenlignes case-insensitivt med substring mot de faktiske kategoriene.
-const FEATURED_CATEGORIES: Array<{
-  label: string;
-  filter: string;
-  match: string[];
-  tone: string;
-}> = [
-  {
-    label: "Trelast",
-    filter: "Trelast",
-    match: ["konstruksjonsvirke", "trelast", "limtre"],
-    tone: "from-[#c48a4d] to-[#8a5c2b]",
-  },
-  {
-    label: "Plater",
-    filter: "Plater",
-    match: ["plater", "gips", "osb", "spon"],
-    tone: "from-[#7c9474] to-[#3f5c3a]",
-  },
-  {
-    label: "Isolasjon",
-    filter: "Isolasjon",
-    match: ["isolasjon"],
-    tone: "from-[#d9b779] to-[#b08a42]",
-  },
-  {
-    label: "Kledning & Fasade",
-    filter: "Kledning",
-    match: ["kledning", "fasade"],
-    tone: "from-[#4a7fa7] to-[#234a6c]",
-  },
-  {
-    label: "Tak",
-    filter: "Tak",
-    match: ["tak"],
-    tone: "from-[#5c6b57] to-[#2e3a2a]",
-  },
-  {
-    label: "Maling & Overflate",
-    filter: "Maling",
-    match: ["maling", "overflatebehandling"],
-    tone: "from-[#b15b47] to-[#7a3523]",
-  },
-  {
-    label: "Festemidler",
-    filter: "Festemidler",
-    match: ["festemidler"],
-    tone: "from-[#8796a6] to-[#445566]",
-  },
-  {
-    label: "Verktøy",
-    filter: "Verktøy",
-    match: ["verktøy"],
-    tone: "from-[#8a6a3b] to-[#4d3818]",
-  },
-];
-
 export default async function StorefrontPage({ searchParams }: StorefrontPageProps) {
   const resolvedSearchParams = await searchParams;
   const cookieStore = await cookies();
@@ -138,15 +87,16 @@ export default async function StorefrontPage({ searchParams }: StorefrontPagePro
 
   const hasFilters = Boolean(q || category || supplier || inStockOnly);
   const showLanding = !hasFilters && result.page === 1;
-  // Precomputed facets — broad category counts live in storefront_catalog_meta
+  // Precomputed facets — category counts live in storefront_catalog_meta
   // (refreshed by the catalog job), so we never scan the full catalog per request.
   const meta = await getStorefrontCatalogMeta();
-  const broadCategoryCounts = meta.broadCategoryCounts;
+  // Department counts are derived from the per-leaf category counts (no migration,
+  // always in sync). Ordering is by live count so the tile/menu order adapts to
+  // whatever supplier file is loaded.
+  const departmentCounts = computeDepartmentCounts(meta.categoryCounts);
+  const departments = orderedDepartments(departmentCounts);
+  const activeFilter = resolveStorefrontCategoryFilter(category);
   const featuredDeals = showLanding ? await getStorefrontProductsByNobb(MOST_POPULAR_NOBB) : [];
-  // Representative tile images come from the already-loaded popular deals — no extra full-catalog read.
-  const featuredCategories = showLanding
-    ? resolveFeaturedCategories(result.categories, featuredDeals)
-    : [];
 
   const stockFilterCandidates = inStockOnly
     ? await queryStorefrontProducts({
@@ -196,13 +146,13 @@ export default async function StorefrontPage({ searchParams }: StorefrontPagePro
       />
       {showLanding ? (
         <>
-          {featuredCategories.length > 0 ? (
-            <CategoryTiles tiles={featuredCategories} counts={broadCategoryCounts} />
-          ) : null}
           {featuredDeals.length > 0 ? (
             <Suspense fallback={<DealsStrip deals={featuredDeals} stockByEan={EMPTY_STOCK_MAP} />}>
               <StockedDealsStrip deals={featuredDeals} />
             </Suspense>
+          ) : null}
+          {departments.length > 0 ? (
+            <CategoryTiles departments={departments} />
           ) : null}
           <div className="hidden sm:block"><ValuePropsBand /></div>
         </>
@@ -218,9 +168,9 @@ export default async function StorefrontPage({ searchParams }: StorefrontPagePro
             sort={sort}
             inStockOnly={inStockOnly}
             cols={cols}
-            categories={result.categories}
-            categoryCounts={result.categoryCounts}
-            broadCategoryCounts={broadCategoryCounts}
+            departments={departments}
+            categoryCounts={meta.categoryCounts}
+            activeFilter={activeFilter}
             priceRange={result.priceRange}
           />
 
@@ -241,9 +191,9 @@ export default async function StorefrontPage({ searchParams }: StorefrontPagePro
                 sort={sort}
                 inStockOnly={inStockOnly}
                 cols={cols}
-                categories={result.categories}
-                categoryCounts={result.categoryCounts}
-                broadCategoryCounts={broadCategoryCounts}
+                departments={departments}
+                categoryCounts={meta.categoryCounts}
+                activeFilter={activeFilter}
                 priceRange={result.priceRange}
               />
             </StorefrontMobileControls>
@@ -252,7 +202,7 @@ export default async function StorefrontPage({ searchParams }: StorefrontPagePro
           <div className="flex flex-col gap-3 rounded-xl border border-stone-200 bg-white p-3 shadow-[0_8px_20px_rgba(32,25,15,0.04)] sm:flex-row sm:items-center sm:justify-between sm:p-4">
             <div className="min-w-0">
               <p className="text-sm font-semibold text-stone-900">
-                {q ? `Søkeresultat for "${q}"` : category || supplier || "Alle produkter"}
+                {q ? `Søkeresultat for "${q}"` : activeFilter ? activeFilter.label : supplier || "Alle produkter"}
               </p>
               <p className="text-sm text-stone-500">
                 {filteredTotal.toLocaleString("nb-NO")} produkter
@@ -265,7 +215,7 @@ export default async function StorefrontPage({ searchParams }: StorefrontPagePro
           </div>
 
           {hasFilters ? (
-            <ActiveFilterChips q={q} category={category} supplier={supplier} sort={sort} inStockOnly={inStockOnly} cols={cols} />
+            <ActiveFilterChips q={q} category={category} categoryLabel={activeFilter?.label ?? category} supplier={supplier} sort={sort} inStockOnly={inStockOnly} cols={cols} />
           ) : null}
 
           {displayItems.length === 0 ? (
@@ -312,28 +262,30 @@ export default async function StorefrontPage({ searchParams }: StorefrontPagePro
   );
 }
 
+const POPULAR_CATEGORY_LIMIT = 6;
+
 function CategoryTiles({
-  tiles,
-  counts,
+  departments,
 }: {
-  tiles: Array<{ label: string; category: string; tone: string; imageUrl: string }>;
-  counts: Record<string, number>;
+  departments: Array<{ slug: string; label: string; icon: string; count: number }>;
 }) {
+  const popular = departments.slice(0, POPULAR_CATEGORY_LIMIT);
+
   return (
     <section id="kategorier">
       <div className="mb-3 flex items-end justify-between">
         <div>
           <p className="text-[11px] font-bold uppercase tracking-[0.16em] text-[#15452d]">Kategorier</p>
-          <h2 className="mt-1 text-xl font-semibold text-stone-900">Finn riktig varegruppe</h2>
+          <h2 className="mt-1 text-lg font-semibold text-stone-900 sm:text-xl">Populære kategorier</h2>
         </div>
-        <Link href="/?sort=price_asc" className="hidden text-sm font-semibold text-[#15452d] hover:underline sm:inline">
+        <Link href="/?sort=relevance" className="hidden text-sm font-semibold text-[#15452d] hover:underline sm:inline">
           Alle varer →
         </Link>
       </div>
 
-      <div className="grid gap-2 sm:grid-cols-2 lg:grid-cols-4">
-        {tiles.map((tile) => (
-          <CategoryTile key={tile.label} tile={tile} count={counts[tile.category] ?? 0} />
+      <div className="grid grid-cols-2 gap-2 sm:grid-cols-3 lg:grid-cols-6">
+        {popular.map((department) => (
+          <CategoryTile key={department.slug} department={department} />
         ))}
       </div>
     </section>
@@ -341,42 +293,64 @@ function CategoryTiles({
 }
 
 function CategoryTile({
-  tile,
-  count,
+  department,
 }: {
-  tile: { label: string; category: string; tone: string; imageUrl: string };
-  count: number;
+  department: { slug: string; label: string; icon: string; count: number };
 }) {
   return (
     <Link
-      href={`/?category=${encodeURIComponent(tile.category)}`}
-      className="group grid min-h-[126px] grid-cols-[minmax(0,1fr)_112px] overflow-hidden rounded-md border border-stone-200 bg-white shadow-[0_3px_12px_rgba(32,25,15,0.03)] transition hover:border-[#15452d] hover:shadow-[0_8px_18px_rgba(21,69,45,0.08)]"
+      href={`/?category=${encodeURIComponent(department.slug)}`}
+      className="group flex items-center gap-3 overflow-hidden rounded-md border border-stone-200 bg-white p-3 shadow-[0_3px_12px_rgba(32,25,15,0.03)] transition hover:border-[#15452d] hover:shadow-[0_8px_18px_rgba(21,69,45,0.08)] sm:flex-col sm:items-start sm:gap-2 sm:p-3.5"
     >
-      <div className="flex flex-col justify-between p-3.5">
-        <div>
-          <span className="inline-flex items-center rounded-sm bg-stone-100 px-2 py-0.5 text-[10px] font-semibold uppercase tracking-[0.12em] text-stone-600">
-            {count} varer
-          </span>
-          <p className="mt-2 text-base font-semibold leading-tight text-stone-950">
-            {tile.label}
-          </p>
-        </div>
-        <span className="mt-4 inline-flex items-center gap-1.5 text-sm font-semibold text-[#15452d]">
-          Åpne kategori
-          <svg viewBox="0 0 16 16" fill="currentColor" className="h-3.5 w-3.5 transition group-hover:translate-x-0.5"><path d="M3 8h9.59L9 4.41 10.41 3l6 6-6 6L9 13.59 12.59 10H3z" /></svg>
-        </span>
-      </div>
-      <div className="flex items-center justify-center border-l border-stone-100 bg-stone-50 p-2">
-        {/* eslint-disable-next-line @next/next/no-img-element */}
-        <img
-          src={tile.imageUrl}
-          alt=""
-          className="h-full max-h-28 w-full object-contain transition duration-300 group-hover:scale-[1.04]"
-          loading="lazy"
-        />
-      </div>
+      <span className="flex h-10 w-10 shrink-0 items-center justify-center rounded-md bg-[#15452d]/8 text-[#15452d] transition group-hover:bg-[#15452d]/12">
+        <DepartmentGlyph slug={department.slug} />
+      </span>
+      <span className="min-w-0">
+        <span className="block text-sm font-semibold leading-tight text-stone-950 group-hover:text-[#15452d]">{department.label}</span>
+        <span className="mt-0.5 block text-xs font-medium text-stone-500">{department.count} varer</span>
+      </span>
     </Link>
   );
+}
+
+/** Compact inline icon per department (no icon-library dependency). */
+function DepartmentGlyph({ slug }: { slug: string }) {
+  const common = {
+    viewBox: "0 0 24 24",
+    fill: "none",
+    stroke: "currentColor",
+    strokeWidth: 1.7,
+    strokeLinecap: "round" as const,
+    strokeLinejoin: "round" as const,
+    className: "h-5 w-5",
+    "aria-hidden": true,
+  };
+  switch (slug) {
+    case "festemidler-og-beslag": // screw
+      return (<svg {...common}><path d="M9 3l6 6" /><path d="M12 6l-7 7a3 3 0 104 4l7-7" /><path d="M8 11l2 2M10 9l2 2" /></svg>);
+    case "verktoy-og-maskiner": // wrench
+      return (<svg {...common}><path d="M15 4a4 4 0 00-5 5l-6 6 3 3 6-6a4 4 0 005-5l-2.5 2.5L13 7.5 15 5z" /></svg>);
+    case "maling-og-overflate": // paint roller
+      return (<svg {...common}><rect x="4" y="4" width="13" height="6" rx="1" /><path d="M17 7h2a1 1 0 011 1v2a1 1 0 01-1 1h-7a1 1 0 00-1 1v2" /><rect x="9" y="15" width="4" height="6" rx="1" /></svg>);
+    case "lim-fuge-og-tetting": // droplet
+      return (<svg {...common}><path d="M12 3s6 6.5 6 11a6 6 0 01-12 0c0-4.5 6-11 6-11z" /></svg>);
+    case "tak-og-takrenner": // roof
+      return (<svg {...common}><path d="M3 11l9-7 9 7" /><path d="M5 10v9h14v-9" /><path d="M3 19h18" /></svg>);
+    case "trelast-og-byggevarer": // stacked planks
+      return (<svg {...common}><rect x="3" y="6" width="18" height="4" rx="1" /><rect x="3" y="14" width="18" height="4" rx="1" /><path d="M7 6v4M15 14v4" /></svg>);
+    case "gulv-og-listverk": // floor grid
+      return (<svg {...common}><rect x="3" y="3" width="18" height="18" rx="1" /><path d="M3 9h18M3 15h18M9 3v18M15 3v18" /></svg>);
+    case "mur-og-betong": // brick wall
+      return (<svg {...common}><rect x="3" y="4" width="18" height="16" rx="1" /><path d="M3 10h18M3 16h18M9 4v6M15 10v6M9 16v4M15 4v0" /></svg>);
+    case "kjokken-og-bad": // faucet
+      return (<svg {...common}><path d="M5 12h6V8a3 3 0 016 0" /><path d="M3 12h10v2a5 5 0 01-10 0z" /><path d="M8 19v2" /></svg>);
+    case "dor-og-vindu": // door
+      return (<svg {...common}><rect x="5" y="3" width="14" height="18" rx="1" /><path d="M15 12h.01" /><path d="M5 21h14" /></svg>);
+    case "sikkerhet-og-forbruk": // shield
+      return (<svg {...common}><path d="M12 3l7 3v6c0 4-3 7-7 8-4-1-7-4-7-8V6z" /><path d="M9 12l2 2 4-4" /></svg>);
+    default:
+      return (<svg {...common}><rect x="3" y="3" width="18" height="18" rx="2" /><path d="M3 9h18" /></svg>);
+  }
 }
 
 function ValuePropsBand() {
@@ -680,6 +654,7 @@ function EmptyState({ q }: { q: string }) {
 function ActiveFilterChips({
   q,
   category,
+  categoryLabel,
   supplier,
   sort,
   inStockOnly,
@@ -687,6 +662,7 @@ function ActiveFilterChips({
 }: {
   q: string;
   category: string;
+  categoryLabel: string;
   supplier: string;
   sort: StorefrontSortOption;
   inStockOnly: boolean;
@@ -694,7 +670,7 @@ function ActiveFilterChips({
 }) {
   const chips: Array<{ label: string; href: string }> = [];
   if (q) chips.push({ label: `Søk: ${q}`, href: buildStoreHref({ category, supplier, sort, inStock: inStockOnly ? 1 : undefined, cols }) });
-  if (category) chips.push({ label: `Kategori: ${category}`, href: buildStoreHref({ q, supplier, sort, inStock: inStockOnly ? 1 : undefined, cols }) });
+  if (category) chips.push({ label: `Kategori: ${categoryLabel}`, href: buildStoreHref({ q, supplier, sort, inStock: inStockOnly ? 1 : undefined, cols }) });
   if (supplier) chips.push({ label: `Leverandør: ${supplier}`, href: buildStoreHref({ q, category, sort, inStock: inStockOnly ? 1 : undefined, cols }) });
   if (inStockOnly) chips.push({ label: "På lager", href: buildStoreHref({ q, category, supplier, sort, cols }) });
 
@@ -728,9 +704,9 @@ function FilterPanel({
   sort,
   inStockOnly,
   cols,
-  categories,
+  departments,
   categoryCounts,
-  broadCategoryCounts,
+  activeFilter,
   priceRange,
 }: {
   q: string;
@@ -739,17 +715,14 @@ function FilterPanel({
   sort: StorefrontSortOption;
   inStockOnly: boolean;
   cols: number;
-  categories: string[];
+  departments: Array<{ slug: string; label: string; icon: string; count: number; categories: string[] }>;
   categoryCounts: Record<string, number>;
-  broadCategoryCounts: Record<string, number>;
+  activeFilter: StorefrontCategoryFilter | null;
   priceRange: { min: number; max: number };
 }) {
-  const broadItems = FEATURED_CATEGORIES
-    .filter((group) => (broadCategoryCounts[group.filter] ?? 0) > 0)
-    .map((group) => group.filter);
-  const broadLabelMap = Object.fromEntries(
-    FEATURED_CATEGORIES.map((group) => [group.filter, group.label]),
-  );
+  const totalCount = departments.reduce((sum, department) => sum + department.count, 0);
+  const activeSlug = activeFilter?.department.slug ?? null;
+  const activeLeaf = activeFilter?.leaf ?? null;
 
   return (
     <div className="bg-white lg:rounded-xl lg:border lg:border-stone-200 lg:p-4 lg:shadow-[0_8px_20px_rgba(32,25,15,0.06)]">
@@ -763,15 +736,63 @@ function FilterPanel({
       </div>
 
       <div className="mt-4 space-y-5">
-        <FilterGroup
-          title="Kategori"
-          items={broadItems}
-          counts={broadCategoryCounts}
-          currentValue={category}
-          whiteText
-          labelMap={broadLabelMap}
-          buildHref={(value) => buildStoreHref({ q, category: value, supplier, sort, inStock: inStockOnly ? 1 : undefined, cols })}
-        />
+        <div>
+          <p className="text-xs font-semibold uppercase tracking-[0.14em] text-stone-500">Kategori</p>
+          <div className="mt-2 flex flex-col gap-0.5">
+            <Link
+              href={buildStoreHref({ q, supplier, sort, inStock: inStockOnly ? 1 : undefined, cols })}
+              className={`flex items-center justify-between rounded-lg px-3 py-1.5 text-sm font-medium transition ${
+                activeFilter === null ? "bg-[#15452d] text-white!" : "text-stone-700 hover:bg-stone-100"
+              }`}
+            >
+              <span>Alle varer</span>
+              <span className={`text-xs ${activeFilter === null ? "text-white/70" : "text-stone-400"}`}>{totalCount}</span>
+            </Link>
+
+            {departments.map((department) => {
+              const departmentActive = activeSlug === department.slug;
+              const leaves = departmentActive ? leafCategoriesForDepartment(department, categoryCounts) : [];
+              return (
+                <div key={department.slug}>
+                  <Link
+                    href={buildStoreHref({ q, category: department.slug, supplier, sort, inStock: inStockOnly ? 1 : undefined, cols })}
+                    className={`flex items-center justify-between gap-2 rounded-lg px-3 py-1.5 text-sm font-medium transition ${
+                      departmentActive && !activeLeaf
+                        ? "bg-[#15452d] text-white!"
+                        : departmentActive
+                          ? "bg-[#15452d]/8 text-stone-900"
+                          : "text-stone-700 hover:bg-stone-100"
+                    }`}
+                  >
+                    <span className="line-clamp-1">{department.label}</span>
+                    <span className={`shrink-0 text-xs ${departmentActive && !activeLeaf ? "text-white/70" : "text-stone-400"}`}>
+                      {department.count}
+                    </span>
+                  </Link>
+                  {leaves.length > 1 ? (
+                    <div className="mb-1 ml-3 mt-0.5 flex flex-col gap-0.5 border-l border-stone-200 pl-2">
+                      {leaves.map((leaf) => {
+                        const leafActive = activeLeaf === leaf.category;
+                        return (
+                          <Link
+                            key={leaf.category}
+                            href={buildStoreHref({ q, category: leaf.category, supplier, sort, inStock: inStockOnly ? 1 : undefined, cols })}
+                            className={`flex items-center justify-between gap-2 rounded-md px-2.5 py-1 text-[13px] transition ${
+                              leafActive ? "bg-[#15452d] font-semibold text-white!" : "text-stone-600 hover:bg-stone-100"
+                            }`}
+                          >
+                            <span className="line-clamp-1">{leaf.category}</span>
+                            <span className={`shrink-0 text-[11px] ${leafActive ? "text-white/70" : "text-stone-400"}`}>{leaf.count}</span>
+                          </Link>
+                        );
+                      })}
+                    </div>
+                  ) : null}
+                </div>
+              );
+            })}
+          </div>
+        </div>
 
         <div>
           <p className="text-xs font-semibold uppercase tracking-[0.14em] text-stone-500">Prisnivå</p>
@@ -921,59 +942,6 @@ function Pagination({
   );
 }
 
-function resolveFeaturedCategories(
-  categories: string[],
-  products: StorefrontProduct[],
-): Array<{ label: string; category: string; tone: string; imageUrl: string }> {
-  const tiles: Array<{ label: string; category: string; tone: string; imageUrl: string }> = [];
-  const lowerMap = new Map(categories.map((c) => [c.toLowerCase(), c] as const));
-
-  const pickImageForCategory = (categoryName: string): string => {
-    const candidate = products.find(
-      (p) => p.category === categoryName && Boolean(getStorefrontImageUrl(p)),
-    );
-    if (candidate) return getStorefrontImageUrl(candidate);
-    const any = products.find((p) => Boolean(getStorefrontImageUrl(p)));
-    return any ? getStorefrontImageUrl(any) : "";
-  };
-
-  for (const featured of FEATURED_CATEGORIES) {
-    let matched: string | undefined;
-    for (const needle of featured.match) {
-      for (const [lower, original] of lowerMap) {
-        if (lower.includes(needle)) {
-          matched = original;
-          break;
-        }
-      }
-      if (matched) break;
-    }
-    if (matched) {
-      tiles.push({
-        label: featured.label,
-        category: featured.filter,
-        tone: featured.tone,
-        imageUrl: pickImageForCategory(matched),
-      });
-    }
-  }
-
-  if (tiles.length < 4) {
-    for (const category of categories) {
-      if (tiles.some((tile) => tile.category === category)) continue;
-      tiles.push({
-        label: category,
-        category,
-        tone: "from-stone-500 to-stone-700",
-        imageUrl: pickImageForCategory(category),
-      });
-      if (tiles.length >= 8) break;
-    }
-  }
-
-  return tiles.slice(0, 8);
-}
-
 function buildProductStockInfo(info: ByggmakkerAvailability): ProductStockInfo {
   if (info.netAvailable) {
     const netQuantity = typeof info.netQuantity === "number" ? formatStockQuantity(info.netQuantity) : "på lager";
@@ -1087,73 +1055,6 @@ function getGridClasses(cols: number) {
     default:
       return "grid grid-cols-2 gap-3 sm:gap-4 md:grid-cols-3 xl:grid-cols-4";
   }
-}
-
-function FilterGroup({
-  title,
-  items,
-  counts,
-  currentValue,
-  whiteText = false,
-  buildHref,
-  labelMap,
-}: {
-  title: string;
-  items: string[];
-  counts: Record<string, number>;
-  currentValue: string;
-  whiteText?: boolean;
-  buildHref: (value: string) => string;
-  labelMap?: Record<string, string>;
-}) {
-  const visibleItems = items.slice(0, 12);
-  return (
-    <div>
-      <p className="text-xs font-semibold uppercase tracking-[0.14em] text-stone-500">{title}</p>
-      <div className="mt-2 flex flex-col gap-1">
-        <Link
-          href={buildHref("")}
-          className={`flex items-center justify-between rounded-lg px-3 py-1.5 text-sm font-medium transition ${
-            currentValue.length === 0
-              ? "bg-[#15452d] text-white!"
-              : whiteText
-                ? "bg-[#15452d]/90 text-white! hover:bg-[#15452d]"
-                : "text-stone-700 hover:bg-stone-100"
-          }`}
-        >
-          <span>Alle</span>
-          <span
-            className={`text-xs ${
-              currentValue.length === 0 ? "text-white/70" : whiteText ? "text-white/70" : "text-stone-400"
-            }`}
-          >
-            {Object.values(counts).reduce((sum, count) => sum + count, 0)}
-          </span>
-        </Link>
-        {visibleItems.map((item) => {
-          const active = currentValue === item;
-          return (
-            <Link
-              key={item}
-              href={buildHref(item)}
-              className={`flex items-center justify-between gap-2 rounded-lg px-3 py-1.5 text-sm font-medium transition ${
-                active
-                  ? "bg-[#15452d] text-white!"
-                  : whiteText
-                    ? "text-black hover:bg-[#15452d]/10"
-                    : "text-stone-700 hover:bg-stone-100"
-              }`}
-            >
-              <span className="line-clamp-1">{labelMap?.[item] ?? item}</span>
-              <span className={`text-xs ${active || whiteText ? "text-white/70" : "text-stone-400"}`}>
-                {counts[item] ?? 0}
-              </span>
-            </Link>
-          );
-        })}
-      </div>
-    </div>
-  );
 }
 
 function buildStoreHref(params: Record<string, string | number | undefined>) {
