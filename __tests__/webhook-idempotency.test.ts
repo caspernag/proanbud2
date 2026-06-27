@@ -136,3 +136,42 @@ describe("Webhook idempotency guard (markShopOrderPaid)", () => {
     expect(isShopOrderAlreadyProcessed(order, "pi_xyz", "cs_abc")).toBe(false);
   });
 });
+
+// ---------------------------------------------------------------------------
+// Shop order email dispatch decision (dispatchShopOrderEmails)
+// ---------------------------------------------------------------------------
+//
+// The Byggmakker purchase order and the customer confirmation are dispatched
+// independently. We must retry (return 500 → Stripe redelivers) iff either send
+// failed transiently. A skipped (unconfigured) Byggmakker email must NOT cause
+// retries, and a failing customer confirmation must NOT silently swallow the
+// retry signal — but it also must never have blocked the Byggmakker send.
+
+type EmailDispatchOutcome = "sent" | "already_sent" | "skipped" | "failed";
+
+/** Pure replica of the retry decision in dispatchShopOrderEmails. */
+function shouldRetryDispatch(byggmakker: EmailDispatchOutcome, customer: EmailDispatchOutcome): boolean {
+  return byggmakker === "failed" || customer === "failed";
+}
+
+describe("Shop order email dispatch decision", () => {
+  it("does not retry when both emails are sent", () => {
+    expect(shouldRetryDispatch("sent", "sent")).toBe(false);
+  });
+
+  it("does not retry when both were already sent (webhook redelivery)", () => {
+    expect(shouldRetryDispatch("already_sent", "already_sent")).toBe(false);
+  });
+
+  it("does not retry when the Byggmakker email is skipped (not configured)", () => {
+    expect(shouldRetryDispatch("skipped", "sent")).toBe(false);
+  });
+
+  it("retries when the Byggmakker order fails transiently", () => {
+    expect(shouldRetryDispatch("failed", "sent")).toBe(true);
+  });
+
+  it("retries when only the customer confirmation fails (Byggmakker still went out)", () => {
+    expect(shouldRetryDispatch("sent", "failed")).toBe(true);
+  });
+});

@@ -9,6 +9,8 @@ import { createSupabaseAdminClient } from "@/lib/supabase/admin";
 type MaterialOrderStatus = "draft" | "pending_payment" | "paid" | "submitted" | "cancelled" | "failed";
 type ShopOrderStatus = "draft" | "pending_payment" | "paid" | "fulfilled" | "cancelled" | "failed";
 
+type EmailDispatchOutcome = "sent" | "already_sent" | "skipped" | "failed";
+
 type MaterialOrderPaymentRow = {
   id: string;
   user_id: string;
@@ -82,8 +84,7 @@ async function markShopOrderPaid(
     order.payment_intent_id === paymentIntentId &&
     order.checkout_session_id === session.id
   ) {
-    await ensureShopOrderEmailSent(supabase, orderId, order.paid_at ?? new Date().toISOString());
-    await ensureByggmakkerOrderEmailSent(supabase, orderId, order.paid_at ?? new Date().toISOString());
+    await dispatchShopOrderEmails(supabase, orderId, order.paid_at ?? new Date().toISOString());
     return;
   }
 
@@ -114,15 +115,40 @@ async function markShopOrderPaid(
     },
   });
 
-  await ensureShopOrderEmailSent(supabase, orderId, paidAt);
-  await ensureByggmakkerOrderEmailSent(supabase, orderId, paidAt);
+  await dispatchShopOrderEmails(supabase, orderId, paidAt);
+}
+
+/**
+ * Sends both order emails for a paid shop order. The Byggmakker order is the
+ * business-critical step (it IS the purchase order to the supplier), so it is
+ * attempted first and independently of the customer confirmation — a failing
+ * confirmation must never block it.
+ *
+ * Both sends are guarded by their own event log, so re-running this (e.g. on a
+ * Stripe webhook retry) never double-sends. If either send fails transiently we
+ * throw, which makes the webhook return 500 and Stripe retry with backoff; the
+ * send that already succeeded is skipped on the retry.
+ */
+async function dispatchShopOrderEmails(
+  supabase: NonNullable<ReturnType<typeof createSupabaseAdminClient>>,
+  orderId: string,
+  paidAt: string,
+) {
+  const byggmakker = await ensureByggmakkerOrderEmailSent(supabase, orderId, paidAt);
+  const customer = await ensureShopOrderEmailSent(supabase, orderId, paidAt);
+
+  if (byggmakker === "failed" || customer === "failed") {
+    throw new Error(
+      `Ordre-e-post feilet (byggmakker=${byggmakker}, kunde=${customer}); ber Stripe om nytt forsøk.`,
+    );
+  }
 }
 
 async function ensureShopOrderEmailSent(
   supabase: NonNullable<ReturnType<typeof createSupabaseAdminClient>>,
   orderId: string,
   paidAt: string,
-) {
+): Promise<EmailDispatchOutcome> {
   const { data: existingEmailEvent } = await supabase
     .from("shop_order_events")
     .select("id")
@@ -132,7 +158,7 @@ async function ensureShopOrderEmailSent(
     .maybeSingle();
 
   if (existingEmailEvent) {
-    return;
+    return "already_sent";
   }
 
   try {
@@ -145,7 +171,7 @@ async function ensureShopOrderEmailSent(
       payload: { paidAt, error: error instanceof Error ? error.message : String(error) },
       customerVisible: false,
     });
-    throw error;
+    return "failed";
   }
 
   await logShopOrderEvent(supabase, {
@@ -155,13 +181,14 @@ async function ensureShopOrderEmailSent(
     payload: { paidAt },
     customerVisible: false,
   });
+  return "sent";
 }
 
 async function ensureByggmakkerOrderEmailSent(
   supabase: NonNullable<ReturnType<typeof createSupabaseAdminClient>>,
   orderId: string,
   paidAt: string,
-) {
+): Promise<EmailDispatchOutcome> {
   const { data: existingEmailEvent } = await supabase
     .from("shop_order_events")
     .select("id")
@@ -171,7 +198,7 @@ async function ensureByggmakkerOrderEmailSent(
     .maybeSingle();
 
   if (existingEmailEvent) {
-    return;
+    return "already_sent";
   }
 
   try {
@@ -185,7 +212,7 @@ async function ensureByggmakkerOrderEmailSent(
         payload: { paidAt },
         customerVisible: false,
       });
-      return;
+      return "skipped";
     }
 
     await logShopOrderEvent(supabase, {
@@ -194,6 +221,7 @@ async function ensureByggmakkerOrderEmailSent(
       message: "Ordren er sendt til Byggmakker for behandling og transportvurdering.",
       payload: { paidAt, resendEmailId: emailId },
     });
+    return "sent";
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error);
 
@@ -206,6 +234,81 @@ async function ensureByggmakkerOrderEmailSent(
       payload: { paidAt, error: message },
       customerVisible: false,
     });
+    return "failed";
+  }
+}
+
+/**
+ * Manually (re)sends the Byggmakker purchase order for a shop order. Used by the
+ * admin order page as a recovery path when the automatic send failed or was
+ * skipped (e.g. missing configuration). Bypasses the idempotency guard on
+ * purpose — the admin is explicitly asking for a resend — and throws on failure
+ * so the caller can surface it.
+ */
+export async function resendByggmakkerOrderEmail(orderId: string): Promise<EmailDispatchOutcome> {
+  const supabase = createSupabaseAdminClient();
+
+  if (!supabase) {
+    throw new Error("Supabase service role er ikke konfigurert.");
+  }
+
+  const { data: order, error: orderError } = await supabase
+    .from("shop_orders")
+    .select("id, paid_at")
+    .eq("id", orderId)
+    .maybeSingle<{ id: string; paid_at: string | null }>();
+
+  if (orderError) {
+    throw new Error("Kunne ikke hente butikkordre for ny utsending.");
+  }
+
+  if (!order) {
+    throw new Error("Fant ikke butikkordren.");
+  }
+
+  const paidAt = order.paid_at ?? new Date().toISOString();
+
+  try {
+    const emailId = await sendOrderEmailForByggmakker(supabase, orderId, paidAt);
+
+    if (!emailId) {
+      await logShopOrderEvent(supabase, {
+        orderId,
+        eventType: "byggmakker_order_email_skipped",
+        actorType: "admin",
+        actorLabel: "Sjefen",
+        message: "Manuell utsending hoppet over fordi Byggmakker-e-post ikke er konfigurert.",
+        payload: { paidAt, manual: true },
+        customerVisible: false,
+      });
+      return "skipped";
+    }
+
+    await logShopOrderEvent(supabase, {
+      orderId,
+      eventType: "byggmakker_order_email_sent",
+      actorType: "admin",
+      actorLabel: "Sjefen",
+      message: "Byggmakker-bestilling sendt på nytt manuelt.",
+      payload: { paidAt, resendEmailId: emailId, manual: true },
+    });
+    return "sent";
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+
+    console.error(`[shop-order] Manuell Byggmakker-utsending ${orderId} feilet:`, message);
+
+    await logShopOrderEvent(supabase, {
+      orderId,
+      eventType: "byggmakker_order_email_failed",
+      actorType: "admin",
+      actorLabel: "Sjefen",
+      message: "Manuell utsending av Byggmakker-bestilling feilet.",
+      payload: { paidAt, error: message, manual: true },
+      customerVisible: false,
+    });
+
+    throw new Error(`Kunne ikke sende Byggmakker-bestilling: ${message}`);
   }
 }
 

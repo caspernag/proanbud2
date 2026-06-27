@@ -15,6 +15,7 @@ import {
   type ShopOrderTransportStatus,
 } from "@/lib/shop-order";
 import { withResolvedShopOrderUnits } from "@/lib/shop-order-units";
+import { resendByggmakkerOrderEmail } from "@/lib/stripe-checkout-reconciliation";
 import { createSupabaseAdminClient } from "@/lib/supabase/admin";
 import { formatCurrency } from "@/lib/utils";
 
@@ -211,6 +212,25 @@ export default async function SjefenBestillingDetaljPage({ params }: PageProps) 
     revalidatePath(`/sjefen/bestillinger/${orderId}`);
   }
 
+  async function resendByggmakkerOrder(formData: FormData) {
+    "use server";
+
+    await requireAdminUser();
+
+    const orderId = String(formData.get("orderId") ?? "").trim();
+    if (!orderId) return;
+
+    try {
+      await resendByggmakkerOrderEmail(orderId);
+    } catch (error) {
+      // The failure is already logged to the order event log inside the helper;
+      // swallow here so the page can re-render and show the updated log.
+      console.error("[sjefen] manuell Byggmakker-utsending feilet:", error);
+    }
+
+    revalidatePath(`/sjefen/bestillinger/${orderId}`);
+  }
+
   const [{ data: items }, { data: messages }, { data: events }] = await Promise.all([
     supabase
       .from("shop_order_items")
@@ -327,6 +347,8 @@ export default async function SjefenBestillingDetaljPage({ params }: PageProps) 
               <InfoRow label="Payment intent" value={order.payment_intent_id ?? "-"} />
             </dl>
           </div>
+
+          <ByggmakkerCard orderId={order.id} events={events ?? []} action={resendByggmakkerOrder} />
         </aside>
       </section>
     </div>
@@ -397,6 +419,53 @@ function SupportThread({ orderId, messages, action }: { orderId: string; message
         <textarea name="message" required minLength={2} maxLength={2000} rows={3} className="w-full rounded-lg border border-stone-300 px-3 py-2 text-sm outline-none focus:border-stone-900" placeholder="Svar kunden." />
         <button type="submit" className="inline-flex h-9 items-center rounded-lg bg-stone-900 px-4 text-xs font-semibold text-white hover:bg-stone-800">
           Send svar
+        </button>
+      </form>
+    </div>
+  );
+}
+
+function ByggmakkerCard({
+  orderId,
+  events,
+  action,
+}: {
+  orderId: string;
+  events: ShopEvent[];
+  action: (formData: FormData) => Promise<void>;
+}) {
+  // events are ordered newest-first, so the first match is the latest status.
+  const latest = events.find((event) => event.event_type.startsWith("byggmakker_order_email_"));
+  const status =
+    latest?.event_type === "byggmakker_order_email_sent"
+      ? { label: "Sendt til Byggmakker", className: "border-emerald-200 bg-emerald-50 text-emerald-700" }
+      : latest?.event_type === "byggmakker_order_email_failed"
+        ? { label: "Sending feilet", className: "border-red-200 bg-red-50 text-red-700" }
+        : latest?.event_type === "byggmakker_order_email_skipped"
+          ? { label: "Hoppet over – e-post ikke konfigurert", className: "border-amber-200 bg-amber-50 text-amber-700" }
+          : { label: "Ikke sendt ennå", className: "border-stone-200 bg-stone-50 text-stone-600" };
+
+  const sentAt = latest?.event_type === "byggmakker_order_email_sent" ? latest.created_at : null;
+
+  return (
+    <div className="rounded-2xl border border-stone-200 bg-white p-5">
+      <h2 className="text-sm font-semibold text-stone-900">Byggmakker-bestilling</h2>
+      <p className="mt-1 text-xs text-stone-500">
+        Bestillingen som sendes til leverandøren når kunden har betalt.
+      </p>
+      <div className={`mt-3 inline-flex rounded-full border px-3 py-1 text-xs font-semibold ${status.className}`}>
+        {status.label}
+      </div>
+      {sentAt ? (
+        <p className="mt-2 text-xs text-stone-500">Sist sendt {new Date(sentAt).toLocaleString("nb-NO")}</p>
+      ) : null}
+      <form action={action} className="mt-4">
+        <input type="hidden" name="orderId" value={orderId} />
+        <button
+          type="submit"
+          className="inline-flex h-10 w-full items-center justify-center rounded-lg border border-stone-300 bg-white px-4 text-sm font-semibold text-stone-800 hover:border-stone-900"
+        >
+          {latest?.event_type === "byggmakker_order_email_sent" ? "Send bestilling på nytt" : "Send bestilling til Byggmakker"}
         </button>
       </form>
     </div>

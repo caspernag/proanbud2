@@ -5,7 +5,11 @@ import { env } from "@/lib/env";
 const BYGGMAKKER_DEMO_EMAIL = "casper@nagsoftware.no";
 const PRISBYGG_CC_EMAIL = "post@proanbud.no";
 const FROM_ADDRESS = "Prisbygg <post@proanbud.no>";
-const TREBYGG_ORDER_FROM_ADDRESS = "Trebygg Strand AS <post@trebyggstrand.no>";
+// NB: avsenderdomenet må være verifisert i Resend. trebyggstrand.no er ikke
+// verifisert (alle Byggmakker-eposter feilet på det), så vi sender via det
+// verifiserte proanbud.no og beholder «Trebygg Strand AS» som visningsnavn.
+// replyTo (TREBYGG_ORDER_FROM_EMAIL) styrer hvor svar havner.
+const TREBYGG_ORDER_FROM_ADDRESS = "Trebygg Strand AS <post@proanbud.no>";
 const DEFAULT_PUBLIC_ORIGIN = "https://www.prisbygg.no";
 
 function getResend(): Resend | null {
