@@ -3,6 +3,7 @@ import Stripe from "stripe";
 import { sendByggmakkerShopOrderEmail, sendMaterialOrderEmail, sendShopOrderEmail } from "@/lib/email";
 import { getPriceListProducts } from "@/lib/price-lists";
 import { logShopOrderEvent } from "@/lib/shop-order";
+import { getStripe } from "@/lib/stripe";
 import { withResolvedShopOrderUnits } from "@/lib/shop-order-units";
 import { createSupabaseAdminClient } from "@/lib/supabase/admin";
 
@@ -89,6 +90,7 @@ async function markShopOrderPaid(
   }
 
   const paidAt = new Date().toISOString();
+  const settlement = await fetchStripeSettlement(paymentIntentId);
   const { error: updateOrderError } = await supabase
     .from("shop_orders")
     .update({
@@ -97,6 +99,7 @@ async function markShopOrderPaid(
       checkout_session_id: session.id,
       payment_intent_id: paymentIntentId,
       paid_at: paidAt,
+      ...(settlement ?? {}),
     })
     .eq("id", orderId);
 
@@ -320,7 +323,7 @@ async function sendOrderEmailForShopOrder(
   const [{ data: orderData }, { data: items }] = await Promise.all([
     supabase
       .from("shop_orders")
-      .select("id, public_token, slug, customer_name, customer_email, customer_phone, shipping_address_line1, shipping_postal_code, shipping_city, subtotal_nok, shipping_nok, vat_nok, total_nok")
+      .select("id, public_token, slug, order_number, customer_name, customer_email, customer_phone, shipping_address_line1, shipping_postal_code, shipping_city, subtotal_nok, shipping_nok, vat_nok, total_nok")
       .eq("id", orderId)
       .maybeSingle(),
     supabase
@@ -337,6 +340,7 @@ async function sendOrderEmailForShopOrder(
   await sendShopOrderEmail({
     orderId,
     orderSlug: orderData.slug ?? orderData.public_token ?? null,
+    orderNumber: orderData.order_number ?? null,
     customerName: orderData.customer_name,
     customerEmail: orderData.customer_email,
     customerPhone: orderData.customer_phone ?? null,
@@ -368,7 +372,7 @@ async function sendOrderEmailForByggmakker(
   const [{ data: orderData }, { data: items }] = await Promise.all([
     supabase
       .from("shop_orders")
-      .select("id, public_token, slug, customer_name, customer_email, customer_phone, shipping_address_line1, shipping_postal_code, shipping_city, customer_note")
+      .select("id, public_token, slug, order_number, customer_name, customer_email, customer_phone, shipping_address_line1, shipping_postal_code, shipping_city, customer_note")
       .eq("id", orderId)
       .maybeSingle(),
     supabase
@@ -385,6 +389,7 @@ async function sendOrderEmailForByggmakker(
   return sendByggmakkerShopOrderEmail({
     orderId,
     orderSlug: orderData.slug ?? orderData.public_token ?? null,
+    orderNumber: orderData.order_number ?? null,
     customerName: orderData.customer_name,
     customerEmail: orderData.customer_email,
     customerPhone: orderData.customer_phone ?? null,
@@ -599,6 +604,63 @@ async function markProjectUnlocked(
     if (fallbackProject) {
       return;
     }
+  }
+}
+
+/**
+ * Henter det FAKTISKE oppgjøret for en betaling: brutto, Stripe-gebyr og netto,
+ * alt i øre, rett fra Stripes balance transaction.
+ *
+ * Dekningsbidraget bruker et estimert gebyr, og det er greit der. Regnskapet kan
+ * ikke: gebyret skal bokføres med sitt virkelige beløp, og Stripe-mellomkontoen
+ * skal gå i null mot faktisk utbetaling. Ett øre avvik per ordre blir noen hundre
+ * kroner i året som ingen klarer å forklare.
+ *
+ * Feiler kallet, returnerer vi null i stedet for å kaste. Betalingen er allerede
+ * gjennomført og ordren MÅ registreres som betalt — kunden har betalt, og
+ * Byggmakker-bestillingen henger på dette. Manglende gebyrdata er et
+ * avstemmingsproblem som kan hentes inn i etterkant; en tapt ordre er ikke.
+ */
+async function fetchStripeSettlement(paymentIntentId: string | null) {
+  if (!paymentIntentId) {
+    return null;
+  }
+
+  const stripe = getStripe();
+
+  if (!stripe) {
+    return null;
+  }
+
+  try {
+    const paymentIntent = await stripe.paymentIntents.retrieve(paymentIntentId, {
+      expand: ["latest_charge.balance_transaction"],
+    });
+
+    const charge = paymentIntent.latest_charge;
+
+    if (!charge || typeof charge === "string") {
+      return null;
+    }
+
+    const balanceTransaction = charge.balance_transaction;
+
+    if (!balanceTransaction || typeof balanceTransaction === "string") {
+      return null;
+    }
+
+    return {
+      stripe_gross_ore: balanceTransaction.amount,
+      stripe_fee_ore: balanceTransaction.fee,
+      stripe_net_ore: balanceTransaction.net,
+      stripe_balance_txn_id: balanceTransaction.id,
+    };
+  } catch (error) {
+    console.error(
+      `[shop-order] Kunne ikke hente Stripe-oppgjør for ${paymentIntentId}:`,
+      error instanceof Error ? error.message : error,
+    );
+    return null;
   }
 }
 

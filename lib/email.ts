@@ -10,7 +10,9 @@ const FROM_ADDRESS = "Prisbygg <post@proanbud.no>";
 // verifiserte proanbud.no og beholder «Trebygg Strand AS» som visningsnavn.
 // replyTo (TREBYGG_ORDER_FROM_EMAIL) styrer hvor svar havner.
 const TREBYGG_ORDER_FROM_ADDRESS = "Trebygg Strand AS <post@proanbud.no>";
-const DEFAULT_PUBLIC_ORIGIN = "https://www.prisbygg.no";
+// NB: www.prisbygg.no peker på en annen (gammel) nginx-server og gir 404 —
+// bare apex-domenet er koblet til Vercel. Lenker i e-post må bruke apex.
+const DEFAULT_PUBLIC_ORIGIN = "https://prisbygg.no";
 
 function getResend(): Resend | null {
   if (!env.resendApiKey) return null;
@@ -62,6 +64,8 @@ export type ShopOrderEmailItem = {
 export type ShopOrderEmailPayload = {
   orderId: string;
   orderSlug?: string | null;
+  /** Salgsdokumentnummer, tildelt ved betaling. Se shop_orders.order_number. */
+  orderNumber?: number | null;
   customerName: string;
   customerEmail: string;
   customerPhone?: string | null;
@@ -86,6 +90,7 @@ export type ByggmakkerShopOrderEmailItem = {
 export type ByggmakkerShopOrderEmailPayload = {
   orderId: string;
   orderSlug?: string | null;
+  orderNumber?: number | null;
   customerName: string;
   customerEmail: string;
   customerPhone?: string | null;
@@ -96,6 +101,22 @@ export type ByggmakkerShopOrderEmailPayload = {
   items: ByggmakkerShopOrderEmailItem[];
   paidAt: string;
 };
+
+/**
+ * Referansen kunden, leverandøren og regnskapet ser på samme ordre.
+ *
+ * `order_number` er salgsdokumentnummeret og skal stå på kvitteringen — det er
+ * det bokføringen refererer til. Slug og uuid-fallback beholdes for ordre fra før
+ * nummerserien fantes, og for ordre som ennå ikke er betalt (nummeret tildeles
+ * først da).
+ */
+function orderReferenceOf(p: { orderNumber?: number | null; orderSlug?: string | null; orderId: string }) {
+  if (p.orderNumber != null) {
+    return `#${p.orderNumber}`;
+  }
+
+  return p.orderSlug ?? `#${p.orderId.slice(0, 8).toUpperCase()}`;
+}
 
 function fmtNok(nok: number) {
   return new Intl.NumberFormat("nb-NO", { style: "currency", currency: "NOK", maximumFractionDigits: 2 }).format(nok);
@@ -266,7 +287,7 @@ export async function sendMaterialOrderEmail(payload: OrderEmailPayload): Promis
 }
 
 function buildShopOrderHtml(p: ShopOrderEmailPayload): string {
-  const orderReference = p.orderSlug ?? `#${p.orderId.slice(0, 8).toUpperCase()}`;
+  const orderReference = orderReferenceOf(p);
   const orderUrl = publicUrl(`/ordre/${encodeURIComponent(p.orderSlug ?? p.orderId)}`);
   const logoUrl = publicUrl("/logo/light/logo-primary.png");
   const paidDate = fmtDate(p.paidAt);
@@ -428,7 +449,7 @@ export async function sendShopOrderEmail(payload: ShopOrderEmailPayload): Promis
     from: FROM_ADDRESS,
     to: payload.customerEmail,
     bcc: PRISBYGG_CC_EMAIL,
-    subject: `Ordrebekreftelse ${payload.orderSlug ?? `#${payload.orderId.slice(0, 8).toUpperCase()}`}`,
+    subject: `Ordrebekreftelse ${orderReferenceOf(payload)}`,
     html: buildShopOrderHtml(payload),
   });
 
@@ -441,7 +462,7 @@ export async function sendShopOrderEmail(payload: ShopOrderEmailPayload): Promis
 }
 
 function buildByggmakkerShopOrderHtml(p: ByggmakkerShopOrderEmailPayload): string {
-  const orderReference = p.orderSlug ?? `#${p.orderId.slice(0, 8).toUpperCase()}`;
+  const orderReference = orderReferenceOf(p);
   const orderDate = fmtSupplierOrderDate(p.paidAt);
   const shippingInstruction = p.customerNote?.trim() || "Ønsker levering.";
   const logoUrl = "https://prisbygg.no/trebygg-logo.png";
@@ -545,7 +566,7 @@ export async function sendByggmakkerShopOrderEmail(payload: ByggmakkerShopOrderE
   }
 
   const replyTo = env.trebyggOrderFromEmail.trim();
-  const orderReference = payload.orderSlug ?? `#${payload.orderId.slice(0, 8).toUpperCase()}`;
+  const orderReference = orderReferenceOf(payload);
   console.log(`[email] Sender Byggmakker-ordre ${payload.orderId} fra ${TREBYGG_ORDER_FROM_ADDRESS} til ${recipient} (bcc: ${PRISBYGG_CC_EMAIL})`);
 
   const result = await resend.emails.send({
@@ -585,6 +606,7 @@ function resolveByggmakkerOrderRecipient() {
 export type ShopOrderStatusEmailPayload = {
   orderId: string;
   orderSlug?: string | null;
+  orderNumber?: number | null;
   customerName: string;
   customerEmail: string;
   /** Transportstatus etter oppdateringen. */
@@ -643,7 +665,7 @@ const STATUS_EMAIL_COPY: Record<
 };
 
 function buildShopOrderStatusHtml(p: ShopOrderStatusEmailPayload): string {
-  const orderReference = p.orderSlug ?? `#${p.orderId.slice(0, 8).toUpperCase()}`;
+  const orderReference = orderReferenceOf(p);
   const orderUrl = publicUrl(`/ordre/${encodeURIComponent(p.orderSlug ?? p.orderId)}`);
   const logoUrl = publicUrl("/logo/light/logo-primary.png");
   const copy = STATUS_EMAIL_COPY[p.transportStatus] ?? STATUS_EMAIL_COPY.pending;
@@ -772,7 +794,7 @@ export async function sendShopOrderStatusEmail(payload: ShopOrderStatusEmailPayl
     return null;
   }
 
-  const orderReference = payload.orderSlug ?? `#${payload.orderId.slice(0, 8).toUpperCase()}`;
+  const orderReference = orderReferenceOf(payload);
   const copy = STATUS_EMAIL_COPY[payload.transportStatus] ?? STATUS_EMAIL_COPY.pending;
 
   console.log(`[email] Sender statusoppdatering (${payload.transportStatus}) for ${payload.orderId} til ${payload.customerEmail}`);

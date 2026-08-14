@@ -20,6 +20,8 @@ export const env = {
   resendApiKey: process.env.RESEND_API_KEY ?? "",
   byggmakkerOrderEmail: process.env.BYGGMAKKER_ORDER_EMAIL ?? "",
   trebyggOrderFromEmail: process.env.TREBYGG_ORDER_FROM_EMAIL ?? "",
+  fikenApiToken: process.env.FIKEN_API_TOKEN ?? "",
+  fikenCompanySlug: process.env.FIKEN_COMPANY_SLUG ?? "",
 };
 
 export function hasSupabaseEnv() {
@@ -60,4 +62,13 @@ export function hasStorefrontImageWarmupSecret() {
 
 export function hasCronSecret() {
   return Boolean(env.cronSecret);
+}
+
+/**
+ * Uten Fiken-nøkler kjører regnskapsposteringen i tørrmodus: bilagene bygges og
+ * lagres, men sendes ikke. Det er den normale tilstanden fram til selskapet er
+ * registrert og Fiken-kontoen finnes.
+ */
+export function hasFikenEnv() {
+  return Boolean(env.fikenApiToken && env.fikenCompanySlug);
 }
