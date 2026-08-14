@@ -5,6 +5,14 @@ import { startTransition, useEffect, useMemo, useRef, useState } from "react";
 
 import { useStorefront } from "@/app/_components/storefront/storefront-provider";
 import { StorefrontProductImage } from "@/app/_components/storefront/storefront-product-image";
+import {
+  amountUntilFreeShipping,
+  calculateShippingNok,
+  freeShippingProgressPct,
+  FREE_SHIPPING_THRESHOLD_NOK,
+  SHIPPING_DISCLAIMER,
+  STANDARD_SHIPPING_NOK,
+} from "@/lib/shipping";
 import { buildStorefrontNobbImagePath, isAllowedStorefrontImageUrl, STORE_IMAGE_FALLBACK_URL } from "@/lib/storefront-image";
 import type { StorefrontProduct } from "@/lib/storefront-types";
 import { formatCurrency } from "@/lib/utils";
@@ -273,9 +281,10 @@ export function StorefrontCheckoutClient({ paymentCancelled }: { paymentCancelle
 
   const subtotalNok = lineItems.reduce((sum, item) => sum + item.lineTotalNok, 0);
   const totalSavingsNok = lineItems.reduce((sum, item) => sum + item.savingsNok, 0);
-  const shippingNok = subtotalNok > 0 ? 499 : 0;
-  const freeShipping = subtotalNok >= 5000;
-  const effectiveShippingNok = freeShipping ? 0 : shippingNok;
+  const shippingNok = subtotalNok > 0 ? STANDARD_SHIPPING_NOK : 0;
+  const freeShipping = subtotalNok >= FREE_SHIPPING_THRESHOLD_NOK;
+  // Samme regnestykke som serveren i /api/store/checkout, via lib/shipping.
+  const effectiveShippingNok = calculateShippingNok(subtotalNok);
   const totalNok = subtotalNok + effectiveShippingNok;
   const vatNok = Math.round(totalNok * 0.2);
   const missingRequiredFields = [email, fullName, phone, addressLine1, postalCode, city].filter(
@@ -506,12 +515,14 @@ export function StorefrontCheckoutClient({ paymentCancelled }: { paymentCancelle
               ) : (
                 <div>
                   <p className="text-xs font-medium text-stone-700">
-                    Handle for <strong className="text-[#15452d]">{formatCurrency(5000 - subtotalNok)}</strong> til for gratis frakt
+                    Handle for{" "}
+                    <strong className="text-[#15452d]">{formatCurrency(amountUntilFreeShipping(subtotalNok))}</strong>{" "}
+                    til for gratis frakt
                   </p>
                   <div className="mt-1.5 h-1.5 w-full overflow-hidden rounded-full bg-stone-200">
                     <div
                       className="h-full rounded-full bg-gradient-to-r from-[#15452d] to-[#d9ff7a] transition-all"
-                      style={{ width: `${Math.min(100, (subtotalNok / 5000) * 100)}%` }}
+                      style={{ width: `${freeShippingProgressPct(subtotalNok)}%` }}
                     />
                   </div>
                 </div>
@@ -630,6 +641,7 @@ export function StorefrontCheckoutClient({ paymentCancelled }: { paymentCancelle
                 strikeThrough={freeShipping}
               />
               <SummaryLine label="Herav MVA" value={formatCurrency(vatNok)} muted />
+              <p className="pt-1 text-[11px] leading-relaxed text-stone-500">{SHIPPING_DISCLAIMER}</p>
             </div>
 
             <div className="mt-3 flex items-baseline justify-between rounded-xl bg-stone-100 px-3 py-2.5">

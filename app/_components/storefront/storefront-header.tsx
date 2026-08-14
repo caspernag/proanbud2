@@ -6,6 +6,7 @@ import { usePathname, useSearchParams } from "next/navigation";
 import { useEffect, useMemo, useRef, useState } from "react";
 
 import { useStorefront } from "@/app/_components/storefront/storefront-provider";
+import { FREE_SHIPPING_LABEL } from "@/lib/shipping";
 
 // Hurtignavigasjon til hovedkategoriene (avdelinger). `/?category=<slug>` slår
 // opp avdelingen i lib/storefront-taxonomy og filtrerer eksakt på de underliggende
@@ -92,7 +93,7 @@ export function StorefrontHeader() {
               Byggevarer til <strong className="text-[#d9ff7a]">partnerpris</strong>
             </span>
             <span className="inline-flex items-center gap-1.5">
-              <Dot /> Gratis frakt over 5 000 kr
+              <Dot /> Gratis frakt over {FREE_SHIPPING_LABEL}
             </span>
             <span className="inline-flex items-center gap-1.5">
               <Dot /> Søk på NOBB, dimensjon og vare

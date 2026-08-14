@@ -3,6 +3,7 @@ import { cookies } from "next/headers";
 import { Suspense } from "react";
 
 import { AddToMaterialListButton } from "@/app/_components/storefront/add-to-material-list-button";
+import { FREE_SHIPPING_LABEL } from "@/lib/shipping";
 import { AddToCartWithQuantity } from "@/app/_components/storefront/add-to-cart-with-quantity";
 import { StorefrontMobileControls } from "@/app/_components/storefront/storefront-mobile-controls";
 import { StorefrontProfileTracker } from "@/app/_components/storefront/storefront-profile-tracker";
@@ -356,8 +357,8 @@ function DepartmentGlyph({ slug }: { slug: string }) {
 function ValuePropsBand() {
   const props = [
     {
-      title: "Gratis frakt over 5 000 kr",
-      body: "Gratis levert over 5 000 kr.",
+      title: `Gratis frakt over ${FREE_SHIPPING_LABEL}`,
+      body: `Gratis levert over ${FREE_SHIPPING_LABEL}.`,
       icon: (
         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" className="h-5 w-5">
           <path d="M3 7h11v9H3zM14 10h4l3 3v3h-7z" />
@@ -825,8 +826,8 @@ function FilterPanel({
 function TrustCard() {
   const items = [
     {
-      title: "Gratis frakt over 5 000 kr",
-      body: "Gratis levert over 5 000 kr.",
+      title: `Gratis frakt over ${FREE_SHIPPING_LABEL}`,
+      body: `Gratis levert over ${FREE_SHIPPING_LABEL}.`,
       icon: (
         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" className="h-4 w-4">
           <path d="M3 7h11v9H3zM14 10h4l3 3v3h-7z" />

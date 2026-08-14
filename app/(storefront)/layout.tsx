@@ -1,6 +1,7 @@
 import { Suspense, type ReactNode } from "react";
 
 import { StorefrontHeader } from "@/app/_components/storefront/storefront-header";
+import { FREE_SHIPPING_LABEL } from "@/lib/shipping";
 import { StorefrontProvider } from "@/app/_components/storefront/storefront-provider";
 
 export default function StorefrontLayout({ children }: { children: ReactNode }) {
@@ -30,7 +31,7 @@ function StorefrontHeaderFallback() {
               <span className="inline-flex h-4 items-center rounded-sm bg-[#d9ff7a] px-1.5 text-[10px] font-bold text-[#0f321f]">PARTNERPRIS</span>
               Byggevarer til <strong className="text-[#d9ff7a]">proffpris</strong>
             </span>
-            <span>Gratis frakt over 5 000 kr</span>
+            <span>Gratis frakt over {FREE_SHIPPING_LABEL}</span>
           </div>
         </div>
       </div>

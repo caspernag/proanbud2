@@ -5,7 +5,10 @@ import { env, hasSupabaseEnv } from "@/lib/env";
 
 const PUBLIC_PATHS = new Set(["/login", "/auth/callback"]);
 
-const PROTECTED_PREFIXES = ["/min-side", "/prosjekter", "/admin"];
+// /sjefen har sin egen administratorsjekk (requireAdminUser) på hver side og i
+// hver server action. Den ligger bevisst ikke her: proxy-en sjekker kun at du
+// er innlogget, og innlogget er ikke det samme som administrator.
+const PROTECTED_PREFIXES = ["/min-side", "/prosjekter"];
 
 // ---------------------------------------------------------------------------
 // Per-IP rate limiting for sensitive POST endpoints.

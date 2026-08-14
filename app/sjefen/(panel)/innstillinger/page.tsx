@@ -1,83 +1,99 @@
-import { revalidatePath } from "next/cache";
+import { adminRows, collectErrors, requireAdminDb } from "@/lib/admin-data";
 
-import { requireAdminUser } from "@/lib/admin-auth";
-import { createSupabaseServerClient } from "@/lib/supabase/server";
+import { ActionForm, SubmitButton } from "../../_components/action-form";
+import { Card, DataErrorBanner, EmptyState, PageHeader } from "../../_components/ui";
+import { updateMarkupAction } from "./actions";
+
+type SupplierMarkup = {
+  id: string;
+  supplier_name: string;
+  markup_percentage: number;
+  markup_fixed: number;
+};
 
 export default async function InnstillingerPage() {
-  await requireAdminUser();
+  const db = await requireAdminDb();
 
-  const supabase = await createSupabaseServerClient();
-  const { data: markups } = supabase
-    ? await supabase.from("supplier_markups").select("*").order("supplier_name")
-    : { data: [] };
-
-  async function updateMarkup(formData: FormData) {
-    "use server";
-    const supabaseServer = await createSupabaseServerClient();
-    if (!supabaseServer) return;
-    const id         = formData.get("id") as string;
-    const percentage = parseFloat(formData.get("percentage") as string);
-    const fixed      = parseFloat(formData.get("fixed") as string);
-    await supabaseServer
+  const markupResult = await adminRows<SupplierMarkup>(
+    "Leverandørpåslag",
+    db
       .from("supplier_markups")
-      .update({ markup_percentage: percentage, markup_fixed: fixed })
-      .eq("id", id);
-    revalidatePath("/sjefen/innstillinger");
-  }
+      .select("id, supplier_name, markup_percentage, markup_fixed")
+      .order("supplier_name"),
+  );
+
+  const errors = collectErrors(markupResult);
 
   return (
-    <div className="p-8 space-y-8">
-      <div>
-        <h1 className="text-2xl font-bold text-stone-900">Innstillinger</h1>
-        <p className="text-sm text-stone-400 mt-0.5">Globale innstillinger for plattformen</p>
-      </div>
+    <div className="space-y-6 p-8">
+      <PageHeader
+        eyebrow="Konfigurasjon"
+        title="Innstillinger"
+        description="Globale innstillinger for plattformen."
+      />
 
-      {/* Markup settings */}
-      <div className="bg-white border border-stone-200 rounded-2xl overflow-hidden">
-        <div className="px-6 py-4 border-b border-stone-200">
-          <h2 className="text-sm font-semibold text-stone-900">Leverandør-påslag</h2>
-          <p className="text-xs text-stone-400 mt-0.5">Juster påslag på priser fra leverandørene</p>
-        </div>
-        <div className="divide-y divide-zinc-800">
-          {markups?.map((markup) => (
-            <form action={updateMarkup} key={markup.id} className="px-6 py-4 flex items-center gap-4 hover:bg-stone-50/80 transition">
-              <input type="hidden" name="id" value={markup.id} />
-              <div className="flex-1 text-sm text-stone-800 font-medium">{markup.supplier_name}</div>
-              <div className="flex items-center gap-2">
-                <label className="text-xs text-stone-400">Påslag (%)</label>
-                <input
-                  type="number"
-                  name="percentage"
-                  defaultValue={markup.markup_percentage}
-                  step="0.1"
-                  className="w-20 rounded-lg bg-stone-100 border border-stone-300 px-3 py-1.5 text-sm text-stone-900 focus:outline-none focus:ring-2 focus:ring-amber-500"
-                />
-              </div>
-              <div className="flex items-center gap-2">
-                <label className="text-xs text-stone-400">Fast (kr)</label>
-                <input
-                  type="number"
-                  name="fixed"
-                  defaultValue={markup.markup_fixed}
-                  step="0.5"
-                  className="w-20 rounded-lg bg-stone-100 border border-stone-300 px-3 py-1.5 text-sm text-stone-900 focus:outline-none focus:ring-2 focus:ring-amber-500"
-                />
-              </div>
-              <button
-                type="submit"
-                className="px-4 py-1.5 rounded-lg bg-amber-500 hover:bg-amber-400 text-stone-900 font-semibold text-xs transition"
-              >
-                Lagre
-              </button>
-            </form>
-          ))}
-          {(!markups || markups.length === 0) && (
-            <div className="px-6 py-8 text-center text-stone-400 text-sm">
-              Ingen leverandører konfigurert.
-            </div>
-          )}
-        </div>
-      </div>
+      <DataErrorBanner errors={errors} />
+
+      <Card
+        title="Leverandørpåslag"
+        description="Påslaget legges på innkjøpsprisen og bestemmer hva kunden betaler i butikken."
+        bodyClassName=""
+      >
+        {markupResult.rows.length === 0 ? (
+          <EmptyState>Ingen leverandører konfigurert.</EmptyState>
+        ) : (
+          <ul className="divide-y divide-stone-100">
+            {markupResult.rows.map((markup) => (
+              <li key={markup.id}>
+                <ActionForm
+                  action={updateMarkupAction}
+                  className="flex flex-wrap items-end gap-4 px-5 py-4 transition hover:bg-stone-50"
+                  messageClassName="w-full"
+                >
+                  <input type="hidden" name="id" value={markup.id} />
+
+                  <span className="min-w-[180px] flex-1 text-sm font-semibold text-stone-900">
+                    {markup.supplier_name}
+                  </span>
+
+                  <label className="text-[10px] font-semibold uppercase tracking-[0.14em] text-stone-500">
+                    Påslag %
+                    <input
+                      type="number"
+                      name="percentage"
+                      step="0.1"
+                      min={-100}
+                      max={500}
+                      defaultValue={markup.markup_percentage}
+                      className="mt-1 block h-10 w-24 border border-stone-300 bg-white px-3 text-sm font-normal tabular-nums text-stone-900 outline-none focus:border-[#163f2a]"
+                    />
+                  </label>
+
+                  <label className="text-[10px] font-semibold uppercase tracking-[0.14em] text-stone-500">
+                    Fast kr
+                    <input
+                      type="number"
+                      name="fixed"
+                      step="0.5"
+                      min={-100_000}
+                      max={100_000}
+                      defaultValue={markup.markup_fixed}
+                      className="mt-1 block h-10 w-24 border border-stone-300 bg-white px-3 text-sm font-normal tabular-nums text-stone-900 outline-none focus:border-[#163f2a]"
+                    />
+                  </label>
+
+                  <SubmitButton
+                    pendingLabel="Lagrer …"
+                    className="inline-flex h-10 items-center bg-[#163f2a] px-4 text-sm font-semibold text-white transition hover:bg-[#1d5639]"
+                  >
+                    Lagre
+                  </SubmitButton>
+                </ActionForm>
+              </li>
+            ))}
+          </ul>
+        )}
+      </Card>
     </div>
   );
 }

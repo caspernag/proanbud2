@@ -3,6 +3,7 @@ import { cookies } from "next/headers";
 import { notFound } from "next/navigation";
 
 import { AddToMaterialListButton } from "@/app/_components/storefront/add-to-material-list-button";
+import { FREE_SHIPPING_LABEL } from "@/lib/shipping";
 import { ProductPurchaseControls } from "@/app/_components/storefront/product-purchase-controls";
 import { StorePickupDropdown } from "@/app/_components/storefront/store-pickup-dropdown";
 import { StorefrontProfileTracker } from "@/app/_components/storefront/storefront-profile-tracker";
@@ -206,7 +207,7 @@ export default async function StorefrontProductPage({ params }: StorefrontProduc
                 {isVerifiedNetAvailable ? (
                   <>
                     <p className="font-semibold text-stone-900">24-48 timers levering</p>
-                    <p className="text-xs text-stone-500">Sendes fra Prisbygg-lager neste virkedag. Gratis frakt over 5 000 kr.</p>
+                    <p className="text-xs text-stone-500">Sendes fra Prisbygg-lager neste virkedag. Gratis frakt over {FREE_SHIPPING_LABEL}.</p>
                   </>
                 ) : isStoreAvailable ? (
                   <>
@@ -230,7 +231,7 @@ export default async function StorefrontProductPage({ params }: StorefrontProduc
 
           {/* Trust row */}
           <div className="grid grid-cols-2 gap-2 sm:grid-cols-4">
-            <TrustItem icon="🚚" title="Gratis frakt" subtitle="over 5 000 kr" />
+            <TrustItem icon="🚚" title="Gratis frakt" subtitle={`over ${FREE_SHIPPING_LABEL}`} />
             <TrustItem icon="↩︎" title="30 dager" subtitle="retur" />
             <TrustItem icon="✓" title="NOBB" subtitle="sertifisert" />
             <TrustItem icon="💳" title="Faktura" subtitle="14 dager" />

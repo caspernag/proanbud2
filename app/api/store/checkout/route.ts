@@ -3,6 +3,7 @@ import { z } from "zod";
 
 import { hasStripeWebhookEnv } from "@/lib/env";
 import { orderLineUnit } from "@/lib/product-unit-pricing";
+import { calculateShippingNok } from "@/lib/shipping";
 import { createShopOrderSlug, logShopOrderEvent } from "@/lib/shop-order";
 import { getStorefrontProductsByIds } from "@/lib/storefront";
 import { getStripe } from "@/lib/stripe";
@@ -286,17 +287,6 @@ function consolidateCartItems(items: Array<{ productId: string; quantity: number
   }));
 }
 
-function calculateShippingNok(subtotalNok: number) {
-  if (subtotalNok <= 0) {
-    return 0;
-  }
-
-  if (subtotalNok >= 5000) {
-    return 0;
-  }
-
-  return 499;
-}
 
 function resolveCheckoutOrigin(requestUrl: string) {
   const url = new URL(requestUrl);

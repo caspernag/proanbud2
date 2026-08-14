@@ -268,7 +268,7 @@ export async function sendMaterialOrderEmail(payload: OrderEmailPayload): Promis
 function buildShopOrderHtml(p: ShopOrderEmailPayload): string {
   const orderReference = p.orderSlug ?? `#${p.orderId.slice(0, 8).toUpperCase()}`;
   const orderUrl = publicUrl(`/ordre/${encodeURIComponent(p.orderSlug ?? p.orderId)}`);
-  const logoUrl = "logo/light/logo-primary.png";
+  const logoUrl = publicUrl("/logo/light/logo-primary.png");
   const paidDate = fmtDate(p.paidAt);
   const itemRows = p.items
     .map(
@@ -574,4 +574,221 @@ function resolveByggmakkerOrderRecipient() {
   }
 
   return process.env.NODE_ENV === "production" ? "" : BYGGMAKKER_DEMO_EMAIL;
+}
+
+/* ── Statusoppdatering til kunde ──────────────────────────────────────────
+ * Sendes når admin flytter en butikkordre videre i logistikkflyten. Egen mal,
+ * bevisst holdt adskilt fra ordrebekreftelsen (sendShopOrderEmail) og
+ * leverandørbestillingen (sendByggmakkerShopOrderEmail).
+ */
+
+export type ShopOrderStatusEmailPayload = {
+  orderId: string;
+  orderSlug?: string | null;
+  customerName: string;
+  customerEmail: string;
+  /** Transportstatus etter oppdateringen. */
+  transportStatus: "pending" | "confirmed" | "packing" | "shipped" | "out_for_delivery" | "delivered" | "cancelled";
+  /** Norsk etikett for alle stegene, i rekkefølge, til stegviseren. */
+  steps: { status: string; label: string; reached: boolean }[];
+  statusNote?: string | null;
+  carrierLabel?: string | null;
+  trackingNumber?: string | null;
+  trackingUrl?: string | null;
+  estimatedDeliveryDate?: string | null;
+  shippingAddress: string;
+  shippingPostalCode: string;
+  shippingCity: string;
+};
+
+const STATUS_EMAIL_COPY: Record<
+  ShopOrderStatusEmailPayload["transportStatus"],
+  { badge: string; heading: string; body: string }
+> = {
+  pending: {
+    badge: "Oppdatering",
+    heading: "Ny status på ordren din",
+    body: "Vi har oppdatert bestillingen din. Detaljene finner du under.",
+  },
+  confirmed: {
+    badge: "Bekreftet",
+    heading: "Ordren er bekreftet",
+    body: "Vi har bekreftet bestillingen din, og varene gjøres nå klare.",
+  },
+  packing: {
+    badge: "Plukkes",
+    heading: "Varene dine plukkes nå",
+    body: "Bestillingen er under plukking og pakking. Du får ny beskjed når den sendes.",
+  },
+  shipped: {
+    badge: "Sendt",
+    heading: "Varene er sendt",
+    body: "Bestillingen har forlatt lageret og er på vei til deg.",
+  },
+  out_for_delivery: {
+    badge: "Under levering",
+    heading: "Varene er under levering",
+    body: "Leveransen er ute på bil og kommer til deg i løpet av kort tid.",
+  },
+  delivered: {
+    badge: "Levert",
+    heading: "Varene er levert",
+    body: "Leveransen er fullført. Takk for handelen — si fra hvis noe ikke stemmer.",
+  },
+  cancelled: {
+    badge: "Kansellert",
+    heading: "Ordren er kansellert",
+    body: "Bestillingen er kansellert. Ta kontakt hvis dette ikke stemmer.",
+  },
+};
+
+function buildShopOrderStatusHtml(p: ShopOrderStatusEmailPayload): string {
+  const orderReference = p.orderSlug ?? `#${p.orderId.slice(0, 8).toUpperCase()}`;
+  const orderUrl = publicUrl(`/ordre/${encodeURIComponent(p.orderSlug ?? p.orderId)}`);
+  const logoUrl = publicUrl("/logo/light/logo-primary.png");
+  const copy = STATUS_EMAIL_COPY[p.transportStatus] ?? STATUS_EMAIL_COPY.pending;
+
+  const stepCells = p.steps
+    .map(
+      (step) => `
+        <td style="padding:0 3px;vertical-align:top;width:${Math.floor(100 / Math.max(1, p.steps.length))}%">
+          <div style="height:4px;border-radius:999px;background:${step.reached ? "#163f2a" : "#e7e2d8"}"></div>
+          <div style="margin-top:7px;font-size:10px;line-height:1.35;font-weight:${step.reached ? "800" : "600"};color:${step.reached ? "#163f2a" : "#a8a29e"}">${escapeHtml(step.label)}</div>
+        </td>`,
+    )
+    .join("");
+
+  const detailRows: string[] = [];
+  if (p.carrierLabel) {
+    detailRows.push(
+      `<tr><td style="padding:7px 0;border-bottom:1px solid #f0ece4;font-size:13px;color:#78716c">Transportør</td><td align="right" style="padding:7px 0;border-bottom:1px solid #f0ece4;font-size:13px;font-weight:700;color:#171412">${escapeHtml(p.carrierLabel)}</td></tr>`,
+    );
+  }
+  if (p.trackingNumber) {
+    detailRows.push(
+      `<tr><td style="padding:7px 0;border-bottom:1px solid #f0ece4;font-size:13px;color:#78716c">Sporingsnummer</td><td align="right" style="padding:7px 0;border-bottom:1px solid #f0ece4;font-size:13px;font-weight:700;color:#171412;font-family:ui-monospace,SFMono-Regular,Menlo,monospace">${escapeHtml(p.trackingNumber)}</td></tr>`,
+    );
+  }
+  if (p.estimatedDeliveryDate) {
+    detailRows.push(
+      `<tr><td style="padding:7px 0;border-bottom:1px solid #f0ece4;font-size:13px;color:#78716c">Estimert levering</td><td align="right" style="padding:7px 0;border-bottom:1px solid #f0ece4;font-size:13px;font-weight:700;color:#171412">${fmtDate(`${p.estimatedDeliveryDate}T12:00:00Z`)}</td></tr>`,
+    );
+  }
+
+  const trackingButton =
+    p.trackingUrl && /^https?:\/\//i.test(p.trackingUrl)
+      ? `<table role="presentation" cellspacing="0" cellpadding="0" style="margin-top:14px;border-collapse:collapse"><tr><td style="border-radius:8px;border:1px solid #163f2a"><a href="${escapeHtml(p.trackingUrl)}" style="display:inline-block;padding:11px 17px;font-size:13px;font-weight:800;color:#163f2a;text-decoration:none">Spor pakken</a></td></tr></table>`
+      : "";
+
+  const noteBlock = p.statusNote?.trim()
+    ? `<div style="margin:20px 0 0;padding:14px 16px;border:1px solid #e7e2d8;border-radius:10px;background:#faf8f3">
+         <div style="font-size:10px;font-weight:800;text-transform:uppercase;letter-spacing:.08em;color:#78716c">Melding fra oss</div>
+         <div style="margin-top:7px;font-size:14px;line-height:1.65;color:#171412">${escapeHtml(p.statusNote.trim()).replaceAll("\n", "<br/>")}</div>
+       </div>`
+    : "";
+
+  return `<!DOCTYPE html>
+<html lang="no">
+<head><meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>${escapeHtml(copy.heading)}</title></head>
+<body style="margin:0;padding:0;background:#f3f1ec;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Arial,sans-serif;color:#171412">
+  <table role="presentation" width="100%" cellspacing="0" cellpadding="0" style="background:#f3f1ec;border-collapse:collapse">
+    <tr>
+      <td align="center" style="padding:28px 14px">
+        <table role="presentation" width="100%" cellspacing="0" cellpadding="0" style="max-width:640px;border-collapse:separate;border-spacing:0;background:#ffffff;border:1px solid #e5e0d7;border-radius:14px;overflow:hidden">
+
+          <tr>
+            <td style="padding:22px 28px;background:#fffefb;border-bottom:1px solid #ece6dc">
+              <table role="presentation" width="100%" cellspacing="0" cellpadding="0" style="border-collapse:collapse">
+                <tr>
+                  <td style="vertical-align:middle">
+                    <img src="${logoUrl}" width="178" alt="Prisbygg" style="display:block;width:178px;max-width:178px;height:auto;border:0" />
+                  </td>
+                  <td align="right" style="vertical-align:middle;font-size:12px;line-height:1.5;color:#78716c">
+                    Ordre<br/><strong style="font-size:14px;color:#171412">${escapeHtml(orderReference)}</strong>
+                  </td>
+                </tr>
+              </table>
+            </td>
+          </tr>
+
+          <tr>
+            <td style="padding:30px 28px 26px;background:#163f2a;color:#ffffff">
+              <div style="display:inline-block;padding:5px 10px;border-radius:999px;background:#d9ff7a;color:#163f2a;font-size:11px;font-weight:800;text-transform:uppercase;letter-spacing:.08em">${escapeHtml(copy.badge)}</div>
+              <h1 style="margin:16px 0 0;font-size:28px;line-height:1.15;font-weight:800;color:#ffffff">${escapeHtml(copy.heading)}</h1>
+              <p style="margin:12px 0 0;max-width:520px;font-size:15px;line-height:1.65;color:#e8f2ea">Hei ${escapeHtml(p.customerName)}. ${escapeHtml(copy.body)}</p>
+              <table role="presentation" cellspacing="0" cellpadding="0" style="margin-top:22px;border-collapse:collapse">
+                <tr><td style="border-radius:8px;background:#ffffff"><a href="${orderUrl}" style="display:inline-block;padding:12px 18px;font-size:13px;font-weight:800;color:#163f2a;text-decoration:none">Følg ordren</a></td></tr>
+              </table>
+            </td>
+          </tr>
+
+          <tr>
+            <td style="padding:24px 28px 4px;background:#ffffff">
+              <div style="font-size:11px;font-weight:800;text-transform:uppercase;letter-spacing:.08em;color:#78716c;margin-bottom:10px">Leveringsstatus</div>
+              <table role="presentation" width="100%" cellspacing="0" cellpadding="0" style="border-collapse:collapse"><tr>${stepCells}</tr></table>
+              ${noteBlock}
+            </td>
+          </tr>
+
+          ${
+            detailRows.length > 0 || trackingButton
+              ? `<tr>
+            <td style="padding:22px 28px 4px;background:#ffffff">
+              <div style="font-size:11px;font-weight:800;text-transform:uppercase;letter-spacing:.08em;color:#78716c;margin-bottom:6px">Transport</div>
+              <table role="presentation" width="100%" cellspacing="0" cellpadding="0" style="border-collapse:collapse">${detailRows.join("")}</table>
+              ${trackingButton}
+            </td>
+          </tr>`
+              : ""
+          }
+
+          <tr>
+            <td style="padding:22px 28px 26px;background:#ffffff">
+              <div style="font-size:11px;font-weight:800;text-transform:uppercase;letter-spacing:.08em;color:#78716c;margin-bottom:8px">Leveringsadresse</div>
+              <div style="font-size:14px;line-height:1.7;color:#171412">
+                ${escapeHtml(p.shippingAddress)}<br/>${escapeHtml(p.shippingPostalCode)} ${escapeHtml(p.shippingCity)}
+              </div>
+            </td>
+          </tr>
+
+          <tr>
+            <td style="padding:18px 28px 24px;background:#fffefb;border-top:1px solid #ece6dc;font-size:11px;line-height:1.65;color:#a8a29e">
+              Prisbygg &nbsp;·&nbsp; post@prisbygg.no<br/>
+              Du kan alltid følge ordren på <a href="${orderUrl}" style="color:#163f2a;font-weight:700;text-decoration:none">ordresiden</a> (ingen innlogging nødvendig).
+            </td>
+          </tr>
+        </table>
+      </td>
+    </tr>
+  </table>
+</body>
+</html>`;
+}
+
+export async function sendShopOrderStatusEmail(payload: ShopOrderStatusEmailPayload): Promise<string | null> {
+  const resend = getResend();
+  if (!resend) {
+    console.warn("[email] RESEND_API_KEY ikke satt – hopper over statusoppdatering");
+    return null;
+  }
+
+  const orderReference = payload.orderSlug ?? `#${payload.orderId.slice(0, 8).toUpperCase()}`;
+  const copy = STATUS_EMAIL_COPY[payload.transportStatus] ?? STATUS_EMAIL_COPY.pending;
+
+  console.log(`[email] Sender statusoppdatering (${payload.transportStatus}) for ${payload.orderId} til ${payload.customerEmail}`);
+
+  const result = await resend.emails.send({
+    from: FROM_ADDRESS,
+    to: payload.customerEmail,
+    subject: `${copy.heading} — ordre ${orderReference}`,
+    html: buildShopOrderStatusHtml(payload),
+  });
+
+  if (result.error) {
+    console.error("[email] Resend returnerte feil på statusoppdatering:", result.error);
+    throw new Error(`Resend feil: ${result.error.message}`);
+  }
+
+  console.log("[email] Statusoppdatering sendt OK, id:", result.data?.id);
+  return result.data?.id ?? null;
 }
