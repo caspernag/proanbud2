@@ -15,7 +15,7 @@ import {
 } from "@/lib/shipping";
 import { buildStorefrontNobbImagePath, isAllowedStorefrontImageUrl, STORE_IMAGE_FALLBACK_URL } from "@/lib/storefront-image";
 import {
-  STOREFRONT_STORE_OPTIONS,
+  storefrontAgreementStores,
   suggestNearestStoreByAddress,
   type StorefrontStoreOption,
 } from "@/lib/storefront-store-selection";
@@ -39,6 +39,10 @@ type StockInfo = {
   netQuantity: number | null;
   storeCount?: number;
 };
+
+// Kun butikker Nag Software har prisavtale med skal tilbys som hentested —
+// franchise-Byggmakker uten avtale er ikke garantert gratis/ferdigpakket henting.
+const PICKUP_STORES = storefrontAgreementStores();
 
 const UNKNOWN_STOCK_INFO: StockInfo = {
   status: "unknown",
@@ -328,10 +332,10 @@ export function StorefrontCheckoutClient({ paymentCancelled }: { paymentCancelle
   const filteredPickupStores = useMemo(() => {
     const query = pickupStoreSearch.trim().toLowerCase();
     if (!query) {
-      return STOREFRONT_STORE_OPTIONS;
+      return PICKUP_STORES;
     }
 
-    return STOREFRONT_STORE_OPTIONS.filter((store) => {
+    return PICKUP_STORES.filter((store) => {
       const haystack = `${store.name} ${store.address ?? ""}`.toLowerCase();
       return haystack.includes(query);
     });
@@ -340,7 +344,7 @@ export function StorefrontCheckoutClient({ paymentCancelled }: { paymentCancelle
   function handlePickupStoreSelection(selectedId: string) {
     setPickupStoreId(selectedId);
     setPickupStoreSelectionLocked(Boolean(selectedId));
-    setPickupStore(STOREFRONT_STORE_OPTIONS.find((store) => store.id === selectedId) ?? null);
+    setPickupStore(PICKUP_STORES.find((store) => store.id === selectedId) ?? null);
     setPickupStoreListOpen(false);
   }
 

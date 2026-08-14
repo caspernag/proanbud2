@@ -6,6 +6,7 @@ import { orderLineUnit } from "@/lib/product-unit-pricing";
 import { calculateShippingNok } from "@/lib/shipping";
 import { createShopOrderSlug, logShopOrderEvent, normalizeShopOrderFulfillment } from "@/lib/shop-order";
 import { getStorefrontProductsByIds } from "@/lib/storefront";
+import { storefrontAgreementStores } from "@/lib/storefront-store-selection";
 import { getStripe } from "@/lib/stripe";
 import { createSupabaseAdminClient } from "@/lib/supabase/admin";
 
@@ -77,9 +78,12 @@ export async function POST(request: Request) {
     };
   });
 
-  if (!payload.customer.addressLine1.trim() || !payload.customer.postalCode.trim() || !payload.customer.city.trim()) {
+  if (
+    payload.deliveryMode === "delivery" &&
+    (!payload.customer.addressLine1.trim() || !payload.customer.postalCode.trim() || !payload.customer.city.trim())
+  ) {
     return NextResponse.json(
-      { error: "Adresse, postnummer og by må fylles ut for å finne nærmeste byggevarehandel eller leveringssted." },
+      { error: "Adresse, postnummer og by må fylles ut for levering." },
       { status: 400 },
     );
   }
@@ -95,6 +99,18 @@ export async function POST(request: Request) {
 
   if (payload.deliveryMode === "pickup" && !fulfillment.pickup_store_id && !fulfillment.pickup_store_name) {
     return NextResponse.json({ error: "Velg en byggevarehandel før betaling." }, { status: 400 });
+  }
+
+  if (payload.deliveryMode === "pickup") {
+    const isAgreementStore = storefrontAgreementStores().some(
+      (store) => store.id === fulfillment.pickup_store_id,
+    );
+    if (!isAgreementStore) {
+      return NextResponse.json(
+        { error: "Denne butikken er ikke tilgjengelig for henting. Velg en byggevarehandel fra listen." },
+        { status: 400 },
+      );
+    }
   }
 
   const subtotalNok = orderItems.reduce((sum, item) => sum + item.lineTotalNok, 0);
