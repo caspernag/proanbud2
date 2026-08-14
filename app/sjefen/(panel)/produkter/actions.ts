@@ -1,9 +1,10 @@
 "use server";
 
 import { revalidatePath } from "next/cache";
+import { redirect } from "next/navigation";
 
 import type { ActionState } from "@/app/sjefen/_components/action-form";
-import { importByggmakkerPriceFile } from "@/lib/admin-product-price-import";
+import { importPriceFile } from "@/lib/admin-product-price-import";
 import { requireAdminDb } from "@/lib/admin-data";
 
 function text(value: FormDataEntryValue | null, fallback = "") {
@@ -140,47 +141,54 @@ export async function updateProductAction(_prev: ActionState, formData: FormData
   return { ok: true, message: "Produktet er lagret." };
 }
 
-export async function importByggmakkerPriceFileAction(
+/**
+ * Importerer en prisfil (Excel, CSV eller JSON). Nye produkter opprettes,
+ * eksisterende matches på NOBB og oppdateres. Produkter fra samme leverandør som
+ * ikke lå i filen slettes IKKE her — de sendes til gjennomgang, der de kan
+ * beholdes eller slettes i bulk.
+ */
+export async function importPriceFileAction(
   _prev: ActionState,
   formData: FormData,
 ): Promise<ActionState> {
   const db = await requireAdminDb();
   const file = formData.get("priceFile");
+  const supplierName = text(formData.get("supplierName")) || "Byggmakker";
 
   if (!(file instanceof File) || file.size === 0) {
-    return { ok: false, message: "Velg en prisfil fra Byggmakker først." };
+    return { ok: false, message: "Velg en prisfil først." };
   }
 
+  // Må holdes under serverActions.bodySizeLimit i next.config.ts (20 MB).
   if (file.size > 20 * 1024 * 1024) {
     return { ok: false, message: "Prisfilen er for stor. Maks 20 MB." };
   }
 
-  const content = await file.text();
-  if (!content.trim()) {
-    return { ok: false, message: "Prisfilen er tom." };
-  }
-
+  let result;
   try {
-    const result = await importByggmakkerPriceFile(db, {
-      fileName: file.name || "byggmakker.csv",
-      content,
+    result = await importPriceFile(db, {
+      fileName: file.name || "prisfil.csv",
+      data: new Uint8Array(await file.arrayBuffer()),
+      supplierName,
     });
-
-    if (result.parsed === 0) {
-      return { ok: false, message: "Fant ingen produkter i prisfilen. Sjekk filformatet." };
-    }
-
-    revalidatePath("/sjefen/produkter");
-    revalidatePath("/");
-
-    return {
-      ok: true,
-      message: `Prisfil importert: ${result.existingUpdated} oppdatert, ${result.inserted} nye produkter.`,
-    };
   } catch (cause) {
     return {
       ok: false,
       message: cause instanceof Error ? cause.message : "Kunne ikke importere prisfilen.",
     };
   }
+
+  revalidatePath("/sjefen/produkter");
+  revalidatePath("/");
+
+  // redirect() kaster en spesiell feil Next fanger opp — den må ligge utenfor
+  // try/catch, ellers svelges navigasjonen av feilhåndteringen over.
+  if (result.missing > 0) {
+    redirect(`/sjefen/produkter/import/${encodeURIComponent(result.runId)}`);
+  }
+
+  return {
+    ok: true,
+    message: `Prisfil importert (${result.format}): ${result.updated} oppdatert, ${result.inserted} nye. Ingen produkter ble stående igjen.`,
+  };
 }

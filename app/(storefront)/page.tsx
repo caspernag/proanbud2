@@ -161,7 +161,7 @@ export default async function StorefrontPage({ searchParams }: StorefrontPagePro
 
       <section className="grid gap-5 lg:grid-cols-[280px_minmax(0,1fr)]">
         {/* Desktop sidebar – hidden on mobile */}
-        <aside className="hidden space-y-4 lg:sticky lg:top-[168px] lg:block lg:self-start">
+        <aside className="hidden space-y-4 lg:top-[168px] lg:block lg:self-start">
           <FilterPanel
             q={q}
             category={category}

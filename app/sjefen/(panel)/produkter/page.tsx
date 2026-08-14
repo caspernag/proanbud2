@@ -1,6 +1,7 @@
 import Link from "next/link";
 import type { ReactNode } from "react";
 
+import { listImportRuns } from "@/lib/admin-product-price-import";
 import { adminRows, collectErrors, requireAdminDb } from "@/lib/admin-data";
 
 import { ActionForm, SubmitButton } from "../../_components/action-form";
@@ -20,7 +21,7 @@ import {
   nok,
   num,
 } from "../../_components/ui";
-import { importByggmakkerPriceFileAction } from "./actions";
+import { importPriceFileAction } from "./actions";
 
 const PAGE_SIZE = 50;
 
@@ -81,7 +82,7 @@ export default async function ProdukterPage({ searchParams }: { searchParams: Se
   if (category) productQuery = productQuery.eq("category", category);
   if (supplier) productQuery = productQuery.eq("supplier_name", supplier);
 
-  const [productResponse, metaResult] = await Promise.all([
+  const [productResponse, metaResult, importRunsResult] = await Promise.all([
     productQuery
       .order("popularity_score", { ascending: false })
       .order("product_name", { ascending: true })
@@ -93,6 +94,7 @@ export default async function ProdukterPage({ searchParams }: { searchParams: Se
         .select("product_count, price_min, price_max, categories, suppliers, refreshed_at")
         .eq("id", 1),
     ),
+    listImportRuns(db, 5),
   ]);
 
   if (productResponse.error) {
@@ -104,7 +106,8 @@ export default async function ProdukterPage({ searchParams }: { searchParams: Se
   const total = productResponse.count ?? products.length;
   const totalPages = Math.max(1, Math.ceil(total / PAGE_SIZE));
   const meta = metaResult.rows[0] ?? null;
-  const errors = collectErrors({ error: productError }, metaResult);
+  const errors = collectErrors({ error: productError }, metaResult, importRunsResult);
+  const openReview = importRunsResult.rows.find((run) => run.status === "review") ?? null;
 
   const categories = meta?.categories.map(facetName).filter(Boolean).sort((a, b) => a.localeCompare(b, "nb")) ?? [];
   const suppliers = meta?.suppliers.map(facetName).filter(Boolean).sort((a, b) => a.localeCompare(b, "nb")) ?? [];
@@ -131,21 +134,44 @@ export default async function ProdukterPage({ searchParams }: { searchParams: Se
         <StatCard label="Pris til" value={nok(meta?.price_max ?? 0)} sub="høyeste katalogpris" />
       </section>
 
+      {openReview ? (
+        <div className="flex flex-wrap items-center justify-between gap-3 border border-amber-300 bg-amber-50 px-4 py-3">
+          <p className="text-xs text-amber-900">
+            <span className="font-semibold">Importen fra {openReview.file_name} venter på gjennomgang.</span>{" "}
+            {num(Math.max(0, openReview.missing_count - openReview.kept_count - openReview.deleted_count))} produkt(er)
+            lå ikke i filen og er ikke behandlet ennå.
+          </p>
+          <Link
+            href={`/sjefen/produkter/import/${encodeURIComponent(openReview.id)}`}
+            className={BTN_PRIMARY}
+          >
+            Åpne gjennomgang
+          </Link>
+        </div>
+      ) : null}
+
       <Card
         title="Importer Byggmakker-priser"
-        description="Last opp ny prisfil. Produkter matches på NOBB og får oppdatert utsalgspris inkl. mva og påslag."
+        description="Excel (.xlsx), CSV eller JSON. Produkter matches på NOBB: nye legges til, treff oppdateres med pris inkl. mva og påslag. Produkter som ikke ligger i filen sendes til gjennomgang — ingenting slettes automatisk."
       >
         <ActionForm
-          action={importByggmakkerPriceFileAction}
+          action={importPriceFileAction}
           encType="multipart/form-data"
-          className="grid gap-3 lg:grid-cols-[minmax(260px,1fr)_auto]"
+          className="grid gap-3 lg:grid-cols-[minmax(260px,1fr)_180px_auto]"
         >
           <input
             type="file"
             name="priceFile"
-            accept=".csv,.txt,.tsv,.json,.ndjson,text/csv,text/plain,application/json"
+            accept=".xlsx,.xlsm,.csv,.txt,.tsv,.json,.ndjson,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet,text/csv,text/plain,application/json"
             required
             className="block h-10 w-full border border-stone-300 bg-white text-xs text-stone-700 file:mr-3 file:h-full file:border-0 file:bg-stone-100 file:px-3 file:text-xs file:font-semibold file:text-stone-800 hover:file:bg-stone-200"
+          />
+          <input
+            name="supplierName"
+            defaultValue="Byggmakker"
+            aria-label="Leverandør"
+            placeholder="Leverandør"
+            className="h-10 border border-stone-300 bg-white px-3 text-sm text-stone-900 outline-none focus:border-[#163f2a]"
           />
           <SubmitButton pendingLabel="Importerer ..." className={BTN_PRIMARY}>
             Importer priser

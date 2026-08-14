@@ -563,6 +563,7 @@ function parseEan(raw: string) {
 // for kategorisering – tekstheuristikk brukes bare som siste fallback.
 const CATEGORY_BY_CODE: Record<string, string> = {
   // Trelast og konstruksjon
+  "0501": "Konstruksjonsvirke", // skurlast (gran/furu, også impregnert)
   "0502": "Konstruksjonsvirke",
   "0504": "Kledning",
   "0505": "Innvendig panel",
@@ -743,7 +744,7 @@ const SECTION_BY_CATEGORY: Record<string, string> = {
   "Tilbud og restesalg": "Tilbud",
 };
 
-function inferCategory(categoryCode: string, productName: string) {
+export function inferCategory(categoryCode: string, productName: string) {
   const fromCode = CATEGORY_BY_CODE[categoryCode];
   if (fromCode) {
     return fromCode;
@@ -779,7 +780,7 @@ function inferCategory(categoryCode: string, productName: string) {
   return "Generelt";
 }
 
-function inferSectionTitle(categoryCode: string, productName: string) {
+export function inferSectionTitle(categoryCode: string, productName: string) {
   const category = inferCategory(categoryCode, productName);
   const section = SECTION_BY_CATEGORY[category];
   if (section) {
@@ -803,7 +804,7 @@ function inferSectionTitle(categoryCode: string, productName: string) {
   return "Uklassifisert";
 }
 
-function inferBrand(brandOrSeries: string, productName: string) {
+export function inferBrand(brandOrSeries: string, productName: string) {
   if (brandOrSeries) {
     return brandOrSeries;
   }
@@ -812,7 +813,7 @@ function inferBrand(brandOrSeries: string, productName: string) {
   return firstWord || "Byggmakker";
 }
 
-function inferQuantitySuggestion(unit: string, sectionTitle: string) {
+export function inferQuantitySuggestion(unit: string, sectionTitle: string) {
   if (unit === "LM") {
     return sectionTitle === "Dekke" ? "25 lm" : "10 lm";
   }
@@ -829,6 +830,6 @@ function inferQuantitySuggestion(unit: string, sectionTitle: string) {
   return `1 ${unit.toLowerCase()}`;
 }
 
-function inferQuantityReason(unit: string, sectionTitle: string, supplierName: string) {
+export function inferQuantityReason(unit: string, sectionTitle: string, supplierName: string) {
   return `Mengdeforslaget er avledet fra enhetskode (${unit}) i ${supplierName}-prislisten og kategorien "${sectionTitle}".`;
 }
