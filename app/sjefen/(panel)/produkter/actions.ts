@@ -175,7 +175,7 @@ export async function importByggmakkerPriceFileAction(
 
     return {
       ok: true,
-      message: `Prisfil importert: ${result.updated} produkter oppdatert, ${result.unmatched} NOBB uten match i katalogen.`,
+      message: `Prisfil importert: ${result.existingUpdated} oppdatert, ${result.inserted} nye produkter.`,
     };
   } catch (cause) {
     return {
