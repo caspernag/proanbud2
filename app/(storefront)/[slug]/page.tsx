@@ -191,38 +191,38 @@ export default async function StorefrontProductPage({ params }: StorefrontProduc
                     </span>
                   )}
                   <span className="text-stone-500">
-                    {isVerifiedNetAvailable ? "24-48t hjemlevering" : "Hjemlevering"}
+                    {isVerifiedNetAvailable ? "Hentes i byggmakker" : "Hent i butikk"}
                   </span>
                 </div>
               )}
             </div>
           </div>
 
-          {/* Delivery promise card — replaces pickup-in-store since we deliver everything home */}
+          {/* Delivery promise card — keep the message honest and aligned with nearest-store pickup */}
           <div className="rounded-md border border-stone-200 bg-white p-3.5">
-            <p className="text-[11px] font-bold uppercase tracking-[0.14em] text-[#15452d]">Levering hjem til deg</p>
+            <p className="text-[11px] font-bold uppercase tracking-[0.14em] text-[#15452d]">Hent hos nærmeste byggmakker</p>
             <div className="mt-2 flex items-start gap-3">
-              <div className="flex h-8 w-8 shrink-0 items-center justify-center text-lg text-[#15452d]">🚚</div>
+              <div className="flex h-8 w-8 shrink-0 items-center justify-center text-lg text-[#15452d]">🏬</div>
               <div className="text-sm text-stone-700">
                 {isVerifiedNetAvailable ? (
                   <>
-                    <p className="font-semibold text-stone-900">24-48 timers levering</p>
-                    <p className="text-xs text-stone-500">Sendes fra Prisbygg-lager neste virkedag. Gratis frakt over {FREE_SHIPPING_LABEL}.</p>
+                    <p className="font-semibold text-stone-900">Lagerstatus bekreftet</p>
+                    <p className="text-xs text-stone-500">Varene hentes hovedsakelig fra nærmeste byggmakker etter bestilling. Vi bekrefter lokasjon og tilgjengelighet.</p>
                   </>
                 ) : isStoreAvailable ? (
                   <>
                     <p className="font-semibold text-stone-900">Lagerført i byggevarehus</p>
-                    <p className="text-xs text-stone-500">Kan skaffes fra butikk/lager. Levering bekreftes etter bestilling.</p>
+                    <p className="text-xs text-stone-500">Materialet kan hentes fra valgt butikk eller nærmeste byggmakker etter bekreftelse.</p>
                   </>
                 ) : byggmakkerAvailability ? (
                   <>
                     <p className="font-semibold text-stone-900">Skaffes på forespørsel</p>
-                    <p className="text-xs text-stone-500">Legg i handlekurv så bekrefter vi leveringstid før videre oppfølging.</p>
+                    <p className="text-xs text-stone-500">Vi sjekker tilgjengelighet og nærmeste lager før videre oppfølging.</p>
                   </>
                 ) : (
                   <>
-                    <p className="font-semibold text-stone-900">Vi sjekker leveringstid ved bestilling</p>
-                    <p className="text-xs text-stone-500">Typisk 2-5 virkedager hjem til deg.</p>
+                    <p className="font-semibold text-stone-900">Vi bekrefter henting</p>
+                    <p className="text-xs text-stone-500">Materialet hentes vanligvis fra nærmeste byggmakker etter bestilling.</p>
                   </>
                 )}
               </div>

@@ -232,11 +232,17 @@ export default async function StorefrontOrderPage({ params, searchParams }: Stor
           <section className="border border-stone-200 bg-white p-4 shadow-[0_8px_24px_rgba(32,25,15,0.05)]">
             <p className="text-sm font-semibold text-stone-900">Leveringsinformasjon</p>
             <p className="mt-3 text-sm leading-6 text-stone-600">
-              {order.customer_name}<br />
-              {order.shipping_address_line1}<br />
-              {order.shipping_postal_code} {order.shipping_city}
+              {order.customer_name}
+              {order.shipping_address_line1 || order.shipping_city || order.shipping_postal_code ? (
+                <>
+                  <br />
+                  {order.shipping_address_line1 || "Hentes i butikk"}
+                  {order.shipping_postal_code || order.shipping_city ? <><br />{order.shipping_postal_code} {order.shipping_city}</> : null}
+                </>
+              ) : null}
+              {order.shipping_address_line1 ? null : order.customer_phone ? <><br />Telefon: {order.customer_phone}</> : null}
             </p>
-            {order.customer_phone ? <p className="mt-3 text-sm text-stone-600">Telefon: {order.customer_phone}</p> : null}
+            {order.customer_phone && order.shipping_address_line1 ? <p className="mt-3 text-sm text-stone-600">Telefon: {order.customer_phone}</p> : null}
             {order.customer_note ? (
               <p className="mt-3 border border-stone-200 bg-stone-50 px-3 py-2 text-sm text-stone-600">{order.customer_note}</p>
             ) : null}

@@ -213,6 +213,11 @@ export type MaterialOrderView = {
 };
 
 export const VAT_RATE = 0.25;
+export const MINIMUM_ORDER_VALUE_NOK = 500;
+
+export function getDefaultMaterialOrderDeliveryMode(mode?: OrderDeliveryMode): OrderDeliveryMode {
+  return mode ?? "pickup";
+}
 
 export function toVatInclusiveNok(value: number, vatRate = VAT_RATE) {
   if (!Number.isFinite(value) || value <= 0) {

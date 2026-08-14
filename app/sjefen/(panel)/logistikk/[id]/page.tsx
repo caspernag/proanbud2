@@ -417,13 +417,25 @@ export default async function LogistikkOrdrePage({ params }: { params: Promise<{
           />
 
           <div className="border border-stone-200 bg-white p-5">
-            <h2 className="text-sm font-bold text-stone-900">Leveringsadresse</h2>
+            <h2 className="text-sm font-bold text-stone-900">
+              {order.pickup_store_name ? "Henting i butikk" : "Leveringsadresse"}
+            </h2>
             <address className="mt-3 text-sm not-italic leading-6 text-stone-800">
               {order.customer_name}
-              <br />
-              {order.shipping_address_line1}
-              <br />
-              {order.shipping_postal_code} {order.shipping_city}
+              {order.pickup_store_name ? (
+                <>
+                  <br />
+                  {order.pickup_store_name}
+                  {order.pickup_store_id ? <><br />{order.pickup_store_id}</> : null}
+                </>
+              ) : (
+                <>
+                  <br />
+                  {order.shipping_address_line1 ?? "—"}
+                  <br />
+                  {order.shipping_postal_code ?? ""} {order.shipping_city ?? ""}
+                </>
+              )}
               {order.customer_phone ? (
                 <>
                   <br />

@@ -55,6 +55,33 @@ export function isShopOrderTransportStatus(value: string): value is ShopOrderTra
   return value in SHOP_ORDER_TRANSPORT_LABELS;
 }
 
+export type ShopOrderFulfillmentInput = {
+  deliveryMode: "pickup" | "delivery";
+  addressLine1?: string | null;
+  postalCode?: string | null;
+  city?: string | null;
+  pickupStoreId?: string | null;
+  pickupStoreName?: string | null;
+};
+
+export function normalizeShopOrderFulfillment(input: ShopOrderFulfillmentInput) {
+  const deliveryMode = input.deliveryMode === "delivery" ? "delivery" : "pickup";
+  const addressLine1 = input.addressLine1?.trim() || null;
+  const postalCode = input.postalCode?.trim() || null;
+  const city = input.city?.trim() || null;
+  const pickupStoreId = deliveryMode === "pickup" ? input.pickupStoreId?.trim() || null : null;
+  const pickupStoreName = deliveryMode === "pickup" ? input.pickupStoreName?.trim() || null : null;
+
+  return {
+    delivery_mode: deliveryMode,
+    shipping_address_line1: deliveryMode === "delivery" ? addressLine1 : null,
+    shipping_postal_code: deliveryMode === "delivery" ? postalCode : null,
+    shipping_city: deliveryMode === "delivery" ? city : null,
+    pickup_store_id: pickupStoreId,
+    pickup_store_name: pickupStoreName,
+  };
+}
+
 export function transportStepState(status: ShopOrderTransportStatus) {
   if (status === "pending" || status === "cancelled") {
     return -1;

@@ -187,9 +187,11 @@ export type LogisticsOrder = {
   customer_name: string;
   customer_email: string;
   customer_phone: string | null;
-  shipping_address_line1: string;
-  shipping_postal_code: string;
-  shipping_city: string;
+  shipping_address_line1: string | null;
+  shipping_postal_code: string | null;
+  shipping_city: string | null;
+  pickup_store_id: string | null;
+  pickup_store_name: string | null;
   customer_note: string;
   internal_note: string;
   last_status_note: string;
@@ -399,6 +401,8 @@ export function matchesSearch(order: LogisticsOrder, query: string): boolean {
     order.shipping_city,
     order.shipping_postal_code,
     order.shipping_address_line1,
+    order.pickup_store_name,
+    order.pickup_store_id,
     order.tracking_number,
   ]
     .filter((value): value is string => Boolean(value))

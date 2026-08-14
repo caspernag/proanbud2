@@ -14,6 +14,11 @@ import {
   STANDARD_SHIPPING_NOK,
 } from "@/lib/shipping";
 import { buildStorefrontNobbImagePath, isAllowedStorefrontImageUrl, STORE_IMAGE_FALLBACK_URL } from "@/lib/storefront-image";
+import {
+  STOREFRONT_STORE_OPTIONS,
+  suggestNearestStoreByAddress,
+  type StorefrontStoreOption,
+} from "@/lib/storefront-store-selection";
 import type { StorefrontProduct } from "@/lib/storefront-types";
 import { formatCurrency } from "@/lib/utils";
 
@@ -50,6 +55,7 @@ type CheckoutDraft = {
   postalCode: string;
   city: string;
   notes: string;
+  deliveryMode: "pickup" | "delivery";
   checkoutFlow: "pay_now" | "klarna";
 };
 
@@ -77,6 +83,12 @@ export function StorefrontCheckoutClient({ paymentCancelled }: { paymentCancelle
   const [postalCode, setPostalCode] = useState("");
   const [city, setCity] = useState("");
   const [notes, setNotes] = useState("");
+  const [deliveryMode, setDeliveryMode] = useState<"pickup" | "delivery">("pickup");
+  const [pickupStoreId, setPickupStoreId] = useState<string>("");
+  const [pickupStore, setPickupStore] = useState<StorefrontStoreOption | null>(null);
+  const [pickupStoreSelectionLocked, setPickupStoreSelectionLocked] = useState(false);
+  const [pickupStoreListOpen, setPickupStoreListOpen] = useState(false);
+  const [pickupStoreSearch, setPickupStoreSearch] = useState("");
   const [checkoutFlow, setCheckoutFlow] = useState<"pay_now" | "klarna">("pay_now");
   const [draftLoaded, setDraftLoaded] = useState(false);
   const [addressFocused, setAddressFocused] = useState(false);
@@ -100,6 +112,7 @@ export function StorefrontCheckoutClient({ paymentCancelled }: { paymentCancelle
       setPostalCode(typeof parsed.postalCode === "string" ? parsed.postalCode : "");
       setCity(typeof parsed.city === "string" ? parsed.city : "");
       setNotes(typeof parsed.notes === "string" ? parsed.notes : "");
+      setDeliveryMode(parsed.deliveryMode === "delivery" ? "delivery" : "pickup");
       setCheckoutFlow(parsed.checkoutFlow === "klarna" ? "klarna" : "pay_now");
     } catch {
       // Ignore malformed checkout drafts.
@@ -121,11 +134,32 @@ export function StorefrontCheckoutClient({ paymentCancelled }: { paymentCancelle
       postalCode,
       city,
       notes,
+      deliveryMode,
       checkoutFlow,
     };
 
     window.localStorage.setItem(CHECKOUT_DRAFT_STORAGE_KEY, JSON.stringify(draft));
-  }, [addressLine1, checkoutFlow, city, draftLoaded, email, fullName, notes, phone, postalCode]);
+  }, [addressLine1, checkoutFlow, city, deliveryMode, draftLoaded, email, fullName, notes, phone, postalCode]);
+
+  useEffect(() => {
+    setPickupStoreSelectionLocked(false);
+  }, [addressLine1, city, postalCode]);
+
+  useEffect(() => {
+    const nextSuggestion = suggestNearestStoreByAddress({ addressLine1, postalCode, city });
+    if (!nextSuggestion) {
+      setPickupStore(null);
+      setPickupStoreId("");
+      return;
+    }
+
+    if (pickupStoreSelectionLocked && pickupStoreId) {
+      return;
+    }
+
+    setPickupStore(nextSuggestion);
+    setPickupStoreId(nextSuggestion.id);
+  }, [addressLine1, city, pickupStoreId, pickupStoreSelectionLocked, postalCode]);
 
   useEffect(() => {
     if (!addressFocused || addressLine1.trim().length < 3) {
@@ -281,15 +315,34 @@ export function StorefrontCheckoutClient({ paymentCancelled }: { paymentCancelle
 
   const subtotalNok = lineItems.reduce((sum, item) => sum + item.lineTotalNok, 0);
   const totalSavingsNok = lineItems.reduce((sum, item) => sum + item.savingsNok, 0);
-  const shippingNok = subtotalNok > 0 ? STANDARD_SHIPPING_NOK : 0;
-  const freeShipping = subtotalNok >= FREE_SHIPPING_THRESHOLD_NOK;
+  const shippingNok = deliveryMode === "pickup" ? 0 : subtotalNok > 0 ? STANDARD_SHIPPING_NOK : 0;
+  const freeShipping = deliveryMode === "pickup" ? false : subtotalNok >= FREE_SHIPPING_THRESHOLD_NOK;
   // Samme regnestykke som serveren i /api/store/checkout, via lib/shipping.
-  const effectiveShippingNok = calculateShippingNok(subtotalNok);
+  const effectiveShippingNok = deliveryMode === "pickup" ? 0 : calculateShippingNok(subtotalNok);
   const totalNok = subtotalNok + effectiveShippingNok;
   const vatNok = Math.round(totalNok * 0.2);
   const missingRequiredFields = [email, fullName, phone, addressLine1, postalCode, city].filter(
     (value) => value.trim().length === 0,
   ).length;
+
+  const filteredPickupStores = useMemo(() => {
+    const query = pickupStoreSearch.trim().toLowerCase();
+    if (!query) {
+      return STOREFRONT_STORE_OPTIONS;
+    }
+
+    return STOREFRONT_STORE_OPTIONS.filter((store) => {
+      const haystack = `${store.name} ${store.address ?? ""}`.toLowerCase();
+      return haystack.includes(query);
+    });
+  }, [pickupStoreSearch]);
+
+  function handlePickupStoreSelection(selectedId: string) {
+    setPickupStoreId(selectedId);
+    setPickupStoreSelectionLocked(Boolean(selectedId));
+    setPickupStore(STOREFRONT_STORE_OPTIONS.find((store) => store.id === selectedId) ?? null);
+    setPickupStoreListOpen(false);
+  }
 
   async function submitCheckout() {
     if (lineItems.length === 0) {
@@ -297,8 +350,18 @@ export function StorefrontCheckoutClient({ paymentCancelled }: { paymentCancelle
       return;
     }
 
-    if (!email.trim() || !fullName.trim() || !phone.trim() || !addressLine1.trim() || !postalCode.trim() || !city.trim()) {
-      setMessage("Fyll inn kontakt- og leveringsinformasjon før betaling.");
+    if (!email.trim() || !fullName.trim() || !phone.trim()) {
+      setMessage("Fyll inn kontaktinformasjon før betaling.");
+      return;
+    }
+
+    if (!addressLine1.trim() || !postalCode.trim() || !city.trim()) {
+      setMessage("Fyll inn adresse, postnummer og by før betaling.");
+      return;
+    }
+
+    if (deliveryMode === "pickup" && !pickupStoreId) {
+      setMessage("Velg en byggevarehandel før betaling.");
       return;
     }
 
@@ -318,11 +381,14 @@ export function StorefrontCheckoutClient({ paymentCancelled }: { paymentCancelle
             email,
             fullName,
             phone,
-            addressLine1,
-            postalCode,
-            city,
+            addressLine1: deliveryMode === "delivery" ? addressLine1 : "",
+            postalCode: deliveryMode === "delivery" ? postalCode : "",
+            city: deliveryMode === "delivery" ? city : "",
             notes,
           },
+          deliveryMode,
+          pickupStoreId: deliveryMode === "pickup" ? pickupStoreId : "",
+          pickupStoreName: deliveryMode === "pickup" ? (pickupStore?.name ?? "") : "",
           checkoutFlow,
           items: items.map((item) => ({
             productId: item.productId,
@@ -537,12 +603,32 @@ export function StorefrontCheckoutClient({ paymentCancelled }: { paymentCancelle
             <span className="flex h-7 w-7 items-center justify-center rounded-full bg-[#15452d] text-xs font-bold text-white">2</span>
             <h2 className="text-base font-semibold text-stone-900">Kontakt og levering</h2>
           </div>
+
+          <div className="mt-4 grid gap-2 sm:grid-cols-2">
+            <button
+              type="button"
+              onClick={() => setDeliveryMode("pickup")}
+              className={`rounded-xl border px-3 py-3 text-left transition ${deliveryMode === "pickup" ? "border-[#15452d] bg-emerald-50" : "border-stone-200 bg-white hover:border-stone-400"}`}
+            >
+              <p className="text-sm font-semibold text-stone-900">Hent selv</p>
+              <p className="mt-0.5 text-xs text-stone-600">Hent på nærmeste byggevarehandel.</p>
+            </button>
+            <button
+              type="button"
+              onClick={() => setDeliveryMode("delivery")}
+              className={`rounded-xl border px-3 py-3 text-left transition ${deliveryMode === "delivery" ? "border-[#15452d] bg-emerald-50" : "border-stone-200 bg-white hover:border-stone-400"}`}
+            >
+              <p className="text-sm font-semibold text-stone-900">Få levert hjem</p>
+              <p className="mt-0.5 text-xs text-stone-600">Frakt beregnes ved valgt levering.</p>
+            </button>
+          </div>
+
           <div className="mt-4 grid gap-3 sm:grid-cols-2">
             <FieldInput label="E-post" type="email" value={email} onChange={setEmail} autoComplete="email" />
             <FieldInput label="Fullt navn" value={fullName} onChange={setFullName} autoComplete="name" />
             <FieldInput label="Telefon" type="tel" value={phone} onChange={setPhone} autoComplete="tel" />
-            <label className="relative flex flex-col gap-1.5 text-xs font-semibold text-stone-700 sm:col-span-2">
-              Adresse
+            <label className="relative flex flex-col gap-1.5 text-xs font-semibold text-stone-700">
+              Adresse for nærmeste byggevarehandel
               <input
                 type="text"
                 value={addressLine1}
@@ -579,8 +665,105 @@ export function StorefrontCheckoutClient({ paymentCancelled }: { paymentCancelle
                 </div>
               ) : null}
             </label>
+            {deliveryMode === "pickup" ? (
+              <div className="rounded-xl border border-stone-200 bg-stone-50 p-3 text-xs font-semibold text-stone-700">
+                <div className="flex items-center justify-between gap-3">
+                  <div className="min-w-0">
+                    <span className="flex items-center gap-1.5 text-amber-700">
+                      <span className="inline-flex h-2 w-2 rounded-full bg-amber-500" />
+                      {pickupStore ? `${pickupStore.name}` : "Velg nærmeste byggevarehus"}
+                    </span>
+                    {pickupStore?.address ? (
+                      <p className="mt-1 truncate text-[11px] font-medium text-stone-500">{pickupStore.address}</p>
+                    ) : (
+                      <p className="mt-1 text-[11px] font-medium text-stone-400">Foreslått fra adressen din</p>
+                    )}
+                  </div>
+                  <button
+                    type="button"
+                    onClick={() => setPickupStoreListOpen((current) => !current)}
+                    className="inline-flex shrink-0 items-center gap-1 rounded-full border border-amber-200 bg-amber-50 px-2.5 py-1 text-[11px] font-semibold text-amber-800 transition hover:bg-amber-100"
+                    aria-expanded={pickupStoreListOpen}
+                  >
+                    {pickupStoreListOpen ? "Skjul" : "Vis butikker"}
+                    <svg
+                      viewBox="0 0 20 20"
+                      fill="currentColor"
+                      className={`h-3 w-3 transition-transform ${pickupStoreListOpen ? "rotate-180" : ""}`}
+                      aria-hidden
+                    >
+                      <path
+                        fillRule="evenodd"
+                        d="M5.23 7.21a.75.75 0 011.06.02L10 11.06l3.71-3.83a.75.75 0 011.08 1.04l-4.25 4.39a.75.75 0 01-1.08 0L5.21 8.27a.75.75 0 01.02-1.06z"
+                        clipRule="evenodd"
+                      />
+                    </svg>
+                  </button>
+                </div>
+
+                {pickupStoreListOpen ? (
+                  <div className="mt-3 space-y-2 border-t border-stone-200 pt-3">
+                    <div className="relative">
+                      <input
+                        type="text"
+                        value={pickupStoreSearch}
+                        onChange={(event) => setPickupStoreSearch(event.target.value)}
+                        placeholder="Søk etter butikk eller sted"
+                        className="h-9 w-full rounded-lg border border-stone-300 bg-white px-3 pr-9 text-sm text-stone-900 outline-none transition placeholder:text-stone-400 focus:border-[#15452d] focus:ring-2 focus:ring-[#15452d]/20"
+                      />
+                      <span className="pointer-events-none absolute inset-y-0 right-3 flex items-center text-stone-400">⌕</span>
+                    </div>
+
+                    <ul className="max-h-60 space-y-1 overflow-y-auto pr-1">
+                      {filteredPickupStores.length === 0 ? (
+                        <li className="rounded-lg border border-dashed border-stone-300 bg-white px-3 py-2 text-xs text-stone-500">
+                          Ingen butikker matcher søket.
+                        </li>
+                      ) : (
+                        filteredPickupStores.map((store) => {
+                          const selected = pickupStoreId === store.id;
+
+                          return (
+                            <li key={store.id}>
+                              <button
+                                type="button"
+                                onClick={() => handlePickupStoreSelection(store.id)}
+                                className={`flex w-full items-center justify-between gap-3 rounded-lg border px-3 py-2 text-left transition ${
+                                  selected
+                                    ? "border-[#15452d] bg-emerald-50"
+                                    : "border-stone-200 bg-white hover:border-stone-300 hover:bg-stone-50"
+                                }`}
+                              >
+                                <span className="min-w-0">
+                                  <span className={`block truncate text-sm font-semibold ${selected ? "text-[#15452d]" : "text-stone-900"}`}>
+                                    {store.name}
+                                  </span>
+                                  {store.address ? (
+                                    <span className="mt-0.5 block truncate text-[11px] text-stone-500">{store.address}</span>
+                                  ) : null}
+                                </span>
+                                {selected ? (
+                                  <span className="shrink-0 rounded-full bg-[#15452d] px-2 py-0.5 text-[10px] font-bold uppercase tracking-[0.12em] text-white">
+                                    valgt
+                                  </span>
+                                ) : null}
+                              </button>
+                            </li>
+                          );
+                        })
+                      )}
+                    </ul>
+                  </div>
+                ) : null}
+              </div>
+            ) : null}
             <FieldInput label="Postnummer" value={postalCode} onChange={setPostalCode} autoComplete="postal-code" />
             <FieldInput label="By" value={city} onChange={setCity} autoComplete="address-level2" />
+            <div className="rounded-xl border border-dashed border-stone-300 bg-stone-50 px-3 py-3 text-sm text-stone-600 sm:col-span-2">
+              {deliveryMode === "pickup"
+                ? "Vi trenger adressen for å finne nærmeste byggevarehandel, men det blir ingen frakt når du henter selv."
+                : "Vi bruker adressen for levering og kan bekrefte transportkostnad før betaling."}
+            </div>
             <label className="flex flex-col gap-1.5 text-xs font-semibold text-stone-700 sm:col-span-2">
               Kommentar til bestillingen
               <textarea

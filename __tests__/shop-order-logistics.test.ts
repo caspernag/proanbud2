@@ -34,6 +34,8 @@ function makeOrder(overrides: Partial<LogisticsOrder> = {}): LogisticsOrder {
     shipping_address_line1: "Golmvegen 334",
     shipping_postal_code: "6590",
     shipping_city: "TUSTNA",
+    pickup_store_id: null,
+    pickup_store_name: null,
     customer_note: "",
     internal_note: "",
     last_status_note: "",

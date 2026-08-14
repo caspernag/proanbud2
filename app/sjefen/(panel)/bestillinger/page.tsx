@@ -287,7 +287,7 @@ export default async function BestillingerPage({ searchParams }: PageProps) {
             href={`/sjefen/bestillinger?type=${tab.key}&status=all`}
             className={`inline-flex h-10 items-center px-4 text-sm font-semibold transition ${
               type === tab.key
-                ? "bg-[#163f2a] text-white"
+                ? "bg-[#163f2a] text-white!"
                 : "border border-stone-300 bg-white text-stone-600 hover:border-stone-900 hover:text-stone-900"
             }`}
           >

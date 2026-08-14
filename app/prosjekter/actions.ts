@@ -228,7 +228,7 @@ export async function createMaterialOrderAction(formData: FormData) {
     redirect(`/min-side/materiallister/${slug}/bestilling?error=ingen-linjer`);
   }
 
-  const summary = recalculateOrderSummary(suggestedItems, "delivery");
+  const summary = recalculateOrderSummary(suggestedItems, "pickup");
 
   const { data: createdOrder, error: createOrderError } = await supabase
     .from("material_orders")
@@ -237,7 +237,7 @@ export async function createMaterialOrderAction(formData: FormData) {
       user_id: user.id,
       status: "draft",
       currency: "NOK",
-      delivery_mode: "delivery",
+      delivery_mode: "pickup",
       delivery_target: "door",
       unloading_method: "standard",
       earliest_delivery_date: summary.earliestDeliveryDate,

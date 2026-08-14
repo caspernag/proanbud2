@@ -1,6 +1,13 @@
 import { describe, it, expect } from "vitest";
 
-import { toVatInclusiveNok, recalculateOrderSummary, VAT_RATE, type MaterialOrderItemInput } from "@/lib/material-order";
+import {
+  toVatInclusiveNok,
+  recalculateOrderSummary,
+  VAT_RATE,
+  getDefaultMaterialOrderDeliveryMode,
+  MINIMUM_ORDER_VALUE_NOK,
+  type MaterialOrderItemInput,
+} from "@/lib/material-order";
 
 // ─── toVatInclusiveNok ───────────────────────────────────────────────────────
 
@@ -48,6 +55,17 @@ function makeItem(overrides: Partial<MaterialOrderItemInput> = {}): MaterialOrde
     ...overrides,
   };
 }
+
+describe("default material order settings", () => {
+  it("uses pickup as the default delivery mode when no explicit choice has been made", () => {
+    expect(getDefaultMaterialOrderDeliveryMode()).toBe("pickup");
+    expect(getDefaultMaterialOrderDeliveryMode("delivery")).toBe("delivery");
+  });
+
+  it("keeps the minimum order threshold at 500 NOK", () => {
+    expect(MINIMUM_ORDER_VALUE_NOK).toBe(500);
+  });
+});
 
 describe("recalculateOrderSummary", () => {
   it("calculates subtotal as sum of included item line totals", () => {

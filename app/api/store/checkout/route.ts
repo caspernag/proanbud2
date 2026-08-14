@@ -4,7 +4,7 @@ import { z } from "zod";
 import { hasStripeWebhookEnv } from "@/lib/env";
 import { orderLineUnit } from "@/lib/product-unit-pricing";
 import { calculateShippingNok } from "@/lib/shipping";
-import { createShopOrderSlug, logShopOrderEvent } from "@/lib/shop-order";
+import { createShopOrderSlug, logShopOrderEvent, normalizeShopOrderFulfillment } from "@/lib/shop-order";
 import { getStorefrontProductsByIds } from "@/lib/storefront";
 import { getStripe } from "@/lib/stripe";
 import { createSupabaseAdminClient } from "@/lib/supabase/admin";
@@ -14,11 +14,14 @@ const checkoutPayloadSchema = z.object({
     email: z.string().email(),
     fullName: z.string().trim().min(2).max(120),
     phone: z.string().trim().min(6).max(40),
-    addressLine1: z.string().trim().min(3).max(160),
-    postalCode: z.string().trim().min(3).max(16),
-    city: z.string().trim().min(2).max(80),
+    addressLine1: z.string().trim().max(160).default(""),
+    postalCode: z.string().trim().max(16).default(""),
+    city: z.string().trim().max(80).default(""),
     notes: z.string().trim().max(1200).optional().default(""),
   }),
+  deliveryMode: z.enum(["pickup", "delivery"]).default("pickup"),
+  pickupStoreId: z.string().trim().max(120).optional().default(""),
+  pickupStoreName: z.string().trim().max(200).optional().default(""),
   checkoutFlow: z.enum(["pay_now", "klarna"]).default("pay_now"),
   items: z
     .array(
@@ -74,8 +77,28 @@ export async function POST(request: Request) {
     };
   });
 
+  if (!payload.customer.addressLine1.trim() || !payload.customer.postalCode.trim() || !payload.customer.city.trim()) {
+    return NextResponse.json(
+      { error: "Adresse, postnummer og by må fylles ut for å finne nærmeste byggevarehandel eller leveringssted." },
+      { status: 400 },
+    );
+  }
+
+  const fulfillment = normalizeShopOrderFulfillment({
+    deliveryMode: payload.deliveryMode,
+    addressLine1: payload.customer.addressLine1,
+    postalCode: payload.customer.postalCode,
+    city: payload.customer.city,
+    pickupStoreId: payload.pickupStoreId,
+    pickupStoreName: payload.pickupStoreName,
+  });
+
+  if (payload.deliveryMode === "pickup" && !fulfillment.pickup_store_id && !fulfillment.pickup_store_name) {
+    return NextResponse.json({ error: "Velg en byggevarehandel før betaling." }, { status: 400 });
+  }
+
   const subtotalNok = orderItems.reduce((sum, item) => sum + item.lineTotalNok, 0);
-  const shippingNok = calculateShippingNok(subtotalNok);
+  const shippingNok = payload.deliveryMode === "pickup" ? 0 : calculateShippingNok(subtotalNok);
   const totalNok = subtotalNok + shippingNok;
   const vatNok = Math.round(totalNok * 0.2);
   const orderSlug = createShopOrderSlug();
@@ -86,13 +109,16 @@ export async function POST(request: Request) {
       status: "draft",
       slug: orderSlug,
       transport_status: "pending",
+      delivery_mode: fulfillment.delivery_mode,
       currency: "NOK",
       customer_email: payload.customer.email,
       customer_name: payload.customer.fullName,
       customer_phone: payload.customer.phone,
-      shipping_address_line1: payload.customer.addressLine1,
-      shipping_postal_code: payload.customer.postalCode,
-      shipping_city: payload.customer.city,
+      shipping_address_line1: fulfillment.shipping_address_line1,
+      shipping_postal_code: fulfillment.shipping_postal_code,
+      shipping_city: fulfillment.shipping_city,
+      pickup_store_id: fulfillment.pickup_store_id,
+      pickup_store_name: fulfillment.pickup_store_name,
       customer_note: payload.customer.notes ?? "",
       subtotal_nok: subtotalNok,
       shipping_nok: shippingNok,

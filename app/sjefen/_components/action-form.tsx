@@ -21,17 +21,19 @@ export function ActionForm({
   action,
   children,
   className,
+  encType,
   messageClassName,
 }: {
   action: ServerAction;
   children: ReactNode;
   className?: string;
+  encType?: string;
   messageClassName?: string;
 }) {
   const [state, formAction, pending] = useActionState(action, null);
 
   return (
-    <form action={formAction} className={className}>
+    <form action={formAction} encType={encType} className={className}>
       {/* display:contents holder layouten uendret, men lar fieldset låse feltene. */}
       <fieldset disabled={pending} style={{ display: "contents" }}>
         {children}

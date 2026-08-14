@@ -10,7 +10,7 @@ type RouteContext = {
   }>;
 };
 
-const MINIMUM_ORDER_VALUE_NOK = 5000;
+const MINIMUM_ORDER_VALUE_NOK = 500;
 
 export async function POST(request: Request, { params }: RouteContext) {
   const { orderId } = await params;

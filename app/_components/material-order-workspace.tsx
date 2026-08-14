@@ -202,7 +202,7 @@ export function MaterialOrderWorkspace({
   const [customerType, setCustomerType] = useState<CustomerType>(initialCustomerType);
   const [companyName, setCompanyName] = useState(initialCompanyName ?? "");
   const [organizationNumber, setOrganizationNumber] = useState(initialOrganizationNumber ?? "");
-  const [deliveryMode, setDeliveryMode] = useState<DeliveryMode>(initialDeliveryMode ?? "delivery");
+  const [deliveryMode, setDeliveryMode] = useState<DeliveryMode>(initialDeliveryMode ?? "pickup");
   const [deliveryTarget, setDeliveryTarget] = useState<DeliveryTarget>(initialDeliveryTarget ?? "door");
   const [unloadingMethod, setUnloadingMethod] = useState<UnloadingMethod>(initialUnloadingMethod ?? "standard");
   const [desiredDeliveryDate, setDesiredDeliveryDate] = useState(initialDesiredDeliveryDate ?? "");

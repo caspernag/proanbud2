@@ -20,7 +20,7 @@ import {
 } from "@/lib/shop-order-logistics";
 
 export const LOGISTICS_ORDER_COLUMNS =
-  "id, slug, public_token, status, transport_status, carrier, carrier_code, tracking_number, tracking_url, estimated_delivery_date, customer_name, customer_email, customer_phone, shipping_address_line1, shipping_postal_code, shipping_city, customer_note, internal_note, last_status_note, total_nok, created_at, paid_at, confirmed_at, packed_at, shipped_at, delivered_at";
+  "id, slug, public_token, status, transport_status, carrier, carrier_code, tracking_number, tracking_url, estimated_delivery_date, customer_name, customer_email, customer_phone, shipping_address_line1, shipping_postal_code, shipping_city, pickup_store_id, pickup_store_name, customer_note, internal_note, last_status_note, total_nok, created_at, paid_at, confirmed_at, packed_at, shipped_at, delivered_at";
 
 export type LogisticsUpdateInput = {
   orderId: string;
@@ -255,9 +255,9 @@ async function notifyCustomerOfStatus(
       trackingNumber: input.trackingNumber,
       trackingUrl: input.trackingUrl,
       estimatedDeliveryDate: input.estimatedDeliveryDate,
-      shippingAddress: order.shipping_address_line1,
-      shippingPostalCode: order.shipping_postal_code,
-      shippingCity: order.shipping_city,
+      shippingAddress: order.shipping_address_line1 ?? "",
+      shippingPostalCode: order.shipping_postal_code ?? "",
+      shippingCity: order.shipping_city ?? "",
     });
 
     await supabase

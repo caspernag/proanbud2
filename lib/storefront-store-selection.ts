@@ -32,6 +32,70 @@ export const STOREFRONT_STORE_OPTIONS: StorefrontStoreOption[] = [
   storeOption("7080001387839", "Tiller", "Vestre Rosten 97, 7075 Tiller", 63.3548, 10.3796),
   storeOption("7080001100582", "Tynset", "Tomtegata 4, 2500 Tynset", 62.2759, 10.7824),
   storeOption("7080000782901", "Øydegard", "Arnvika 4, 6670 Øydegard", 63.0274, 7.8312),
+  storeOption("byggmakker-brobekk", "Byggmakker Brobekk (Oslo)", "Haraldrudveien 50, 0581 Oslo"),
+  storeOption("byggmakker-alnabru-proff", "Byggmakker Alnabru Proff", "Strømsveien 3, 0181 Oslo"),
+  storeOption("byggmakker-arendal", "Byggmakker Arendal", "Frolandsveien 17, 4848 Arendal"),
+  storeOption("byggmakker-berkak", "Byggmakker Berkåk", "Postmyrveien 22, 7391 Rennebu"),
+  storeOption("byggmakker-bjugn", "Byggmakker Bjugn", "Emil Schanches gate 5, 7160 Bjugn"),
+  storeOption("byggmakker-bruland", "Byggmakker Bruland", "Brulandsvegen 150, 6800 Førde"),
+  storeOption("byggmakker-bytas", "Byggmakker Bytås AS", "Arnvika 4, 6670 Øydegard"),
+  storeOption("byggmakker-bo", "Byggmakker Bø", "Grivisvingen 2, 3802 Bø i Telemark"),
+  storeOption("byggmakker-dokka", "Byggmakker Dokka", "Storgata 123, 2870 Dokka"),
+  storeOption("byggmakker-drammen", "Byggmakker Drammen", "Ingvald Ludvigsens gate 20, 3027 Drammen"),
+  storeOption("byggmakker-eiker", "Byggmakker Eiker", "Prestebråtan 11, 3300 Hokksund"),
+  storeOption("byggmakker-fredrikstad-ostsiden", "Byggmakker Fredrikstad Østsiden", "Borgarveien 13, 1633 Gamle Fredrikstad"),
+  storeOption("byggmakker-geitanger-bergen", "Byggmakker Geitanger (Bergen)", "Ulsmågskaret 15, 5224 Nesttun"),
+  storeOption("byggmakker-gjovik", "Byggmakker Gjøvik", "Valdresvegen 4, 2816 Gjøvik"),
+  storeOption("byggmakker-gramyra", "Byggmakker Gråmyra", "Gråmyrvegen 47, 7608 Levanger"),
+  storeOption("byggmakker-gunvald-johansen-bodo", "Byggmakker Gunvald Johansen Bodø", "Olav V gate 9, 8004 Bodø"),
+  storeOption("byggmakker-gunvald-johansen-fauske", "Byggmakker Gunvald Johansen Fauske", "Terminalveien 7, 8208 Fauske"),
+  storeOption("byggmakker-gunvald-johansen-leknes", "Byggmakker Gunvald Johansen Leknes", "Leknessletta 7, 8370 Leknes"),
+  storeOption("byggmakker-gunvald-johansen-svolvaer", "Byggmakker Gunvald Johansen Svolvær", "Industriveien 5, 8300 Svolvær"),
+  storeOption("byggmakker-hamar", "Byggmakker Hamar", "Arnkvernvegen 20, 2320 Furnes"),
+  storeOption("byggmakker-havna", "Byggmakker Havna", "Skolegangen 2, 3961 Stathelle"),
+  storeOption("byggmakker-hvaler", "Byggmakker Hvaler", "Lammenes 8, 1680 Skjærhalden"),
+  storeOption("byggmakker-honefoss", "Byggmakker Hønefoss", "Hensmoveien 28, 3516 Hønefoss"),
+  storeOption("byggmakker-hovellast-lillestrom", "Byggmakker Høvellast Lillestrøm", "Nordahl Brunsgate 10, 2004 Lillestrøm"),
+  storeOption("byggmakker-jessheim-proff", "Byggmakker Jessheim Proff", "Industrivegen 24, 2069 Jessheim"),
+  storeOption("byggmakker-kongsberg", "Byggmakker Kongsberg", "Bingeplassveien 13, 3610 Kongsberg"),
+  storeOption("byggmakker-kragero", "Byggmakker Kragerø", "Dalaneveien 22, 3770 Kragerø"),
+  storeOption("byggmakker-kristiansand", "Byggmakker Kristiansand", "Buråsen 2, 4636 Kristiansand"),
+  storeOption("byggmakker-larvik", "Byggmakker Larvik", "Øya 6, 3262 Larvik"),
+  storeOption("byggmakker-leangen-trondheim", "Byggmakker Leangen (Trondheim)", "Landbruksvegen 17, 7047 Trondheim"),
+  storeOption("byggmakker-levanger", "Byggmakker Levanger", "Okkenhaugvegen 8, 7600 Levanger"),
+  storeOption("byggmakker-lillehammer", "Byggmakker Lillehammer", "Landbruksvegen 1, 2619 Lillehammer"),
+  storeOption("byggmakker-mandal-proff", "Byggmakker Mandal Proff", "Doneheia 46, 4516 Mandal"),
+  storeOption("byggmakker-materialhandelen-batsfjord", "Byggmakker Materialhandelen Båtsfjord", "Fomavegen 14, 9990 Båtsfjord"),
+  storeOption("byggmakker-materialhandelen-tana", "Byggmakker Materialhandelen Tana", "Grenvegen 20, 9845 Tana"),
+  storeOption("byggmakker-moss", "Byggmakker Moss", "Varnaveien 31, 1526 Moss"),
+  storeOption("byggmakker-notodden", "Byggmakker Notodden", "Merdevegen 14A, 3676 Notodden"),
+  storeOption("byggmakker-oldernes-vadso", "Byggmakker Oldernes Vadsø", "Båtsfjordveien 11, 9801 Vadsø"),
+  storeOption("byggmakker-oppdal", "Byggmakker Oppdal", "Søndre Industrivegen 7, 7340 Oppdal"),
+  storeOption("byggmakker-overhalla", "Byggmakker Overhalla", "Kornsilovegen 14, 7863 Overhalla"),
+  storeOption("byggmakker-proff-bergen", "Byggmakker Proff Gravdal (Bergen)", "Sjøkrigsskoleveien 15, 5165 Laksevåg"),
+  storeOption("byggmakker-raufoss", "Byggmakker Raufoss", "Sigurd Østliens veg 3, 2830 Raufoss"),
+  storeOption("byggmakker-rissa", "Byggmakker Rissa", "Fv718 11, 2710 Rissa"),
+  storeOption("byggmakker-rjukan", "Byggmakker Rjukan", "Svaddevegen 14, 3660 Rjukan"),
+  storeOption("byggmakker-roros", "Byggmakker Røros", "Langegga 1, 7374 Røros"),
+  storeOption("byggmakker-rorvik", "Byggmakker Rørvik", "Havnegata 7, 7900 Rørvik"),
+  storeOption("byggmakker-rade", "Byggmakker Råde", "Sarpsborgveien 11, 1640 Råde"),
+  storeOption("byggmakker-sandefjord", "Byggmakker Sandefjord", "Hotvedtveien 6, 3220 Sandefjord"),
+  storeOption("byggmakker-sarpsborg", "Byggmakker Sarpsborg", "Vogts vei 3, 1710 Sarpsborg"),
+  storeOption("byggmakker-seljord", "Byggmakker Seljord", "Vekanvegen 12, 3840 Seljord"),
+  storeOption("byggmakker-skien", "Byggmakker Skien", "Kjørbekkdalen 5, 3735 Skien"),
+  storeOption("byggmakker-stavanger", "Byggmakker Stavanger", "Breiflåtveien 21, 4017 Stavanger"),
+  storeOption("byggmakker-stavern", "Byggmakker Stavern", "Terneveien 23, 3290 Stavern"),
+  storeOption("byggmakker-steinkjer", "Byggmakker Steinkjer", "Sagbruksvegen 8, 7725 Steinkjer"),
+  storeOption("byggmakker-storen", "Byggmakker Støren", "Kjørkvollveien 27, 7290 Støren"),
+  storeOption("byggmakker-surnadal", "Byggmakker Surnadal", "Industrivegen 1, 6652 Surnadal"),
+  storeOption("byggmakker-sogne-proff", "Byggmakker Søgne Proff", "Linnegrøvan 32, 4640 Søgne"),
+  storeOption("byggmakker-tiller", "Byggmakker Tiller (Trondheim)", "Vestre Rosten 97, 7075 Tiller"),
+  storeOption("byggmakker-tredal", "Byggmakker Tredal", "Industrivegen 1, 6600 Sunndalsøra"),
+  storeOption("byggmakker-tonsberg-proff", "Byggmakker Tønsberg Proff", "Fjordgaten 23, 3125 Tønsberg"),
+  storeOption("byggmakker-verdal", "Byggmakker Verdal", "Industrivegen 4, 7650 Verdal"),
+  storeOption("byggmakker-vagsbygd", "Byggmakker Vågsbygd", "Sagmyra 2, 4624 Kristiansand"),
+  storeOption("byggmakker-orland", "Byggmakker Ørland", "Industrigata 7, 7130 Brekstad"),
+  storeOption("byggmakker-aasen-og-five", "Byggmakker Aasen og Five", "Gamle Kongeveg 11, 7503 Stjørdal"),
 ].sort((left, right) => left.name.localeCompare(right.name, "nb-NO"));
 
 const STORE_COORDINATES: Record<string, { latitude: number; longitude: number }> = {
@@ -93,16 +157,15 @@ function storeOption(
   id: string,
   name: string,
   address: string,
-  latitude: number,
-  longitude: number,
+  latitude?: number,
+  longitude?: number,
 ): StorefrontStoreOption {
   return {
     id,
     name,
     address,
     addressUrl: `https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(address)}`,
-    latitude,
-    longitude,
+    ...(typeof latitude === "number" && typeof longitude === "number" ? { latitude, longitude } : {}),
   };
 }
 
@@ -117,6 +180,66 @@ export function findNearestStore(
       distance: distanceKm(position.latitude, position.longitude, store.latitude!, store.longitude!),
     }))
     .sort((left, right) => left.distance - right.distance)[0] ?? null;
+}
+
+export function suggestNearestStoreByAddress(location: {
+  addressLine1?: string;
+  postalCode?: string;
+  city?: string;
+}): StorefrontStoreOption | null {
+  const query = normalizeAddressText(`${location.addressLine1 ?? ""} ${location.city ?? ""} ${location.postalCode ?? ""}`);
+  const postalCode = normalizePostalCode(location.postalCode);
+  const city = normalizeAddressText(location.city ?? "");
+
+  if (!query && !postalCode && !city) {
+    return null;
+  }
+
+  const byPostal = STOREFRONT_STORE_OPTIONS.find((store) => {
+    const storeAddress = normalizeAddressText(store.address ?? "");
+    return postalCode && storeAddress.includes(postalCode);
+  });
+
+  if (byPostal) {
+    return byPostal;
+  }
+
+  const byCity = STOREFRONT_STORE_OPTIONS.find((store) => {
+    const cityName = normalizeAddressText(store.name);
+    const storeAddress = normalizeAddressText(store.address ?? "");
+    return (
+      (city && cityName.includes(city)) ||
+      (city && storeAddress.includes(city)) ||
+      (query && cityName.includes(query)) ||
+      (query && storeAddress.includes(query))
+    );
+  });
+
+  if (byCity) {
+    return byCity;
+  }
+
+  const byPostalPrefix = STOREFRONT_STORE_OPTIONS.find((store) => {
+    const storePostalCode = normalizePostalCode((store.address ?? "").match(/\b(\d{4})\b/)?.[1] ?? "");
+    if (!postalCode || !storePostalCode) return false;
+    return postalCode.slice(0, 2) === storePostalCode.slice(0, 2);
+  });
+
+  return byPostalPrefix ?? null;
+}
+
+function normalizeAddressText(value: string) {
+  return value
+    .toLowerCase()
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .replace(/[^a-z0-9\s]/g, " ")
+    .replace(/\s+/g, " ")
+    .trim();
+}
+
+function normalizePostalCode(value?: string) {
+  return (value ?? "").replace(/\D/g, "").slice(0, 4);
 }
 
 function distanceKm(lat1: number, lon1: number, lat2: number, lon2: number) {
