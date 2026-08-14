@@ -9,7 +9,10 @@
     "lint": "eslint",
     "test": "vitest run",
     "test:watch": "vitest",
-    "test:coverage": "vitest run --coverage"
+    "test:coverage": "vitest run --coverage",
+    "db:migrate": "supabase db push",
+    "db:migrate:dry-run": "supabase db push --dry-run",
+    "db:migration:new": "supabase migration new"
   },
   "dependencies": {
     "@ai-sdk/openai": "^3.0.53",
@@ -52,6 +55,7 @@
     "@vitest/coverage-v8": "^4.1.5",
     "eslint": "^9",
     "eslint-config-next": "16.2.2",
+    "supabase": "^2.114.0",
     "tailwindcss": "^4",
     "typescript": "^5",
     "vitest": "^4.1.5"
