@@ -142,6 +142,11 @@ export async function importPriceFile(
       brand,
       unit_price_nok: Math.max(0, Math.round(prices.unitPriceNok)),
       list_price_nok: Math.max(0, Math.round(prices.listPriceNok)),
+      // Råtallene fra filen, eks. mva og uten påslag. Utsalgsprisen over er
+      // avrundet, påslått og klemt mot veiledende pris, så den kan ikke regnes
+      // tilbake til innkjøpspris — dekningsbidraget i /sjefen trenger disse to.
+      cost_price_ex_vat_nok: roundOre(product.priceNok),
+      list_price_ex_vat_nok: roundOre(product.listPriceNok),
       unit: product.unit || product.salesUnit || "STK",
       price_unit: product.priceUnit || null,
       sales_unit: product.salesUnit || null,
@@ -454,6 +459,15 @@ async function bumpRunCounters(
 }
 
 /* ── Hjelpere ─────────────────────────────────────────────────────────────── */
+
+/** Priser lagres med øre — innkjøpsprisene fra Byggmakker har to desimaler. */
+function roundOre(value: number | null | undefined) {
+  if (typeof value !== "number" || !Number.isFinite(value) || value <= 0) {
+    return null;
+  }
+
+  return Math.round(value * 100) / 100;
+}
 
 /** Samme NOBB flere ganger i filen: laveste pris vinner, som i katalogsynken. */
 function dedupeByNobb(products: PriceListProduct[]) {

@@ -101,6 +101,10 @@ export async function updateProductAction(_prev: ActionState, formData: FormData
       package_area_sqm: optionalNumber(formData.get("package_area_sqm"), "Pakkeareal"),
       unit_price_nok: intValue(formData.get("unit_price_nok"), "Pris"),
       list_price_nok: intValue(formData.get("list_price_nok"), "Listepris"),
+      // Eks. mva, i motsetning til de to over. Tomt felt = ukjent innkjøpspris,
+      // og da skal marginen vises som ukjent i stedet for som 100 %.
+      cost_price_ex_vat_nok: optionalNumber(formData.get("cost_price_ex_vat_nok"), "Innkjøpspris"),
+      list_price_ex_vat_nok: optionalNumber(formData.get("list_price_ex_vat_nok"), "Veiledende pris"),
       section_title: sectionTitle,
       category,
       description,

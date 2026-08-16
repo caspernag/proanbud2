@@ -3,6 +3,7 @@ import type { ReactNode } from "react";
 
 import { listImportRuns } from "@/lib/admin-product-price-import";
 import { adminRows, collectErrors, requireAdminDb } from "@/lib/admin-data";
+import { calculateProductMargin, marginTone, pctNo } from "@/lib/product-margin";
 
 import { ActionForm, SubmitButton } from "../../_components/action-form";
 import {
@@ -25,6 +26,14 @@ import { importPriceFileAction } from "./actions";
 
 const PAGE_SIZE = 50;
 
+/** Dekningsgrad under 5 % tåler ikke frakt og gebyr — den skal være synlig rød. */
+const MARGIN_TONE: Record<ReturnType<typeof marginTone>, string> = {
+  unknown: "text-stone-400",
+  loss: "text-red-700",
+  thin: "text-amber-700",
+  ok: "text-stone-900",
+};
+
 type SearchParams = Promise<{ q?: string; category?: string; supplier?: string; page?: string }>;
 
 type ProductListRow = {
@@ -37,6 +46,8 @@ type ProductListRow = {
   unit: string | null;
   unit_price_nok: number;
   list_price_nok: number;
+  /** Eks. mva, fra prisfilen. numeric fra Postgres kan komme som streng. */
+  cost_price_ex_vat_nok: number | string | null;
   section_title: string | null;
   category: string | null;
   last_updated: string;
@@ -66,7 +77,7 @@ export default async function ProdukterPage({ searchParams }: { searchParams: Se
   let productQuery = db
     .from("storefront_products")
     .select(
-      "id, slug, nobb_number, product_name, supplier_name, brand, unit, unit_price_nok, list_price_nok, section_title, category, last_updated, popularity_score",
+      "id, slug, nobb_number, product_name, supplier_name, brand, unit, unit_price_nok, list_price_nok, cost_price_ex_vat_nok, section_title, category, last_updated, popularity_score",
       { count: "exact" },
     );
 
@@ -109,6 +120,18 @@ export default async function ProdukterPage({ searchParams }: { searchParams: Se
   const errors = collectErrors({ error: productError }, metaResult, importRunsResult);
   const openReview = importRunsResult.rows.find((run) => run.status === "review") ?? null;
 
+  // Marginen regnes én gang per rad og gjenbrukes av både tabellen og snittet
+  // over, så nøkkeltallet aldri kan komme i utakt med kolonnen.
+  const productRows = products.map((product) => ({
+    product,
+    margin: calculateProductMargin({
+      unitPriceNok: product.unit_price_nok,
+      costPriceExVatNok: product.cost_price_ex_vat_nok,
+      listPriceExVatNok: null,
+    }),
+  }));
+  const pageMargin = averageMargin(productRows.map((row) => row.margin.marginPct));
+
   const categories = meta?.categories.map(facetName).filter(Boolean).sort((a, b) => a.localeCompare(b, "nb")) ?? [];
   const suppliers = meta?.suppliers.map(facetName).filter(Boolean).sort((a, b) => a.localeCompare(b, "nb")) ?? [];
 
@@ -127,11 +150,20 @@ export default async function ProdukterPage({ searchParams }: { searchParams: Se
 
       <DataErrorBanner errors={errors} />
 
-      <section className="grid grid-cols-2 gap-3 lg:grid-cols-4">
+      <section className="grid grid-cols-2 gap-3 lg:grid-cols-5">
         <StatCard label="Produkter" value={num(meta?.product_count ?? total)} sub="i katalogen" tone="accent" />
         <StatCard label="Treff" value={num(total)} sub={`${num(products.length)} vist på siden`} />
         <StatCard label="Pris fra" value={nok(meta?.price_min ?? 0)} sub="laveste katalogpris" />
         <StatCard label="Pris til" value={nok(meta?.price_max ?? 0)} sub="høyeste katalogpris" />
+        <StatCard
+          label="Snittmargin"
+          value={pctNo(pageMargin.averagePct, 0)}
+          sub={
+            pageMargin.knownCount === 0
+              ? "ingen innkjøpspriser på siden"
+              : `${num(pageMargin.knownCount)} av ${num(products.length)} på siden`
+          }
+        />
       </section>
 
       {openReview ? (
@@ -234,44 +266,52 @@ export default async function ProdukterPage({ searchParams }: { searchParams: Se
                 <Th>Kategori</Th>
                 <Th align="right">Pris</Th>
                 <Th align="right">Listepris</Th>
+                <Th align="right">Margin</Th>
                 <Th>Sist endret</Th>
                 <Th />
               </tr>
             </thead>
             <tbody>
-              {products.map((product) => (
-                <tr key={product.id} className="border-b border-stone-100 transition hover:bg-stone-50">
-                  <Td>
-                    <div className="max-w-[420px]">
-                      <p className="truncate text-xs font-semibold text-stone-900">{product.product_name}</p>
-                      <p className="mt-0.5 truncate font-mono text-[10px] text-stone-500">
-                        NOBB {product.nobb_number} · {product.slug}
-                      </p>
-                    </div>
-                  </Td>
-                  <Td>
-                    <span className="text-xs text-stone-800">{product.supplier_name}</span>
-                    {product.brand ? <span className="mt-0.5 block text-[10px] text-stone-500">{product.brand}</span> : null}
-                  </Td>
-                  <Td>
-                    <Badge>{product.category ?? "Diverse"}</Badge>
-                  </Td>
-                  <Td align="right" className="text-xs font-semibold tabular-nums text-stone-900">
-                    {nok(product.unit_price_nok)}
-                    <span className="block text-[10px] font-normal text-stone-400">/{product.unit ?? "STK"}</span>
-                  </Td>
-                  <Td align="right" className="text-xs tabular-nums text-stone-600">{nok(product.list_price_nok)}</Td>
-                  <Td className="text-[10px] text-stone-500">{dateNo(product.last_updated)}</Td>
-                  <Td align="right">
-                    <Link
-                      href={`/sjefen/produkter/${encodeURIComponent(product.id)}`}
-                      className="text-xs font-semibold text-[#163f2a] hover:underline"
-                    >
-                      Rediger
-                    </Link>
-                  </Td>
-                </tr>
-              ))}
+              {productRows.map(({ product, margin }) => {
+                return (
+                  <tr key={product.id} className="border-b border-stone-100 transition hover:bg-stone-50">
+                    <Td>
+                      <Link
+                        href={`/sjefen/produkter/${encodeURIComponent(product.id)}`}
+                        className="text-xs font-semibold text-[#163f2a] hover:underline"
+                      >
+                        <div className="max-w-[400px]">
+                          <p className="truncate text-xs font-semibold text-stone-900">{product.product_name}</p>
+                          <p className="mt-0.5 truncate font-mono text-[10px] text-stone-500">
+                            NOBB {product.nobb_number} · {product.slug}
+                          </p>
+                        </div>
+                      </Link>
+                    </Td>
+                    <Td>
+                      <span className="text-xs text-stone-800">{product.supplier_name}</span>
+                      {product.brand ? <span className="mt-0.5 block text-[10px] text-stone-500">{product.brand}</span> : null}
+                    </Td>
+                    <Td>
+                      <Badge>{product.category ?? "Diverse"}</Badge>
+                    </Td>
+                    <Td align="right" className="text-xs font-semibold tabular-nums text-stone-900">
+                      {nok(product.unit_price_nok)}
+                      <span className="block text-[10px] font-normal text-stone-400">/{product.unit ?? "STK"}</span>
+                    </Td>
+                    <Td align="right" className="text-xs tabular-nums text-stone-600">{nok(product.list_price_nok)}</Td>
+                    <Td align="right" className={`text-xs font-semibold tabular-nums ${MARGIN_TONE[marginTone(margin.marginPct)]}`}>
+                      {pctNo(margin.marginPct, 0)}
+                      {margin.contributionNok === null ? null : (
+                        <span className="block text-[10px] font-normal text-stone-400">
+                          {nok(margin.contributionNok)} DB
+                        </span>
+                      )}
+                    </Td>
+                    <Td className="text-[10px] text-stone-500">{dateNo(product.last_updated)}</Td>
+                  </tr>
+                );
+              })}
             </tbody>
           </TableWrap>
         )}
@@ -290,6 +330,20 @@ export default async function ProdukterPage({ searchParams }: { searchParams: Se
       </div>
     </div>
   );
+}
+
+/**
+ * Snittet er et enkelt gjennomsnitt av dekningsgradene på siden — ikke vektet
+ * mot omsetning, siden katalogen ikke vet hvor mye av hver vare som selges.
+ * Produkter uten innkjøpspris holdes utenfor i stedet for å telle som 0 %.
+ */
+function averageMargin(percentages: Array<number | null>) {
+  const known = percentages.filter((value): value is number => value !== null);
+
+  return {
+    knownCount: known.length,
+    averagePct: known.length === 0 ? null : known.reduce((sum, value) => sum + value, 0) / known.length,
+  };
 }
 
 function facetName(value: { name: string; count?: number } | string) {

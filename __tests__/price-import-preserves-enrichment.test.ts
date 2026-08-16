@@ -107,4 +107,19 @@ describe("prisimport bevarer det filen ikke bærer", () => {
     expect(rows.every((row) => typeof row.unit_price_nok === "number")).toBe(true);
     expect(rows.some((row) => (row.unit_price_nok as number) > 0)).toBe(true);
   });
+
+  it("lagrer innkjøpspris og veiledende pris eks. mva så marginen kan regnes", async () => {
+    const rows = await run();
+
+    // 119 kr/m² × 4,1 m² per pakke, netto og veiledende, begge eks. mva.
+    const terrassebord = rows.find((row) => row.nobb_number === "51512345");
+
+    expect(terrassebord?.cost_price_ex_vat_nok).toBeCloseTo(487.9, 2);
+    expect(terrassebord?.list_price_ex_vat_nok).toBeCloseTo(612.95, 2);
+    // Utsalgsprisen er påslått og inkl. mva — den må ligge over innkjøpsprisen.
+    expect(terrassebord?.unit_price_nok as number).toBeGreaterThan(
+      terrassebord?.cost_price_ex_vat_nok as number,
+    );
+    expect(rows.every((row) => (row.cost_price_ex_vat_nok as number) > 0)).toBe(true);
+  });
 });
