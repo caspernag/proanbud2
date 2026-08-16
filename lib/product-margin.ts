@@ -1,4 +1,4 @@
-import { netOfVat } from "@/lib/order-economics";
+import { netOfVat, toVatInclusiveNok } from "@/lib/vat";
 
 /**
  * Dekningsbidrag per produkt i katalogen.
@@ -27,6 +27,12 @@ export type ProductMargin = {
   /** Dekningsgrad i prosent av netto salgspris. null når innkjøpsprisen er ukjent. */
   marginPct: number | null;
   /**
+   * Påslag i prosent AV INNKJØPSPRISEN — samme størrelse som
+   * `supplier_markups.markup_percentage`. 25 % påslag = 20 % dekningsgrad, så
+   * de to tallene må aldri forveksles.
+   */
+  markupPct: number | null;
+  /**
    * Innkjøpsrabatten fra prisfilen: hvor mye under veiledende pris vi kjøper.
    * Negativ verdi betyr at vi betaler mer enn veiledende — da er det ingen
    * rabatt å skjule, og tallet skal vises som det er.
@@ -44,9 +50,34 @@ export function calculateProductMargin(input: ProductMarginInput): ProductMargin
     contributionNok === null || netPriceExVatNok <= 0
       ? null
       : (contributionNok / netPriceExVatNok) * 100;
+  const markupPct = contributionNok === null || cost === null || cost <= 0 ? null : (contributionNok / cost) * 100;
   const discountPct = cost === null || list === null || list <= 0 ? null : ((list - cost) / list) * 100;
 
-  return { netPriceExVatNok, contributionNok, marginPct, discountPct };
+  return { netPriceExVatNok, contributionNok, marginPct, markupPct, discountPct };
+}
+
+/**
+ * Utsalgspris inkl. mva som gir ønsket DEKNINGSGRAD (andel av salgsprisen).
+ *
+ * 100 % dekningsgrad krever uendelig pris, så alt fra 100 og oppover er
+ * umulig — da returneres null i stedet for et tall som ser gyldig ut.
+ * Resultatet rundes til hele kroner fordi `unit_price_nok` er en integer-kolonne;
+ * den faktiske dekningsgraden etter avrunding kan avvike litt, og skal leses av
+ * `calculateProductMargin` på den avrundede prisen.
+ */
+export function priceInclVatFromMarginPct(costExVatNok: number, marginPct: number): number | null {
+  if (!Number.isFinite(costExVatNok) || costExVatNok <= 0) return null;
+  if (!Number.isFinite(marginPct) || marginPct >= 100) return null;
+
+  return Math.max(0, Math.round(toVatInclusiveNok(costExVatNok / (1 - marginPct / 100))));
+}
+
+/** Utsalgspris inkl. mva som gir ønsket PÅSLAG (prosent av innkjøpsprisen). */
+export function priceInclVatFromMarkupPct(costExVatNok: number, markupPct: number): number | null {
+  if (!Number.isFinite(costExVatNok) || costExVatNok <= 0) return null;
+  if (!Number.isFinite(markupPct) || markupPct <= -100) return null;
+
+  return Math.max(0, Math.round(toVatInclusiveNok(costExVatNok * (1 + markupPct / 100))));
 }
 
 /** Formaterer prosent med ett desimal, norsk stil. `null` blir «—». */

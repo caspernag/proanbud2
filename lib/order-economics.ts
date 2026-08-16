@@ -1,4 +1,4 @@
-import { VAT_RATE } from "@/lib/material-order";
+import { netOfVat, vatWithin } from "@/lib/vat";
 
 /**
  * Dekningsbidrag per butikkordre.
@@ -15,20 +15,9 @@ import { VAT_RATE } from "@/lib/material-order";
  * ble målt som 11 400 i inntekt, mens den reelle inntekten er 9 120.
  */
 
-/** Andel av et mva-inklusivt beløp som ER mva. 25 % mva ⇒ 20 % av bruttobeløpet. */
-export const VAT_SHARE_OF_GROSS = VAT_RATE / (1 + VAT_RATE);
-
-/** Trekker mva ut av et beløp som inkluderer mva. */
-export function netOfVat(grossNok: number): number {
-  if (!Number.isFinite(grossNok) || grossNok === 0) return 0;
-  return grossNok / (1 + VAT_RATE);
-}
-
-/** Mva-beløpet som ligger inne i et mva-inklusivt beløp. */
-export function vatWithin(grossNok: number): number {
-  if (!Number.isFinite(grossNok) || grossNok === 0) return 0;
-  return grossNok - netOfVat(grossNok);
-}
+// Selve mva-regnestykket bor i lib/vat.ts, som er importfri og dermed trygg å
+// bruke fra klientkomponenter. Re-eksporteres her fordi panelene henter den herfra.
+export { VAT_SHARE_OF_GROSS, netOfVat, vatWithin } from "@/lib/vat";
 
 /**
  * Stripe-gebyr. Belastes av bruttobeløpet kunden betaler (altså inkl. mva), og

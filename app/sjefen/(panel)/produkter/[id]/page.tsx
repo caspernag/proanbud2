@@ -3,11 +3,11 @@ import { notFound } from "next/navigation";
 
 import { ActionForm, SubmitButton } from "@/app/sjefen/_components/action-form";
 import { adminRows, collectErrors, requireAdminDb } from "@/lib/admin-data";
-import { calculateProductMargin, marginTone, nokExact, pctNo } from "@/lib/product-margin";
 import { buildPublicStorefrontImageUrl } from "@/lib/storefront-catalog-db";
 
 import { BTN_PRIMARY, BTN_SECONDARY, Card, DataErrorBanner, PageHeader, dateNo, nok } from "../../../_components/ui";
 import { updateProductAction } from "../actions";
+import { PriceMarginCard } from "./_components/price-margin-card";
 
 type ProductPageProps = {
   params: Promise<{ id: string }>;
@@ -88,11 +88,6 @@ export default async function ProductEditPage({ params }: ProductPageProps) {
 
   const imageUrl = product.image_path ? buildPublicStorefrontImageUrl(product.image_path) : product.image_url;
   const categories = categoryOptions(metaResult.rows[0]?.categories ?? [], product.category ?? "Diverse");
-  const margin = calculateProductMargin({
-    unitPriceNok: product.unit_price_nok,
-    costPriceExVatNok: product.cost_price_ex_vat_nok,
-    listPriceExVatNok: product.list_price_ex_vat_nok,
-  });
 
   return (
     <div className="space-y-6 p-8">
@@ -131,29 +126,15 @@ export default async function ProductEditPage({ params }: ProductPageProps) {
             </div>
           </Card>
 
-          <Card
-            title="Pris og enheter"
-            description="Kundeprisene er inkl. mva. Innkjøpspris og veiledende pris kommer fra prisfilen og er eks. mva — de vises aldri i butikken."
-          >
+          <PriceMarginCard
+            unitPriceNok={product.unit_price_nok}
+            listPriceNok={product.list_price_nok}
+            costPriceExVatNok={product.cost_price_ex_vat_nok}
+            listPriceExVatNok={product.list_price_ex_vat_nok}
+          />
+
+          <Card title="Enheter">
             <div className="grid gap-3 lg:grid-cols-4">
-              <Field label="Pris inkl. mva" name="unit_price_nok" type="number" min={0} step={1} defaultValue={product.unit_price_nok} required />
-              <Field label="Listepris inkl. mva" name="list_price_nok" type="number" min={0} step={1} defaultValue={product.list_price_nok} required />
-              <Field
-                label="Innkjøpspris eks. mva"
-                name="cost_price_ex_vat_nok"
-                type="number"
-                min={0}
-                step="0.01"
-                defaultValue={product.cost_price_ex_vat_nok ?? ""}
-              />
-              <Field
-                label="Veil. pris eks. mva"
-                name="list_price_ex_vat_nok"
-                type="number"
-                min={0}
-                step="0.01"
-                defaultValue={product.list_price_ex_vat_nok ?? ""}
-              />
               <Field label="Enhet" name="unit" defaultValue={product.unit ?? "STK"} required />
               <Field label="Prisenhet" name="price_unit" defaultValue={product.price_unit ?? ""} />
               <Field label="Salgsenhet" name="sales_unit" defaultValue={product.sales_unit ?? ""} />
@@ -217,26 +198,6 @@ export default async function ProductEditPage({ params }: ProductPageProps) {
                 <p className="text-[10px] text-stone-500">Listepris {nok(product.list_price_nok)}</p>
               </div>
             </div>
-          </Card>
-
-          <Card
-            title="Lønnsomhet"
-            description="Per salgsenhet. Alt regnes eks. mva — kundeprisen er delt på 1,25 for å være sammenlignbar med innkjøpsprisen."
-          >
-            <dl className="space-y-2 text-xs">
-              <Row label="Innkjøpspris" value={nokExact(toNumberOrNull(product.cost_price_ex_vat_nok))} />
-              <Row label="Veil. pris" value={nokExact(toNumberOrNull(product.list_price_ex_vat_nok))} />
-              <Row label="Rabatt fra prisfil" value={pctNo(margin.discountPct)} />
-              <Row label="Salgspris eks. mva" value={nokExact(margin.netPriceExVatNok)} />
-              <Row label="Dekningsbidrag" value={nokExact(margin.contributionNok)} />
-              <Row label="Dekningsgrad" value={pctNo(margin.marginPct)} tone={marginTone(margin.marginPct)} />
-            </dl>
-            {margin.contributionNok === null ? (
-              <p className="mt-3 text-[10px] leading-4 text-stone-500">
-                Innkjøpsprisen mangler på dette produktet — den fylles inn ved neste prisimport, eller kan
-                skrives inn manuelt i «Pris og enheter».
-              </p>
-            ) : null}
           </Card>
 
           <Card title="Status">
@@ -344,41 +305,13 @@ function TextArea({
   );
 }
 
-const MARGIN_TONE: Record<ReturnType<typeof marginTone>, string> = {
-  unknown: "text-stone-400",
-  loss: "text-red-700 font-semibold",
-  thin: "text-amber-700 font-semibold",
-  ok: "text-stone-900 font-semibold",
-};
-
-function Row({
-  label,
-  value,
-  mono,
-  tone,
-}: {
-  label: string;
-  value: string;
-  mono?: boolean;
-  tone?: ReturnType<typeof marginTone>;
-}) {
+function Row({ label, value, mono }: { label: string; value: string; mono?: boolean }) {
   return (
     <div className="flex items-start justify-between gap-4 border-b border-stone-100 pb-3 last:border-0 last:pb-0">
       <dt className="text-[10px] font-semibold uppercase tracking-[0.12em] text-stone-400">{label}</dt>
-      <dd
-        className={`text-right text-xs ${tone ? MARGIN_TONE[tone] : "text-stone-800"} ${mono ? "font-mono text-[10px]" : ""}`}
-      >
-        {value}
-      </dd>
+      <dd className={`text-right text-xs text-stone-800 ${mono ? "font-mono text-[10px]" : ""}`}>{value}</dd>
     </div>
   );
-}
-
-/** numeric-kolonner fra PostgREST kan komme som streng — nokExact() vil ha tall. */
-function toNumberOrNull(value: number | string | null) {
-  if (value === null || value === "") return null;
-  const numeric = typeof value === "number" ? value : Number(value);
-  return Number.isFinite(numeric) ? numeric : null;
 }
 
 function categoryOptions(values: Array<{ name: string; count?: number } | string>, current: string) {

@@ -1,4 +1,5 @@
 import { getPriceListProducts, type PriceListProduct } from "@/lib/price-lists";
+import { toVatInclusiveNok } from "@/lib/vat";
 import { applyMarkupForSupplierKey, getSupplierMarkups } from "@/lib/price-markup";
 import type { MaterialSection } from "@/lib/project-data";
 
@@ -212,20 +213,14 @@ export type MaterialOrderView = {
   items: MaterialOrderItemView[];
 };
 
-export const VAT_RATE = 0.25;
+// Mva-regelen bor i lib/vat.ts (importfri, så klientkomponenter kan bruke den).
+// Re-eksporteres her fordi halve kodebasen henter den herfra.
+export { VAT_RATE, toVatInclusiveNok } from "@/lib/vat";
+
 export const MINIMUM_ORDER_VALUE_NOK = 500;
 
 export function getDefaultMaterialOrderDeliveryMode(mode?: OrderDeliveryMode): OrderDeliveryMode {
   return mode ?? "pickup";
-}
-
-export function toVatInclusiveNok(value: number, vatRate = VAT_RATE) {
-  if (!Number.isFinite(value) || value <= 0) {
-    return 0;
-  }
-
-  // Round to 2 decimal places (øre), not to whole kroner.
-  return Math.max(0, Math.round(value * (1 + vatRate) * 100) / 100);
 }
 
 export type MaterialOrderItemView = {
