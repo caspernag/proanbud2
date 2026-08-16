@@ -24,6 +24,15 @@ type ExistingProductRow = {
   id: string;
   slug: string;
   nobb_number: string;
+  /**
+   * Felter prisfilen ikke bærer. Upserten skriver hele raden, så disse må leses
+   * inn og skrives tilbake — ellers nullstiller hver import det som er samlet
+   * opp utenom prisfilen.
+   */
+  popularity_score: number | null;
+  ean: string | null;
+  image_url: string | null;
+  datasheet_url: string | null;
 };
 
 type CatalogMetaRow = {
@@ -141,15 +150,20 @@ export async function importPriceFile(
       section_title: sectionTitle,
       category,
       description,
-      ean: product.ean ?? null,
-      datasheet_url: product.datasheetUrl ?? null,
-      image_url: product.imageUrl ?? null,
+      // Prisfilen har sjelden EAN, bilde eller datablad. Mangler de, beholder vi
+      // det som allerede står — en tom kolonne i filen skal ikke slette dem.
+      // EAN er kritisk: lagerstatusen fra Byggmakker slås opp på EAN, og uten
+      // den viser hele butikken «Sjekk lager».
+      ean: product.ean ?? existing?.ean ?? null,
+      datasheet_url: product.datasheetUrl ?? existing?.datasheet_url ?? null,
+      image_url: product.imageUrl ?? existing?.image_url ?? null,
       technical_details: technicalDetails,
       quantity_suggestion: product.quantitySuggestion || "1 stk",
       quantity_reason: product.quantityReason || "",
       last_updated: lastUpdated,
       source: "byggmakker_price_import",
-      popularity_score: 0,
+      // Populariteten bygges opp av salg og visninger over tid, ikke av prisfilen.
+      popularity_score: existing?.popularity_score ?? 0,
       search_text: buildStorefrontSearchText({
         category,
         sectionTitle,
@@ -475,7 +489,7 @@ async function loadExistingProductsByNobb(db: SupabaseClient, nobbNumbers: strin
     const chunk = nobbNumbers.slice(i, i + IMPORT_CHUNK_SIZE);
     const { data, error } = await db
       .from(STOREFRONT_PRODUCTS_TABLE)
-      .select("id, slug, nobb_number")
+      .select("id, slug, nobb_number, popularity_score, ean, image_url, datasheet_url")
       .in("nobb_number", chunk);
 
     if (error) {
