@@ -72,7 +72,7 @@ export function applyMarkup(
   });
 
   if (!markup) {
-    return capToMaxPrice(price, options?.maxPrice);
+    return capToMaxPrice(price, options?.maxPrice, price);
   }
 
   return applyMarkupFormula(price, markup, options?.maxPrice);
@@ -90,7 +90,7 @@ export function applyMarkupForSupplierKey(
 
   const markup = markups.find((row) => matchesSupplierKey(row.supplier_name, supplierKey));
   if (!markup) {
-    return capToMaxPrice(price, options?.maxPrice);
+    return capToMaxPrice(price, options?.maxPrice, price);
   }
 
   return applyMarkupFormula(price, markup, options?.maxPrice);
@@ -110,15 +110,25 @@ function matchesSupplierKey(supplierName: string, supplierKey: SupplierKey) {
 function applyMarkupFormula(price: number, markup: SupplierMarkup, maxPrice?: number | null) {
   const percentageIncrement = price * (markup.markup_percentage / 100);
   const markedPrice = Math.max(0, price + percentageIncrement + markup.markup_fixed);
-  return capToMaxPrice(markedPrice, maxPrice);
+  return capToMaxPrice(markedPrice, maxPrice, price);
 }
 
-function capToMaxPrice(price: number, maxPrice?: number | null) {
+/**
+ * Påslaget kan aldri spise mer enn innkjøpsrabatten: utsalgsprisen låses til
+ * leverandørens veiledende pris (`maxPrice`) når påslaget ellers ville løftet
+ * oss over den.
+ *
+ * `netPrice` er gulvet. Ligger veiledende pris under innkjøpsprisen — feil i
+ * prisfila, eller en vare vi faktisk ikke har rabatt på — selger vi til null
+ * margin i stedet for med tap. Gulvet kan heller aldri løfte prisen over det
+ * påslaget selv ga (negativt `markup_fixed` skal fortsatt slå gjennom).
+ */
+function capToMaxPrice(price: number, maxPrice?: number | null, netPrice = 0) {
   if (typeof maxPrice !== "number" || !Number.isFinite(maxPrice) || maxPrice <= 0) {
     return price;
   }
 
-  return Math.min(price, maxPrice);
+  return Math.max(Math.min(price, maxPrice), Math.min(netPrice, price));
 }
 
 function inferSupplierKeyFromName(value: string): SupplierKey | null {

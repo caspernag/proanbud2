@@ -55,6 +55,25 @@ describe("applyMarkupForSupplierKey", () => {
     const result = applyMarkupForSupplierKey(100, "byggmakker", markupsWithNegativeFixed);
     expect(result).toBeGreaterThanOrEqual(0);
   });
+
+  it("falls back to the net price rather than selling below cost when maxPrice is under it", () => {
+    // Veiledende pris (900) er lavere enn innkjøpsprisen (1000): null margin, ikke tap.
+    const result = applyMarkupForSupplierKey(1000, "byggmakker", SAMPLE_MARKUPS, { maxPrice: 900 });
+    expect(result).toBe(1000);
+  });
+
+  it("lets a negative fixed fee cut below the net price even with a maxPrice", () => {
+    const markupsWithNegativeFixed: SupplierMarkup[] = [
+      { supplier_name: "Byggmakker", markup_percentage: 0, markup_fixed: -10 },
+    ];
+    const result = applyMarkupForSupplierKey(100, "byggmakker", markupsWithNegativeFixed, { maxPrice: 120 });
+    expect(result).toBe(90);
+  });
+
+  it("applies the same cap rules when no supplier markup matches", () => {
+    expect(applyMarkupForSupplierKey(1000, "byggmakker", [], { maxPrice: 1200 })).toBe(1000);
+    expect(applyMarkupForSupplierKey(1000, "byggmakker", [], { maxPrice: 900 })).toBe(1000);
+  });
 });
 
 describe("applyMarkup (by supplier name string)", () => {
@@ -95,13 +114,34 @@ describe("calculateStorefrontDisplayPrices", () => {
     expect(prices.unitPriceNok).toBe(1223.75);
   });
 
-  it("does not cap current price to before price", () => {
+  it("caps the current price at the before price when the markup exceeds the discount", () => {
+    // 890 + 10 % = 979, men veiledende pris er 950: rabatten er mindre enn påslaget.
+    const prices = calculateStorefrontDisplayPrices(
+      { unitPriceNok: 890, listPriceNok: 950, supplierName: "Byggmakker" },
+      SAMPLE_MARKUPS,
+    );
+
+    expect(prices.unitPriceNok).toBe(1187.5);
+    expect(prices.listPriceNok).toBe(1187.5);
+  });
+
+  it("never prices above the before price, even with no discount at all", () => {
+    const prices = calculateStorefrontDisplayPrices(
+      { unitPriceNok: 1000, listPriceNok: 1000, supplierName: "XL-Bygg" },
+      SAMPLE_MARKUPS,
+    );
+
+    expect(prices.unitPriceNok).toBe(1250);
+    expect(prices.listPriceNok).toBe(1250);
+  });
+
+  it("falls back to cost price without a fake before price when list price is below cost", () => {
     const prices = calculateStorefrontDisplayPrices(
       { unitPriceNok: 1100, listPriceNok: 1000, supplierName: "XL-Bygg" },
       SAMPLE_MARKUPS,
     );
 
-    expect(prices.unitPriceNok).toBe(1665);
-    expect(prices.listPriceNok).toBe(1250);
+    expect(prices.unitPriceNok).toBe(1375);
+    expect(prices.listPriceNok).toBe(1375);
   });
 });

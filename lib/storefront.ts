@@ -980,9 +980,17 @@ export function calculateStorefrontDisplayPrices(
   product: Pick<StorefrontProduct, "unitPriceNok" | "listPriceNok" | "supplierName">,
   markups: SupplierMarkup[],
 ) {
-  const currentPriceWithMarkup = applyMarkup(product.unitPriceNok, product.supplierName, markups);
+  // Veiledende pris er taket: påslaget skal aldri overgå innkjøpsrabatten, så
+  // vi kan ikke ende dyrere enn leverandøren selv tar for varen.
+  const listPriceBasis = product.listPriceNok > 0 ? product.listPriceNok : null;
+  const currentPriceWithMarkup = applyMarkup(product.unitPriceNok, product.supplierName, markups, {
+    maxPrice: listPriceBasis,
+  });
   const unitPriceNok = toVatInclusiveNok(currentPriceWithMarkup);
-  const listPriceNok = product.listPriceNok > 0 ? toVatInclusiveNok(product.listPriceNok) : unitPriceNok;
+  const listPriceWithVat = listPriceBasis === null ? 0 : toVatInclusiveNok(listPriceBasis);
+  // Er veiledende pris lavere enn vår egen pris (mangler rabatt på varen) har vi
+  // ingen «før-pris» å vise — da ville strekprisen sett ut som en prisøkning.
+  const listPriceNok = listPriceWithVat > unitPriceNok ? listPriceWithVat : unitPriceNok;
 
   return { unitPriceNok, listPriceNok };
 }
