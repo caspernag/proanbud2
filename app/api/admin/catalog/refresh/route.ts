@@ -8,6 +8,15 @@ import { refreshStorefrontCatalog } from "@/lib/storefront-catalog-refresh";
 // cacheComponents (next.config.ts) — route handlers are dynamic by default here.
 export const maxDuration = 300;
 
+/**
+ * IKKE SATT OPP SOM CRON — fjernet fra vercel.json 2026-08-16, med vilje.
+ *
+ * Katalogen eies nå av prisfil-importen i /sjefen/produkter. Denne ruten bygger
+ * fra vector store med egne id-er og sletter deretter alle rader den ikke rørte,
+ * så et kall herfra ville slettet hele den importerte katalogen. Ikke legg den
+ * tilbake på et skjema uten å først avklare hvem som skal eie tabellen.
+ */
+
 function isAuthorized(request: Request): boolean {
   const secrets = [env.cronSecret, env.storefrontImageWarmupSecret].filter(Boolean);
   if (secrets.length === 0) {
