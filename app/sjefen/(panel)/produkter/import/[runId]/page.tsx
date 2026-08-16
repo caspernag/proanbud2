@@ -32,6 +32,7 @@ const COLUMN_LABELS: Record<string, string> = {
   brand: "Merke",
   supplier: "Leverandør",
   category: "Kategori",
+  categoryCode: "Varegruppekode",
   section: "Seksjon",
   description: "Beskrivelse",
   imageUrl: "Bilde",

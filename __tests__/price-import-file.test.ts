@@ -156,6 +156,55 @@ describe("Excel-prisfil uten overskriftsrad", () => {
   });
 });
 
+describe("varegruppekode med overskriftsrad", () => {
+  // Samme kolonneoppsett som Byggmakker-eksporten, men med overskrifter. Uten
+  // overskrifter gjenkjennes varegruppekoden på innhold; med overskrifter må den
+  // gjenkjennes på navn, ellers mister katalogen kategoriene sine.
+  const rows = [
+    ["NOBB", "Produktnavn", "Beskrivelse", "", "Veil.pris", "Rabatt %", "Nettopris", "Salgsenhet", "", "Varegruppekode"],
+    ["27885359", "GRAN 19X100 SKURLAST", "", "", "15,92", "51,69", "7,69", "LM", "", "0501"],
+    ["46583456", "TERRASSEBORD 28X120", "", "", "250,00", "20,00", "200,00", "LM", "", "0506"],
+  ];
+
+  it("kobler varegruppekoden på overskriftsnavn", () => {
+    const result = parseProductsFromTable(rows, options);
+
+    expect(result.headerRowIndex).toBe(0);
+    expect(result.mappedColumns).toMatchObject({
+      nobb: "NOBB",
+      productName: "Produktnavn",
+      listPrice: "Veil.pris",
+      price: "Nettopris",
+      categoryCode: "Varegruppekode",
+    });
+  });
+
+  it("slår opp kategorien fra koden i stedet for produktnavnet", () => {
+    const products = parseProductsFromTable(rows, options).products;
+
+    expect(products.map((product) => product.category)).toEqual(["Konstruksjonsvirke", "Terrasse"]);
+  });
+
+  it("skiller nettopris fra veiledende pris på navn, ikke på rabattsammenhengen", () => {
+    const gran = parseProductsFromTable(rows, options).products[0];
+
+    expect(gran.priceNok).toBeCloseTo(7.69, 2);
+    expect(gran.listPriceNok).toBeCloseTo(15.92, 2);
+  });
+
+  it("lar «Varegruppe» med kategorinavn fortsatt bli kategori, ikke kode", () => {
+    const named = [
+      ["NOBB", "Produktnavn", "Nettopris", "Varegruppe"],
+      ["27885359", "GRAN 19X100 SKURLAST", "7,69", "Trelast"],
+    ];
+    const result = parseProductsFromTable(named, options);
+
+    expect(result.mappedColumns).toMatchObject({ category: "Varegruppe" });
+    expect(result.mappedColumns.categoryCode).toBeUndefined();
+    expect(result.products[0].category).toBe("Trelast");
+  });
+});
+
 describe("import av CSV med overskriftsrad", () => {
   it("kobler kolonner på navn uansett rekkefølge", () => {
     const csv = [

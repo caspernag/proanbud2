@@ -105,6 +105,17 @@ const FIELD_ALIASES = {
   brand: ["merke", "merkevare", "fabrikat", "produsent", "brand", "manufacturer"],
   supplier: ["leverandor", "leverandør", "supplier", "vendor"],
   category: ["varegruppe", "produktgruppe", "hovedgruppe", "kategori", "category", "productgroup"],
+  // Varegruppekode («0501»), ikke et kategorinavn — kategorien slås opp fra koden.
+  // Må stå etter `category`, ellers kaprer den «varegruppe»-overskriften.
+  categoryCode: [
+    "varegruppekode",
+    "varegruppenr",
+    "varegruppenummer",
+    "gruppekode",
+    "vgkode",
+    "vgnr",
+    "categorycode",
+  ],
   section: ["seksjon", "avdeling", "hovedkategori", "section", "department"],
   description: [
     "beskrivelse",
@@ -218,8 +229,7 @@ export function parseProductsFromTable(
 
 /* ── Overskriftsgjenkjenning ──────────────────────────────────────────────── */
 
-/** `categoryCode` er en varegruppekode (f.eks. «0501»), ikke et kategorinavn. */
-type ColumnMap = Partial<Record<FieldName, number>> & { categoryCode?: number };
+type ColumnMap = Partial<Record<FieldName, number>>;
 
 /**
  * Leter etter overskriftsraden i de første radene. Excel-eksporter har ofte
