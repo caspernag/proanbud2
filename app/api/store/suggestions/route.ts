@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server";
 
-import { getStorefrontProducts, queryStorefrontProducts } from "@/lib/storefront";
+import { getStorefrontCatalogMeta, queryStorefrontProducts } from "@/lib/storefront";
 
 const MAX_PRODUCT_SUGGESTIONS = 5;
 const MAX_CATEGORY_SUGGESTIONS = 5;
@@ -18,25 +18,24 @@ export async function GET(request: Request) {
   const { searchParams } = new URL(request.url);
   const query = (searchParams.get("q") ?? "").trim();
 
-  if (query.length < 2) {
-    const { products } = await getStorefrontProducts();
-    const categories = buildTopCategories(products);
+  // Kategoritellingene er forhåndsberegnet i storefront_catalog_meta og cachet.
+  // Denne ruta lastet tidligere hele katalogen for å telle dem selv — på hvert
+  // tastetrykk, og også for tomme søk.
+  const meta = await getStorefrontCatalogMeta();
 
+  if (query.length < 2) {
     return NextResponse.json({
       query,
       searches: POPULAR_SEARCHES,
-      categories,
+      categories: buildTopCategories(meta.categoryCounts),
       products: [],
     });
   }
 
-  const [result, catalog] = await Promise.all([
-    queryStorefrontProducts({ q: query, pageSize: MAX_PRODUCT_SUGGESTIONS }),
-    getStorefrontProducts(),
-  ]);
+  const result = await queryStorefrontProducts({ q: query, pageSize: MAX_PRODUCT_SUGGESTIONS });
 
   const normalizedQuery = normalize(query);
-  const categoryMatches = buildTopCategories(catalog.products)
+  const categoryMatches = buildTopCategories(meta.categoryCounts, Number.POSITIVE_INFINITY)
     .filter((category) => normalize(category.label).includes(normalizedQuery))
     .slice(0, MAX_CATEGORY_SUGGESTIONS);
 
@@ -55,17 +54,14 @@ export async function GET(request: Request) {
   });
 }
 
-function buildTopCategories(products: Awaited<ReturnType<typeof getStorefrontProducts>>["products"]) {
-  const counts = new Map<string, number>();
-
-  for (const product of products) {
-    if (!product.category) continue;
-    counts.set(product.category, (counts.get(product.category) ?? 0) + 1);
-  }
-
-  return Array.from(counts.entries())
+function buildTopCategories(
+  categoryCounts: Record<string, number>,
+  limit: number = MAX_CATEGORY_SUGGESTIONS,
+) {
+  return Object.entries(categoryCounts)
+    .filter(([label]) => label.length > 0)
     .sort((left, right) => right[1] - left[1] || left[0].localeCompare(right[0], "nb-NO"))
-    .slice(0, MAX_CATEGORY_SUGGESTIONS)
+    .slice(0, limit)
     .map(([label, count]) => ({
       label,
       href: `/?category=${encodeURIComponent(label)}`,

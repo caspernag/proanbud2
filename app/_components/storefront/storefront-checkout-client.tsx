@@ -500,6 +500,7 @@ export function StorefrontCheckoutClient({ paymentCancelled }: { paymentCancelle
                       <StorefrontProductImage
                         src={resolveImageUrl(lineItem.product)}
                         alt={lineItem.product.productName}
+                        sizes="96px"
                         className="h-full w-full object-contain"
                       />
                     </Link>

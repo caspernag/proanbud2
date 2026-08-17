@@ -142,9 +142,14 @@ export default async function ProdukterPage({ searchParams }: { searchParams: Se
         title="Produkter"
         description="Søk, filtrer og rediger butikkatalogen."
         actions={
-          <Link href="/" className={BTN_SECONDARY}>
-            Åpne butikk
-          </Link>
+          <>
+            <Link href="/sjefen/produkter/bilder" className={BTN_SECONDARY}>
+              Bilder
+            </Link>
+            <Link href="/" className={BTN_SECONDARY}>
+              Åpne butikk
+            </Link>
+          </>
         }
       />
 

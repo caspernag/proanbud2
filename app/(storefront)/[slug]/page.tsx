@@ -1,6 +1,7 @@
 import Link from "next/link";
 import { cookies } from "next/headers";
 import { notFound } from "next/navigation";
+import { Suspense } from "react";
 
 import { AddToMaterialListButton } from "@/app/_components/storefront/add-to-material-list-button";
 import { FREE_SHIPPING_LABEL } from "@/lib/shipping";
@@ -9,7 +10,12 @@ import { StorePickupDropdown } from "@/app/_components/storefront/store-pickup-d
 import { StorefrontProfileTracker } from "@/app/_components/storefront/storefront-profile-tracker";
 import { StorefrontProductImage } from "@/app/_components/storefront/storefront-product-image";
 import { getByggmakkerAvailability } from "@/lib/byggmakker-availability";
-import { getStorefrontImageUrl, getStorefrontProductBySlug, queryStorefrontProducts } from "@/lib/storefront";
+import {
+  getStorefrontImageUrl,
+  getStorefrontProductBySlug,
+  getStorefrontProductSlugs,
+  queryStorefrontProducts,
+} from "@/lib/storefront";
 import { departmentForCategory } from "@/lib/storefront-taxonomy";
 import { parseStorefrontUserProfileCookie, STOREFRONT_USER_PROFILE_COOKIE } from "@/lib/storefront-user-profile";
 import { formatCurrency } from "@/lib/utils";
@@ -32,10 +38,19 @@ export async function generateMetadata({ params }: StorefrontProductPageProps) {
   };
 }
 
+/**
+ * Prerender produktsidene. De er de mest SEO-kritiske sidene i butikken, og
+ * innholdet er identisk for alle besøkende — det personaliserte (anbefalinger)
+ * og det ferske (lagerstatus) streames inn under, så selve siden kan ligge
+ * ferdig på CDN.
+ */
+export async function generateStaticParams() {
+  const slugs = await getStorefrontProductSlugs();
+  return slugs.map((slug) => ({ slug }));
+}
+
 export default async function StorefrontProductPage({ params }: StorefrontProductPageProps) {
   const { slug } = await params;
-  const cookieStore = await cookies();
-  const userProfile = parseStorefrontUserProfileCookie(cookieStore.get(STOREFRONT_USER_PROFILE_COOKIE)?.value);
   const product = await getStorefrontProductBySlug(slug);
 
   if (!product) {
@@ -43,17 +58,7 @@ export default async function StorefrontProductPage({ params }: StorefrontProduc
   }
 
   const isByggmakkerProduct = product.supplierName.toLowerCase().includes("byggmakker");
-
-  const related = await queryStorefrontProducts({
-    category: product.category,
-    sort: "relevance",
-    userProfile,
-    pageSize: 4,
-  });
-
-  // EAN comes straight from the price list now, no NOBB→EAN resolution needed.
-  const byggmakkerAvailability =
-    isByggmakkerProduct && product.ean ? await getByggmakkerAvailability(product.ean) : null;
+  const availabilityEan = isByggmakkerProduct ? product.ean ?? null : null;
 
   const department = departmentForCategory(product.category);
   const showLeafCrumb = department.label.toLowerCase() !== product.category.toLowerCase();
@@ -65,8 +70,6 @@ export default async function StorefrontProductPage({ params }: StorefrontProduc
   const priceUnitLabel = formatUnitLabel(product.priceUnit ?? product.unit);
   const salesUnitLabel = formatUnitLabel(product.salesUnit ?? product.unit);
   const pricePerPriceUnitNok = product.packageAreaSqm ? product.unitPriceNok / product.packageAreaSqm : 0;
-  const isVerifiedNetAvailable = Boolean(byggmakkerAvailability?.netAvailable);
-  const isStoreAvailable = Boolean(byggmakkerAvailability?.storeAvailable);
 
   return (
     <div className="space-y-5">
@@ -116,6 +119,8 @@ export default async function StorefrontProductPage({ params }: StorefrontProduc
             <StorefrontProductImage
               src={getStorefrontImageUrl(product)}
               alt={product.productName}
+              sizes="(max-width: 1024px) 100vw, 680px"
+              priority
               className="h-auto max-h-[560px] w-full object-contain object-top lg:max-h-[680px]"
             />
           </div>
@@ -167,34 +172,12 @@ export default async function StorefrontProductPage({ params }: StorefrontProduc
                 packageAreaSqm={product.packageAreaSqm}
                 secondaryAction={<AddToMaterialListButton {...buildMaterialListProduct(product)} />}
               />
-              {isStoreAvailable && byggmakkerAvailability ? (
-                <StorePickupDropdown stores={byggmakkerAvailability.stores} />
-              ) : (
-                <div className="flex flex-wrap items-center gap-x-4 gap-y-2 rounded-md border border-stone-200 bg-white px-3 py-2.5 text-xs font-medium">
-                  {isVerifiedNetAvailable ? (
-                    <span className="inline-flex items-center gap-1.5 text-emerald-700">
-                      <span className="relative flex h-2 w-2">
-                        <span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-emerald-400 opacity-75" />
-                        <span className="relative inline-flex h-2 w-2 rounded-full bg-emerald-500" />
-                      </span>
-                      På lager
-                    </span>
-                  ) : byggmakkerAvailability ? (
-                    <span className="inline-flex items-center gap-1.5 text-stone-600">
-                      <span className="relative inline-flex h-2 w-2 rounded-full bg-stone-400" />
-                      Skaffes på forespørsel
-                    </span>
-                  ) : (
-                    <span className="inline-flex items-center gap-1.5 text-stone-500">
-                      <span className="relative inline-flex h-2 w-2 rounded-full bg-stone-400" />
-                      Sjekk levering
-                    </span>
-                  )}
-                  <span className="text-stone-500">
-                    {isVerifiedNetAvailable ? "Hentes i byggmakker" : "Hent i butikk"}
-                  </span>
-                </div>
-              )}
+              {/* Lagerstatus kommer fra Byggmakkers API. Den blokkerte tidligere
+                  hele sidegjengivelsen; nå streames den inn, så resten av siden
+                  kan prerendres og leveres fra CDN. */}
+              <Suspense fallback={<ProductStockPanelSkeleton />}>
+                <ProductStockPanel ean={availabilityEan} />
+              </Suspense>
             </div>
           </div>
 
@@ -204,27 +187,9 @@ export default async function StorefrontProductPage({ params }: StorefrontProduc
             <div className="mt-2 flex items-start gap-3">
               <div className="flex h-8 w-8 shrink-0 items-center justify-center text-lg text-[#15452d]">🏬</div>
               <div className="text-sm text-stone-700">
-                {isVerifiedNetAvailable ? (
-                  <>
-                    <p className="font-semibold text-stone-900">Lagerstatus bekreftet</p>
-                    <p className="text-xs text-stone-500">Varene hentes hovedsakelig fra nærmeste byggmakker etter bestilling. Vi bekrefter lokasjon og tilgjengelighet.</p>
-                  </>
-                ) : isStoreAvailable ? (
-                  <>
-                    <p className="font-semibold text-stone-900">Lagerført i byggevarehus</p>
-                    <p className="text-xs text-stone-500">Materialet kan hentes fra valgt butikk eller nærmeste byggmakker etter bekreftelse.</p>
-                  </>
-                ) : byggmakkerAvailability ? (
-                  <>
-                    <p className="font-semibold text-stone-900">Skaffes på forespørsel</p>
-                    <p className="text-xs text-stone-500">Vi sjekker tilgjengelighet og nærmeste lager før videre oppfølging.</p>
-                  </>
-                ) : (
-                  <>
-                    <p className="font-semibold text-stone-900">Vi bekrefter henting</p>
-                    <p className="text-xs text-stone-500">Materialet hentes vanligvis fra nærmeste byggmakker etter bestilling.</p>
-                  </>
-                )}
+                <Suspense fallback={<DeliveryPromiseCopy availability={null} />}>
+                  <ProductDeliveryPromise ean={availabilityEan} />
+                </Suspense>
               </div>
             </div>
           </div>
@@ -277,9 +242,32 @@ export default async function StorefrontProductPage({ params }: StorefrontProduc
           </Link>
         </div>
 
-        <div className="mt-4 grid grid-cols-2 gap-2 sm:gap-3 lg:grid-cols-4">
-          {related.items
-            .filter((relatedProduct) => relatedProduct.id !== product.id)
+        {/* Anbefalingene rangeres etter besøkendes profil-cookie. Det er det
+            eneste personaliserte på siden, så den leses her nede i stedet for i
+            page-body — ellers ville cookie-lesingen gjort hele siden dynamisk. */}
+        <Suspense fallback={<RelatedProductsSkeleton />}>
+          <RelatedProducts category={product.category} excludeId={product.id} />
+        </Suspense>
+      </section>
+    </div>
+  );
+}
+
+async function RelatedProducts({ category, excludeId }: { category: string; excludeId: string }) {
+  const cookieStore = await cookies();
+  const userProfile = parseStorefrontUserProfileCookie(cookieStore.get(STOREFRONT_USER_PROFILE_COOKIE)?.value);
+
+  const related = await queryStorefrontProducts({
+    category,
+    sort: "relevance",
+    userProfile,
+    pageSize: 5,
+  });
+
+  return (
+    <div className="mt-4 grid grid-cols-2 gap-2 sm:gap-3 lg:grid-cols-4">
+      {related.items
+        .filter((relatedProduct) => relatedProduct.id !== excludeId)
             .slice(0, 4)
             .map((relatedProduct) => {
               const hasRelDiscount = relatedProduct.listPriceNok > relatedProduct.unitPriceNok;
@@ -301,6 +289,7 @@ export default async function StorefrontProductPage({ params }: StorefrontProduc
                     <StorefrontProductImage
                       src={getStorefrontImageUrl(relatedProduct)}
                       alt={relatedProduct.productName}
+                      sizes="(max-width: 640px) 45vw, (max-width: 1024px) 30vw, 220px"
                       className="h-full w-full object-contain transition group-hover:scale-[1.03]"
                     />
                   </div>
@@ -321,9 +310,124 @@ export default async function StorefrontProductPage({ params }: StorefrontProduc
                 </Link>
               );
             })}
-        </div>
-      </section>
     </div>
+  );
+}
+
+function RelatedProductsSkeleton() {
+  return (
+    <div className="mt-4 grid grid-cols-2 gap-2 sm:gap-3 lg:grid-cols-4">
+      {Array.from({ length: 4 }, (_, index) => (
+        <div
+          key={index}
+          className="flex min-w-0 flex-col overflow-hidden rounded-md border border-stone-200 bg-white"
+        >
+          <div className="aspect-square animate-pulse bg-stone-100" />
+          <div className="space-y-2 p-2.5 sm:p-3">
+            <div className="h-3 w-full animate-pulse rounded bg-stone-100" />
+            <div className="h-3 w-2/3 animate-pulse rounded bg-stone-100" />
+          </div>
+        </div>
+      ))}
+    </div>
+  );
+}
+
+async function ProductStockPanel({ ean }: { ean: string | null }) {
+  const availability = ean ? await getByggmakkerAvailability(ean) : null;
+
+  if (availability?.storeAvailable) {
+    return <StorePickupDropdown stores={availability.stores} />;
+  }
+
+  const isVerifiedNetAvailable = Boolean(availability?.netAvailable);
+
+  return (
+    <div className="flex flex-wrap items-center gap-x-4 gap-y-2 rounded-md border border-stone-200 bg-white px-3 py-2.5 text-xs font-medium">
+      {isVerifiedNetAvailable ? (
+        <span className="inline-flex items-center gap-1.5 text-emerald-700">
+          <span className="relative flex h-2 w-2">
+            <span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-emerald-400 opacity-75" />
+            <span className="relative inline-flex h-2 w-2 rounded-full bg-emerald-500" />
+          </span>
+          På lager
+        </span>
+      ) : availability ? (
+        <span className="inline-flex items-center gap-1.5 text-stone-600">
+          <span className="relative inline-flex h-2 w-2 rounded-full bg-stone-400" />
+          Skaffes på forespørsel
+        </span>
+      ) : (
+        <span className="inline-flex items-center gap-1.5 text-stone-500">
+          <span className="relative inline-flex h-2 w-2 rounded-full bg-stone-400" />
+          Sjekk levering
+        </span>
+      )}
+      <span className="text-stone-500">
+        {isVerifiedNetAvailable ? "Hentes i byggmakker" : "Hent i butikk"}
+      </span>
+    </div>
+  );
+}
+
+function ProductStockPanelSkeleton() {
+  return (
+    <div className="flex flex-wrap items-center gap-x-4 gap-y-2 rounded-md border border-stone-200 bg-white px-3 py-2.5 text-xs font-medium">
+      <span className="inline-flex items-center gap-1.5 text-stone-400">
+        <span className="relative inline-flex h-2 w-2 animate-pulse rounded-full bg-stone-300" />
+        Sjekker lager…
+      </span>
+    </div>
+  );
+}
+
+async function ProductDeliveryPromise({ ean }: { ean: string | null }) {
+  const availability = ean ? await getByggmakkerAvailability(ean) : null;
+  return <DeliveryPromiseCopy availability={availability} />;
+}
+
+/**
+ * Delt av både Suspense-fallbacket og det ferdige resultatet. `null` betyr
+ * «vet ikke ennå» og «fant ikke ut av det» — begge skal vise den nøytrale
+ * teksten, så det er samme tilfelle.
+ */
+function DeliveryPromiseCopy({
+  availability,
+}: {
+  availability: { netAvailable?: boolean; storeAvailable?: boolean } | null;
+}) {
+  if (availability?.netAvailable) {
+    return (
+      <>
+        <p className="font-semibold text-stone-900">Lagerstatus bekreftet</p>
+        <p className="text-xs text-stone-500">Varene hentes hovedsakelig fra nærmeste byggmakker etter bestilling. Vi bekrefter lokasjon og tilgjengelighet.</p>
+      </>
+    );
+  }
+
+  if (availability?.storeAvailable) {
+    return (
+      <>
+        <p className="font-semibold text-stone-900">Lagerført i byggevarehus</p>
+        <p className="text-xs text-stone-500">Materialet kan hentes fra valgt butikk eller nærmeste byggmakker etter bekreftelse.</p>
+      </>
+    );
+  }
+
+  if (availability) {
+    return (
+      <>
+        <p className="font-semibold text-stone-900">Skaffes på forespørsel</p>
+        <p className="text-xs text-stone-500">Vi sjekker tilgjengelighet og nærmeste lager før videre oppfølging.</p>
+      </>
+    );
+  }
+
+  return (
+    <>
+      <p className="font-semibold text-stone-900">Vi bekrefter henting</p>
+      <p className="text-xs text-stone-500">Materialet hentes vanligvis fra nærmeste byggmakker etter bestilling.</p>
+    </>
   );
 }
 

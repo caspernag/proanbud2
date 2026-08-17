@@ -58,11 +58,21 @@ export function SubmitButton({
   pendingLabel,
   className,
   title,
+  name,
+  value,
 }: {
   children: ReactNode;
   pendingLabel?: string;
   className?: string;
   title?: string;
+  /**
+   * Lar ett skjema ha flere knapper som betyr forskjellige ting: nettleseren
+   * sender name/value til den knappen som faktisk ble trykket, så serveren kan
+   * forgrene på den. Brukes der knappene deler felter (f.eks. avkryssede rader)
+   * og derfor ikke kan splittes i hvert sitt skjema.
+   */
+  name?: string;
+  value?: string;
 }) {
   const { pending } = useFormStatus();
 
@@ -70,6 +80,8 @@ export function SubmitButton({
     <button
       type="submit"
       title={title}
+      name={name}
+      value={value}
       className={`${className ?? ""} disabled:cursor-not-allowed disabled:opacity-60`}
       disabled={pending}
     >

@@ -39,6 +39,7 @@
     "react-dom": "19.2.4",
     "resend": "^6.12.2",
     "shadcn": "^4.7.0",
+    "sharp": "^0.35.3",
     "stripe": "^22.0.0",
     "svg-to-pdfkit": "^0.1.8",
     "tailwind-merge": "^3.6.0",

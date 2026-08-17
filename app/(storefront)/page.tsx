@@ -13,7 +13,7 @@ import { getByggmakkerAvailabilityBatch, type ByggmakkerAvailability } from "@/l
 import {
   getStorefrontCatalogMeta,
   getStorefrontImageUrl,
-  getStorefrontProductsByNobb,
+  getCuratedStorefrontProductsByNobb,
   queryStorefrontProducts,
 } from "@/lib/storefront";
 import { parseStorefrontUserProfileCookie, STOREFRONT_USER_PROFILE_COOKIE } from "@/lib/storefront-user-profile";
@@ -97,7 +97,7 @@ export default async function StorefrontPage({ searchParams }: StorefrontPagePro
   const departmentCounts = computeDepartmentCounts(meta.categoryCounts);
   const departments = orderedDepartments(departmentCounts);
   const activeFilter = resolveStorefrontCategoryFilter(category);
-  const featuredDeals = showLanding ? await getStorefrontProductsByNobb(MOST_POPULAR_NOBB) : [];
+  const featuredDeals = showLanding ? await getCuratedStorefrontProductsByNobb(MOST_POPULAR_NOBB) : [];
 
   const stockFilterCandidates = inStockOnly
     ? await queryStorefrontProducts({
@@ -472,6 +472,7 @@ function DealsStrip({ deals, stockByEan }: { deals: StorefrontProduct[]; stockBy
                   <StorefrontProductImage
                     src={getStorefrontImageUrl(product)}
                     alt={product.productName}
+                    sizes="(max-width: 640px) 45vw, (max-width: 1024px) 25vw, 200px"
                     className="h-full w-full object-contain transition duration-300 group-hover:scale-[1.04]"
                   />
                 </div>
@@ -525,6 +526,7 @@ function ProductCard({ product, stockInfo }: { product: StorefrontProduct; stock
           <StorefrontProductImage
             src={getStorefrontImageUrl(product)}
             alt={product.productName}
+            sizes="(max-width: 640px) 45vw, (max-width: 1024px) 30vw, 280px"
             className="h-full w-full object-contain transition duration-300 group-hover:scale-[1.02]"
           />
         </div>

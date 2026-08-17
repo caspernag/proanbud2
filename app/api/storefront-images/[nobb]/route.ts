@@ -1,5 +1,6 @@
 import { createSupabaseAdminClient } from "@/lib/supabase/admin";
 import { env, hasNobbExportEnv, hasStorefrontImageWarmupSecret } from "@/lib/env";
+import { normalizeProductImage } from "@/lib/product-image-normalize";
 import { STORE_IMAGE_FALLBACK_URL } from "@/lib/storefront-image";
 
 // ---------------------------------------------------------------------------
@@ -218,7 +219,7 @@ async function checkNullMarker(supabase: SupabaseClient, nobb: string): Promise<
 async function saveImageToSupabase(
   supabase: SupabaseClient,
   nobb: string,
-  bytes: ArrayBuffer,
+  bytes: ArrayBuffer | Buffer,
   contentType: string,
 ): Promise<void> {
   const ext = extForContentType(contentType);
@@ -228,6 +229,21 @@ async function saveImageToSupabase(
     contentType,
     upsert: true,
   });
+
+  // Rydd bort varianter med annen filendelse for samme NOBB. Uten dette blir
+  // den gamle .jpg-en liggende igjen etter WebP-konverteringen, og
+  // `findImageInSupabase` (som matcher på prefiks) kan plukke den i stedet.
+  const { data: siblings } = await supabase.storage.from(BUCKET).list("", {
+    search: nobb + ".",
+    limit: 10,
+  });
+  const stale = (siblings ?? [])
+    .map((file) => file.name)
+    .filter((name) => name.startsWith(nobb + ".") && name !== objectPath && !name.endsWith(".null"));
+
+  if (stale.length > 0) {
+    await supabase.storage.from(BUCKET).remove(stale);
+  }
 
   setStoragePointer(nobb, objectPath, IMAGE_POINTER_TTL_MS);
 }
@@ -432,22 +448,32 @@ async function resolveImage(
 
   const resolved = await resolveFromExternalSources(nobb);
 
+  // Skaler ned + konverter til WebP FØR vi lagrer og før vi serverer. Kildene
+  // leverer alt fra 30 kB til 20 MB; uten dette havner råfilen i bøtta og blir
+  // liggende der som permanent egress-kostnad.
+  const normalized = resolved ? await normalizeProductImage(resolved.image.bytes) : null;
+
   if (supabase) {
-    if (resolved) {
+    if (normalized) {
       await runWithTimeout(
-        saveImageToSupabase(supabase, nobb, resolved.image.bytes, resolved.image.contentType),
+        saveImageToSupabase(supabase, nobb, normalized.bytes, normalized.contentType),
         PERSIST_BUDGET_MS,
       );
     } else {
+      // Enten fant vi ingenting, eller så lot ikke det vi fant seg dekode som
+      // bilde. Begge deler er "ingen bilde" for denne NOBB-en.
       await runWithTimeout(saveNullMarker(supabase, nobb), PERSIST_BUDGET_MS);
     }
   }
 
-  if (resolved) {
+  if (normalized && resolved) {
     return {
       kind: "image",
-      bytes: resolved.image.bytes,
-      contentType: resolved.image.contentType,
+      bytes: normalized.bytes.buffer.slice(
+        normalized.bytes.byteOffset,
+        normalized.bytes.byteOffset + normalized.bytes.byteLength,
+      ) as ArrayBuffer,
+      contentType: normalized.contentType,
       source: resolved.source,
       cacheStatus: "miss-resolved",
     };

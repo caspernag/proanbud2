@@ -77,6 +77,19 @@ export function buildStorefrontSearchText(
     .toLowerCase();
 }
 
+/**
+ * Hele katalogen i minnet.
+ *
+ * IKKE bruk denne på request-stien. Søk, tilbud og autocomplete gikk tidligere
+ * gjennom den, og lastet dermed alle ~3 900 radene for å svare på ett søk.
+ * `use cache` reddet det ikke: den cachen er in-memory og persisterer normalt
+ * ikke mellom requests på serverless, så lastingen skjedde i praksis om igjen
+ * og om igjen.
+ *
+ * Gjenstående lovlig bruk er bakgrunnsjobber som faktisk trenger alt (bilde-
+ * warmup). Trenger du produkter i en request: bruk queryStorefrontProducts,
+ * getStorefrontProductsByNobb eller getStorefrontProductBySlug.
+ */
 export async function getStorefrontProducts() {
   "use cache";
   cacheLife("hours");
@@ -86,7 +99,7 @@ export async function getStorefrontProducts() {
 
 /**
  * Reads the full catalog snapshot from Postgres (paginated). Cheap compared to
- * the vector-store build; backs text search, AI matching, and featured deals.
+ * the vector-store build; backs the image warmup job.
  */
 async function loadStorefrontCatalogFromDb(): Promise<{
   products: StorefrontProduct[];
@@ -198,10 +211,20 @@ const EMPTY_CATALOG_META: StorefrontCatalogMeta = {
   productCount: 0,
 };
 
-// Above this page size we read the full (cached) catalog and paginate in memory
-// instead of issuing a huge SQL range — used by the "in stock only" candidate
-// fetch which requests every matching product at once.
-const STOREFRONT_BULK_PAGE_SIZE = 200;
+/**
+ * Hvor mange kandidater SQL henter inn før JS-scoreren rangerer dem.
+ *
+ * Søket er to-trinns: `search_storefront_product_candidates` gjør den
+ * indekserte utvelgelsen (fulltekst + trigram + NOBB/EAN), og
+ * scoreStorefrontProduct() rangerer resultatet. Grensen er det som holder
+ * søket O(treff) i stedet for O(katalog) — med 3 864 produkter dekker 600
+ * kandidater alle realistiske søk med god margin, og ingen paginerer forbi
+ * side 25 av et søkeresultat.
+ */
+const STOREFRONT_SEARCH_CANDIDATE_LIMIT = 600;
+
+/** Tak for bulk-uttrekk (lagerfilteret ber om alle treff på én gang). */
+const STOREFRONT_MAX_BULK_ROWS = 2000;
 
 /** Precomputed catalog facets (categories, counts, price range). Cached. */
 export async function getStorefrontCatalogMeta(): Promise<StorefrontCatalogMeta> {
@@ -247,11 +270,11 @@ export async function queryStorefrontProducts(query: StorefrontProductQuery): Pr
 
   const meta = await getStorefrontCatalogMeta();
 
-  // Text search keeps the carefully-tuned JS relevance scoring (over the cached
-  // full catalog). Bulk fetches (in-stock candidates) also go in-memory.
-  // Plain browsing is served by cheap paginated SQL.
-  if (q.length > 0 || pageSize > STOREFRONT_BULK_PAGE_SIZE) {
-    return queryStorefrontProductsInMemory({ q, category, supplier, sort, userProfile, page, pageSize }, meta);
+  // Fritekstsøk: SQL velger kandidater (indeksert), JS scorer dem. Blaing uten
+  // søkeord — inkludert bulk-uttrekk for lagerfilteret — går rett på paginert
+  // SQL. Ingen av grenene laster hele katalogen.
+  if (q.length > 0) {
+    return searchStorefrontProductsFromDb({ q, category, supplier, sort, userProfile, page, pageSize }, meta);
   }
 
   return browseStorefrontProductsFromDb({ category, supplier, sort, page, pageSize }, meta);
@@ -265,7 +288,7 @@ type BrowseArgs = {
   pageSize: number;
 };
 
-type InMemoryArgs = BrowseArgs & {
+type SearchArgs = BrowseArgs & {
   q: string;
   userProfile: StorefrontProductQuery["userProfile"];
 };
@@ -303,8 +326,12 @@ async function browseStorefrontProductsFromDb(
     ordered = ordered.order("product_name", { ascending: true });
   }
 
-  const start = (args.page - 1) * args.pageSize;
-  const { data, error, count } = await ordered.range(start, start + args.pageSize - 1);
+  // Lagerfilteret ber om alle treff på én gang. Det er greit som ÉN paginert
+  // spørring, men taket hindrer at en fremtidig større katalog gjør den om til
+  // et fullt tabelluttrekk per request.
+  const rowLimit = Math.min(args.pageSize, STOREFRONT_MAX_BULK_ROWS);
+  const start = (args.page - 1) * rowLimit;
+  const { data, error, count } = await ordered.range(start, start + rowLimit - 1);
 
   if (error) {
     console.error("[storefront] browse-spørring feilet:", error.message);
@@ -319,20 +346,44 @@ async function browseStorefrontProductsFromDb(
   return buildQueryResult(items, total, safePage, args.pageSize, meta);
 }
 
-async function queryStorefrontProductsInMemory(
-  args: InMemoryArgs,
+/**
+ * Fritekstsøk, to trinn:
+ *
+ *   1. Postgres velger kandidater via `search_storefront_product_candidates`
+ *      (GIN-indeksert fulltekst + trigram + eksakt NOBB/EAN).
+ *   2. scoreStorefrontProduct() rangerer kandidatene i JS.
+ *
+ * Trinn 2 er uendret fra før — scoringen er nøye tunet og er fortsatt
+ * kvalitetsautoriteten. Det som er borte er at trinn 1 tidligere var «last ned
+ * hele katalogen».
+ */
+async function searchStorefrontProductsFromDb(
+  args: SearchArgs,
   meta: StorefrontCatalogMeta,
 ): Promise<StorefrontProductQueryResult> {
-  const { products } = await getStorefrontProducts();
+  const client = getStorefrontCatalogClient();
+  if (!client) {
+    return buildQueryResult([], 0, 1, args.pageSize, meta);
+  }
 
-  const filtered = products.filter((product) => {
-    if (args.category && !matchesStorefrontCategory(product, args.category)) {
-      return false;
-    }
-    if (args.supplier && product.supplierName !== args.supplier) {
-      return false;
-    }
-    if (args.q.length > 0 && scoreStorefrontProduct(product, args.q) <= 0) {
+  const categoryFilter = resolveStorefrontCategoryFilter(args.category);
+
+  const { data, error } = await client.rpc("search_storefront_product_candidates", {
+    q: args.q,
+    category_filter: categoryFilter ? categoryFilter.leaves : null,
+    supplier_filter: args.supplier || null,
+    max_candidates: Math.max(STOREFRONT_SEARCH_CANDIDATE_LIMIT, args.pageSize),
+  });
+
+  if (error) {
+    console.error("[storefront] søkespørring feilet:", error.message);
+    return buildQueryResult([], 0, 1, args.pageSize, meta);
+  }
+
+  const candidates = ((data as unknown as StorefrontProductRow[]) ?? []).map(rowToStorefrontProduct);
+
+  const filtered = candidates.filter((product) => {
+    if (scoreStorefrontProduct(product, args.q) <= 0) {
       return false;
     }
     return true;
@@ -408,8 +459,29 @@ export async function getStorefrontProductBySlug(slug: string) {
 }
 
 export async function getStorefrontFeaturedDeals(limit = 6): Promise<StorefrontProduct[]> {
-  const { products } = await getStorefrontProducts();
-  return products
+  const client = getStorefrontCatalogClient();
+  if (!client) {
+    return [];
+  }
+
+  // Rabatten kan ikke sorteres i SQL uten en generert kolonne, men utvalget kan
+  // avgrenses: bare produkter som faktisk har rabatt, og bare de mest populære
+  // av dem. Det gjør dette til en indeksert spørring i stedet for en
+  // fullkatalog-lasting for å finne 6 rader.
+  const { data, error } = await client
+    .from(STOREFRONT_PRODUCTS_TABLE)
+    .select(STOREFRONT_PRODUCT_COLUMNS)
+    .gt("unit_price_nok", 0)
+    .order("popularity_score", { ascending: false })
+    .limit(500);
+
+  if (error) {
+    console.error("[storefront] kunne ikke hente tilbud:", error.message);
+    return [];
+  }
+
+  return ((data as unknown as StorefrontProductRow[]) ?? [])
+    .map(rowToStorefrontProduct)
     .filter((product) => product.listPriceNok > product.unitPriceNok && product.unitPriceNok > 0)
     .map((product) => ({
       product,
@@ -418,6 +490,47 @@ export async function getStorefrontFeaturedDeals(limit = 6): Promise<StorefrontP
     .sort((left, right) => right.discount - left.discount)
     .slice(0, limit)
     .map((entry) => entry.product);
+}
+
+/**
+ * Alle produkt-slugs, for generateStaticParams. Henter bare slug-kolonnen —
+ * ikke hele katalogen — så prerenderingen koster én indeksert spørring.
+ */
+export async function getStorefrontProductSlugs(): Promise<string[]> {
+  "use cache";
+  cacheLife("hours");
+
+  const client = getStorefrontCatalogClient();
+  if (!client) {
+    return [];
+  }
+
+  const slugs: string[] = [];
+  const pageSize = 1000;
+
+  for (let from = 0; ; from += pageSize) {
+    const { data, error } = await client
+      .from(STOREFRONT_PRODUCTS_TABLE)
+      .select("slug")
+      .order("slug", { ascending: true })
+      .range(from, from + pageSize - 1);
+
+    if (error) {
+      console.error("[storefront] kunne ikke hente slugs:", error.message);
+      break;
+    }
+    if (!data || data.length === 0) {
+      break;
+    }
+
+    slugs.push(...data.map((row) => (row as { slug: string }).slug));
+
+    if (data.length < pageSize) {
+      break;
+    }
+  }
+
+  return slugs;
 }
 
 export async function getStorefrontProductsByIds(ids: string[]) {
@@ -440,6 +553,21 @@ export async function getStorefrontProductsByIds(ids: string[]) {
   }
 
   return (data as unknown as StorefrontProductRow[]).map(rowToStorefrontProduct);
+}
+
+/**
+ * Cachet variant av getStorefrontProductsByNobb, for kuraterte lister med
+ * stabil input (landingssidens «mest populære»). Cache-nøkkelen er argumentene,
+ * så dette er bare trygt når NOBB-listen er en konstant — ikke bruk den til
+ * brukerstyrte utvalg som handlekurv eller materialliste.
+ */
+export async function getCuratedStorefrontProductsByNobb(
+  nobbNumbers: string[],
+): Promise<StorefrontProduct[]> {
+  "use cache";
+  cacheLife("hours");
+
+  return getStorefrontProductsByNobb(nobbNumbers);
 }
 
 export async function getStorefrontProductsByNobb(nobbNumbers: string[]): Promise<StorefrontProduct[]> {
@@ -1276,16 +1404,37 @@ function isSearchMatchEligible({
   return matchQuality.totalTokens >= requiredTokenMatches && matchQuality.strongTokens >= requiredStrongMatches;
 }
 
+/**
+ * Fjerner ledende nuller i tall, slik at dimensjoner skrives på én form.
+ *
+ * Prislisten skriver dimensjoner nullpolstret — «GRAN 48X098 K-VIRKE C24»,
+ * «FURU 36X048 CUIMP LEKT» — mens folk søker slik de sier det: «48x98»,
+ * «36x48». Uten dette matcher de to aldri hverandre.
+ *
+ * Kanoniseringen brukes på BEGGE sider (søkeord og produkttekst), så det spiller
+ * ingen rolle hvilken form brukeren skriver: «48x98» og «48x098» gir samme
+ * treff. Samme uttrykk finnes som generert kolonne i Postgres (search_dims), så
+ * SQL-kandidatutvelgelsen og JS-scoringen er enige.
+ *
+ * Desimaler røres ikke: «0.5» beholder nullen, siden det ikke står et siffer
+ * rett etter den.
+ */
+function stripLeadingZerosInNumbers(value: string) {
+  return value.replace(/(^|[^0-9])0+([0-9])/g, "$1$2");
+}
+
 function normalizeSearchText(value: string) {
-  return value
-    .toLowerCase()
-    .replace(/m²/g, "m2")
-    .replace(/×/g, "x")
-    .replace(/(\d),(\d)/g, "$1.$2")
-    .replace(/(\d)\s*x\s*(\d)/g, "$1x$2")
-    .replace(/[^a-z0-9æøå.]+/g, " ")
-    .replace(/\s+/g, " ")
-    .trim();
+  return stripLeadingZerosInNumbers(
+    value
+      .toLowerCase()
+      .replace(/m²/g, "m2")
+      .replace(/×/g, "x")
+      .replace(/(\d),(\d)/g, "$1.$2")
+      .replace(/(\d)\s*x\s*(\d)/g, "$1x$2")
+      .replace(/[^a-z0-9æøå.]+/g, " ")
+      .replace(/\s+/g, " ")
+      .trim(),
+  );
 }
 
 function searchTokens(value: string) {
