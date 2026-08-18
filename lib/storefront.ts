@@ -555,21 +555,6 @@ export async function getStorefrontProductsByIds(ids: string[]) {
   return (data as unknown as StorefrontProductRow[]).map(rowToStorefrontProduct);
 }
 
-/**
- * Cachet variant av getStorefrontProductsByNobb, for kuraterte lister med
- * stabil input (landingssidens «mest populære»). Cache-nøkkelen er argumentene,
- * så dette er bare trygt når NOBB-listen er en konstant — ikke bruk den til
- * brukerstyrte utvalg som handlekurv eller materialliste.
- */
-export async function getCuratedStorefrontProductsByNobb(
-  nobbNumbers: string[],
-): Promise<StorefrontProduct[]> {
-  "use cache";
-  cacheLife("hours");
-
-  return getStorefrontProductsByNobb(nobbNumbers);
-}
-
 export async function getStorefrontProductsByNobb(nobbNumbers: string[]): Promise<StorefrontProduct[]> {
   if (nobbNumbers.length === 0) {
     return [];

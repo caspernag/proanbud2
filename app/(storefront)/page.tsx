@@ -13,9 +13,9 @@ import { getByggmakkerAvailabilityBatch, type ByggmakkerAvailability } from "@/l
 import {
   getStorefrontCatalogMeta,
   getStorefrontImageUrl,
-  getCuratedStorefrontProductsByNobb,
   queryStorefrontProducts,
 } from "@/lib/storefront";
+import { getMostPopularStorefrontProducts } from "@/lib/storefront-popular";
 import { parseStorefrontUserProfileCookie, STOREFRONT_USER_PROFILE_COOKIE } from "@/lib/storefront-user-profile";
 import {
   computeDepartmentCounts,
@@ -44,26 +44,6 @@ const EMPTY_STOCK_MAP = new Map<string, ProductStockInfo>();
 type StorefrontPageProps = {
   searchParams: Promise<Record<string, string | string[] | undefined>>;
 };
-
-// Most popular products among private / DIY customers – curated from the Byggmakker price list.
-const MOST_POPULAR_NOBB = [
-  "25410978", // FURU 28X120 CUIMP TERRASSE KL1
-  "23304215", // FURU 28X120 TERR ROYAL BRUN
-  "11303617", // GRAN 36X148 K-VIRKE C24
-  "11303641", // GRAN 48X098 K-VIRKE C24
-  "11303666", // GRAN 48X148 K-VIRKE C24
-  "10397701", // GIPSPLATE STD 1200X2400X12,5
-  "10397735", // GIPSPLATE STD 1200X2700X12,5
-  "60638110", // OSB 3 ZERO 12X2400X1220 TG2
-  "60638112", // OSB 3 ZERO 18X2400X1220 TG2
-  "50673624", // GLAVA PROFF 34 PLATE 10X57X120
-  "56831354", // ISOLASJON EPS 100X600X1200MM
-  "25411299", // FURU 36X048 CUIMP LEKT KL1
-  "11302643", // G-F 36X048 LEKT/REKKE KL1
-  "25386400", // FURU 19X098 REKTKLED IMP KL1
-  "60137368", // VINDSPERRE BASIC 1,30X25M
-  "60743886", // KONSTRUKSJONSKRUE WAF 6X40
-];
 
 export default async function StorefrontPage({ searchParams }: StorefrontPageProps) {
   const resolvedSearchParams = await searchParams;
@@ -97,7 +77,7 @@ export default async function StorefrontPage({ searchParams }: StorefrontPagePro
   const departmentCounts = computeDepartmentCounts(meta.categoryCounts);
   const departments = orderedDepartments(departmentCounts);
   const activeFilter = resolveStorefrontCategoryFilter(category);
-  const featuredDeals = showLanding ? await getCuratedStorefrontProductsByNobb(MOST_POPULAR_NOBB) : [];
+  const featuredDeals = showLanding ? await getMostPopularStorefrontProducts() : [];
 
   const stockFilterCandidates = inStockOnly
     ? await queryStorefrontProducts({
