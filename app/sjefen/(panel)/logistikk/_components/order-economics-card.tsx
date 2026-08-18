@@ -23,7 +23,7 @@ function pct(value: number | null) {
 
 /**
  * Dekningsbidrag for én ordre. Alt regnes eks. mva: kundeprisene er lagret
- * inkl. mva, prislisten fra Byggmakker er eks. mva, og mva er gjennomstrømning
+ * inkl. mva, innkjøpsprisene fra Byggmakker er eks. mva, og mva er gjennomstrømning
  * begge veier.
  */
 export function OrderEconomicsCard({
@@ -68,7 +68,7 @@ export function OrderEconomicsCard({
             ? `${economics.totalLines - economics.linesWithKnownCost} av ${economics.totalLines} varelinjer mangler innkjøpspris. `
             : ""}
           {!economics.freightCostRegistered ? "Faktisk fraktkostnad er ikke registrert. " : ""}
-          {!economics.goodsCostFromInvoice ? "Varekosten er hentet fra prislisten, ikke fra leverandørfaktura. " : ""}
+          {!economics.goodsCostFromInvoice ? "Varekosten er katalogens innkjøpspris, ikke leverandørfaktura. " : ""}
           Tallet er derfor et estimat.
         </p>
       ) : null}
@@ -85,7 +85,7 @@ export function OrderEconomicsCard({
             label={
               economics.goodsCostFromInvoice
                 ? "− Varekost (fra leverandørfaktura)"
-                : `− Varekost (prisliste, ${economics.linesWithKnownCost}/${economics.totalLines} linjer)`
+                : `− Varekost (innkjøpspris, ${economics.linesWithKnownCost}/${economics.totalLines} linjer)`
             }
             value={`−${kr(economics.goodsCostNok)}`}
           />
@@ -159,8 +159,8 @@ export function OrderEconomicsCard({
             Registrer faktiske kostnader (eks. mva)
           </p>
           <p className="mb-2 text-[11px] leading-relaxed text-stone-500">
-            Varekost overstyrer prislisten. Bruk den når leverandørfakturaen foreligger, så
-            dekningsbidraget bygger på det du faktisk betalte og ikke på et prisliste-øyeblikksbilde.
+            Varekost overstyrer katalogens innkjøpspris. Bruk den når leverandørfakturaen
+            foreligger, så dekningsbidraget bygger på det du faktisk betalte og ikke på prisfilen.
           </p>
 
           <div className="flex flex-wrap gap-3">
@@ -169,7 +169,7 @@ export function OrderEconomicsCard({
               <input
                 name="goodsCostNok"
                 inputMode="decimal"
-                placeholder="fra prisliste"
+                placeholder="fra innkjøpspris"
                 defaultValue={goodsCostNok ?? ""}
                 className="mt-1 block h-9 w-32 border border-stone-300 px-2.5 text-sm font-normal tabular-nums outline-none focus:border-[#163f2a]"
               />

@@ -30,7 +30,7 @@ import {
   parseByggmakkerEventType,
 } from "@/lib/shop-order-logistics-admin";
 import { calculateOrderEconomics } from "@/lib/order-economics";
-import { getPriceListProducts } from "@/lib/price-lists";
+import { getProductCostsByNobb } from "@/lib/product-costs";
 import { withResolvedShopOrderUnits } from "@/lib/shop-order-units";
 import { createSupabaseAdminClient } from "@/lib/supabase/admin";
 import { formatCurrency } from "@/lib/utils";
@@ -153,18 +153,18 @@ export default async function LogistikkOrdrePage({ params }: { params: Promise<{
   const resolvedItems = await withResolvedShopOrderUnits(items ?? []);
 
   /* ── Lønnsomhet ──────────────────────────────────────────────────────────
-   * Innkjøpsprisene ligger i Byggmakker-prislisten og er EKS. mva, mens
-   * linjesummene på ordren er INKL. mva. calculateOrderEconomics håndterer
-   * omregningen. Faller prislisten ut, vises kortet uten varekost framfor at
-   * hele ordresiden feiler.                                              */
+   * Innkjøpsprisene leses fra katalogen (`cost_price_ex_vat_nok`) og er EKS.
+   * mva, mens linjesummene på ordren er INKL. mva. calculateOrderEconomics
+   * håndterer omregningen. Feiler oppslaget, vises kortet uten varekost framfor
+   * at hele ordresiden feiler.                                            */
   let costByNobb = new Map<string, number>();
   try {
-    const priceListProducts = await getPriceListProducts();
-    costByNobb = new Map(
-      priceListProducts.filter((p) => p.nobbNumber).map((p) => [p.nobbNumber, p.priceNok]),
+    costByNobb = await getProductCostsByNobb(
+      supabase,
+      (items ?? []).map((item) => item.nobb_number),
     );
   } catch (cause) {
-    console.error("[sjefen] prisliste utilgjengelig for lønnsomhet:", cause);
+    console.error("[sjefen] innkjøpspriser utilgjengelig for lønnsomhet:", cause);
   }
 
   const economics = calculateOrderEconomics(

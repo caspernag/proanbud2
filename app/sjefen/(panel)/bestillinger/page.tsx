@@ -14,7 +14,7 @@ import {
   sumEconomics,
   type OrderEconomics,
 } from "@/lib/order-economics";
-import { getPriceListProducts } from "@/lib/price-lists";
+import { getProductCostsByNobb } from "@/lib/product-costs";
 
 import { OrderStatusBadge, PartnerStatusBadge, TransportBadge } from "../../_components/status-badges";
 import { PartnerControls } from "./_components/partner-controls";
@@ -100,32 +100,17 @@ export default async function BestillingerPage({ searchParams }: PageProps) {
 
   const userEmail = new Map(usersResult.rows.map((user) => [user.id, user.email ?? "—"]));
 
-  /* ── Innkjøpspris for marginberegning ──────────────────────────────────
-   * Prislisten ligger bak et hourly cache mot OpenAI. Faller den ut skal
-   * ordrelisten fortsatt vises — bare uten marginkolonnene.             */
-  let costByNobb = new Map<string, number>();
-  let marginAvailable = true;
-  try {
-    const priceListProducts = await getPriceListProducts();
-    costByNobb = new Map(
-      priceListProducts.filter((p) => p.nobbNumber).map((p) => [p.nobbNumber, p.priceNok]),
-    );
-  } catch (cause) {
-    marginAvailable = false;
-    console.error("[sjefen] prisliste utilgjengelig, hopper over margin:", cause);
-  }
-
   const paidShopIds = shopResult.rows.filter((o) => isPaidShopStatus(o.status)).map((o) => o.id);
   const paidMaterialIds = materialResult.rows.filter((o) => isPaidMaterialStatus(o.status)).map((o) => o.id);
 
   const [shopItems, materialItems] = await Promise.all([
-    paidShopIds.length > 0 && marginAvailable
+    paidShopIds.length > 0
       ? adminRows<{ order_id: string; nobb_number: string; quantity: number; line_total_nok: number }>(
           "Butikkordrelinjer",
           db.from("shop_order_items").select("order_id, nobb_number, quantity, line_total_nok").in("order_id", paidShopIds),
         )
       : Promise.resolve({ rows: [], error: null }),
-    paidMaterialIds.length > 0 && marginAvailable
+    paidMaterialIds.length > 0
       ? adminRows<{ order_id: string; supplier_sku: string | null; quantity_value: number; line_total_nok: number }>(
           "Materialordrelinjer",
           db
@@ -139,8 +124,23 @@ export default async function BestillingerPage({ searchParams }: PageProps) {
 
   errors.push(...collectErrors(shopItems, materialItems));
 
+  /* ── Innkjøpspris for marginberegning ──────────────────────────────────
+   * Katalogen eier innkjøpsprisen (se lib/product-costs). Slår oppslaget feil
+   * skal ordrelisten fortsatt vises — bare uten marginkolonnene.        */
+  let costByNobb = new Map<string, number>();
+  let marginAvailable = true;
+  try {
+    costByNobb = await getProductCostsByNobb(db, [
+      ...shopItems.rows.map((item) => item.nobb_number),
+      ...materialItems.rows.map((item) => item.supplier_sku ?? ""),
+    ]);
+  } catch (cause) {
+    marginAvailable = false;
+    console.error("[sjefen] innkjøpspriser utilgjengelig, hopper over margin:", cause);
+  }
+
   /* ── Dekningsbidrag ────────────────────────────────────────────────────
-   * Linjesummene på ordren er INKL. mva, mens prislisten fra Byggmakker er
+   * Linjesummene på ordren er INKL. mva, mens innkjøpsprisen i katalogen er
    * EKS. mva. Panelet sammenlignet tidligere de to direkte, noe som overvurderte
    * inntjeningen med hele mva-beløpet. calculateOrderEconomics regner begge
    * sider eks. mva og trekker fra frakt og betalingsgebyr.              */
@@ -255,7 +255,7 @@ export default async function BestillingerPage({ searchParams }: PageProps) {
         <StatCard
           label={isMaterial ? "Varekost" : "Kostnader"}
           value={marginAvailable ? nok(cost) : "—"}
-          sub={isMaterial ? "fra prisliste, eks. mva" : "vare + frakt + gebyr"}
+          sub={isMaterial ? "fra katalogens innkjøpspris, eks. mva" : "vare + frakt + gebyr"}
         />
         <StatCard
           label="Dekningsbidrag"
@@ -268,7 +268,7 @@ export default async function BestillingerPage({ searchParams }: PageProps) {
           value={marginAvailable ? `${marginPct.toFixed(1)} %` : "—"}
           sub={
             !marginAvailable
-              ? "prisliste utilgjengelig"
+              ? "innkjøpspriser utilgjengelig"
               : incompleteCount > 0
                 ? `${incompleteCount} ordre mangler kostnadsdata`
                 : "av netto salgsinntekt"
