@@ -22,6 +22,11 @@ export const env = {
   trebyggOrderFromEmail: process.env.TREBYGG_ORDER_FROM_EMAIL ?? "",
   fikenApiToken: process.env.FIKEN_API_TOKEN ?? "",
   fikenCompanySlug: process.env.FIKEN_COMPANY_SLUG ?? "",
+  vercelAnalyticsToken: process.env.VERCEL_ANALYTICS_TOKEN ?? process.env.VERCEL_TOKEN ?? "",
+  // VERCEL_PROJECT_ID injiseres automatisk av Vercel i deploy, så bare tokenet
+  // og team-IDen må settes manuelt.
+  vercelProjectId: process.env.VERCEL_ANALYTICS_PROJECT_ID ?? process.env.VERCEL_PROJECT_ID ?? "",
+  vercelTeamId: process.env.VERCEL_TEAM_ID ?? "",
 };
 
 export function hasSupabaseEnv() {
@@ -71,4 +76,26 @@ export function hasCronSecret() {
  */
 export function hasFikenEnv() {
   return Boolean(env.fikenApiToken && env.fikenCompanySlug);
+}
+
+/**
+ * Hvilke Vercel-variabler som mangler.
+ *
+ * Navngis, ikke bare telles: `VERCEL_PROJECT_ID` settes automatisk av Vercel i
+ * deploy, men IKKE lokalt, og en melding som bare sier «ikke konfigurert»
+ * sender deg til å sjekke tokenet — som pleier å være det ene som er på plass.
+ */
+export function missingVercelAnalyticsEnv(): string[] {
+  const missing: string[] = [];
+  if (!env.vercelAnalyticsToken) missing.push("VERCEL_ANALYTICS_TOKEN");
+  if (!env.vercelProjectId) missing.push("VERCEL_PROJECT_ID");
+  return missing;
+}
+
+/**
+ * Uten token/prosjekt-ID kan ikke /sjefen lese Vercel Web Analytics. Da vises
+ * en oppsettmelding i trafikkortene i stedet for tomme grafer.
+ */
+export function hasVercelAnalyticsEnv() {
+  return missingVercelAnalyticsEnv().length === 0;
 }

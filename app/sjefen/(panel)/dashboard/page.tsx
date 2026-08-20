@@ -1,5 +1,7 @@
 import Link from "next/link";
+import { Suspense } from "react";
 
+import { fetchAdminWebTraffic } from "@/lib/admin-web-traffic";
 import {
   adminRows,
   collectErrors,
@@ -16,6 +18,7 @@ import {
 import { fetchByggmakkerStates, LOGISTICS_ORDER_COLUMNS } from "@/lib/shop-order-logistics-admin";
 
 import { OrderStatusBadge, TransportBadge } from "../../_components/status-badges";
+import { WebTrafficSection, WebTrafficSectionSkeleton } from "./_components/web-traffic-section";
 import {
   BTN_SECONDARY,
   Card,
@@ -51,6 +54,10 @@ export default async function DashboardPage() {
   ]);
 
   const errors = collectErrors(shopResult, materialResult, projectResult, usersResult);
+
+  // Ikke ventet på her: Vercel-kallet streames inn under, slik at ordretallene
+  // rendres uten å henge på et eksternt API.
+  const trafficPromise = fetchAdminWebTraffic(db);
 
   const byggmakkerStates = await fetchByggmakkerStates(
     db,
@@ -126,6 +133,10 @@ export default async function DashboardPage() {
           sub={`+${newUsersThisMonth} denne måneden`}
         />
       </section>
+
+      <Suspense fallback={<WebTrafficSectionSkeleton />}>
+        <WebTrafficSection traffic={trafficPromise} />
+      </Suspense>
 
       {needsAttention.length > 0 ? (
         <Card
