@@ -1,6 +1,7 @@
 import "server-only";
 
 import OpenAI from "openai";
+import type { SupabaseClient } from "@supabase/supabase-js";
 
 import { cacheLife } from "next/cache";
 
@@ -492,9 +493,19 @@ export async function getStorefrontFeaturedDeals(limit = 6): Promise<StorefrontP
     .map((entry) => entry.product);
 }
 
+const SLUG_PAGE_SIZE = 1000;
+const SLUG_FETCH_ATTEMPTS = 3;
+
 /**
  * Alle produkt-slugs, for generateStaticParams. Henter bare slug-kolonnen —
  * ikke hele katalogen — så prerenderingen koster én indeksert spørring.
+ *
+ * Kaster i stedet for å returnere en kort liste når katalogen ikke kan leses.
+ * Med Cache Components er en tom `generateStaticParams` uansett en byggefeil,
+ * men den feilen («must return at least one result») sier ingenting om at det
+ * egentlig var Supabase som ikke svarte. Verre var det stille tilfellet: en
+ * spørring som feilet midt i pagineringen ga et *delvis* resultat, og da bygget
+ * halve butikken uten at noe så galt ut.
  */
 export async function getStorefrontProductSlugs(): Promise<string[]> {
   "use cache";
@@ -502,35 +513,70 @@ export async function getStorefrontProductSlugs(): Promise<string[]> {
 
   const client = getStorefrontCatalogClient();
   if (!client) {
-    return [];
+    throw new Error(
+      "[storefront] kan ikke hente produkt-slugs: NEXT_PUBLIC_SUPABASE_URL og/eller " +
+        "NEXT_PUBLIC_SUPABASE_ANON_KEY mangler. Produktsidene prerendres fra katalogen, " +
+        "så bygget kan ikke fullføres uten dem.",
+    );
   }
 
   const slugs: string[] = [];
-  const pageSize = 1000;
 
-  for (let from = 0; ; from += pageSize) {
+  for (let from = 0; ; from += SLUG_PAGE_SIZE) {
+    const page = await fetchSlugPage(client, from);
+    slugs.push(...page);
+
+    if (page.length < SLUG_PAGE_SIZE) {
+      break;
+    }
+  }
+
+  if (slugs.length === 0) {
+    throw new Error(
+      "[storefront] katalogen inneholder ingen produkter. Kjør prisimporten eller " +
+        "POST /api/admin/catalog/refresh før bygget — uten produkter finnes det ingen " +
+        "produktsider å prerendre.",
+    );
+  }
+
+  return slugs;
+}
+
+/**
+ * Én side med slugs, med nye forsøk.
+ *
+ * Supabase-lesing fra lokal maskin timer ut nå og da. Det er en forbigående
+ * nettverksfeil, ikke et tomt katalog — og et par nye forsøk er billigere enn
+ * et bygg som stopper.
+ */
+async function fetchSlugPage(client: SupabaseClient, from: number): Promise<string[]> {
+  let lastError = "ukjent feil";
+
+  for (let attempt = 1; attempt <= SLUG_FETCH_ATTEMPTS; attempt += 1) {
     const { data, error } = await client
       .from(STOREFRONT_PRODUCTS_TABLE)
       .select("slug")
       .order("slug", { ascending: true })
-      .range(from, from + pageSize - 1);
+      .range(from, from + SLUG_PAGE_SIZE - 1);
 
-    if (error) {
-      console.error("[storefront] kunne ikke hente slugs:", error.message);
-      break;
-    }
-    if (!data || data.length === 0) {
-      break;
+    if (!error) {
+      return ((data ?? []) as { slug: string }[]).map((row) => row.slug);
     }
 
-    slugs.push(...data.map((row) => (row as { slug: string }).slug));
+    lastError = error.message;
+    console.warn(
+      `[storefront] slug-spørring fra rad ${from} feilet (forsøk ${attempt}/${SLUG_FETCH_ATTEMPTS}): ${error.message}`,
+    );
 
-    if (data.length < pageSize) {
-      break;
+    if (attempt < SLUG_FETCH_ATTEMPTS) {
+      await new Promise((resolve) => setTimeout(resolve, 500 * attempt));
     }
   }
 
-  return slugs;
+  throw new Error(
+    `[storefront] kunne ikke hente produkt-slugs fra rad ${from} etter ${SLUG_FETCH_ATTEMPTS} forsøk: ${lastError}. ` +
+      "Sjekk at Supabase er tilgjengelig herfra.",
+  );
 }
 
 export async function getStorefrontProductsByIds(ids: string[]) {
