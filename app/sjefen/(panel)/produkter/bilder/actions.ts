@@ -1,6 +1,6 @@
 "use server";
 
-import { revalidatePath } from "next/cache";
+import { revalidatePath, updateTag } from "next/cache";
 
 import type { ActionState } from "@/app/sjefen/_components/action-form";
 import {
@@ -10,11 +10,17 @@ import {
   uploadProductImage,
 } from "@/lib/admin-product-images";
 import { requireAdminDb } from "@/lib/admin-data";
+import { STOREFRONT_CATALOG_TAG } from "@/lib/storefront-catalog-db";
 
 function revalidateImageSurfaces() {
   revalidatePath("/sjefen/produkter/bilder");
   revalidatePath("/sjefen/produkter");
   revalidatePath("/");
+  // Produktsidene er statiske og leser katalogen gjennom `use cache` — stien
+  // alene invaliderer dem ikke. `updateTag` og ikke `revalidateTag`: den siste
+  // serverer det gamle innholdet mens det ferske hentes i bakgrunnen, og en
+  // kunde som får forrige prisfils pris er ikke en akseptabel mellomtilstand.
+  updateTag(STOREFRONT_CATALOG_TAG);
 }
 
 /** NOBB-numrene et bulk-skjema sendte inn: avkryssede rader + fritekstfeltet. */

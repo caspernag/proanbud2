@@ -69,6 +69,31 @@ function isBlockedPath(pathname: string) {
     pathname.startsWith("/.private/");
 }
 
+/**
+ * Punktum i siste segment betyr at stien er en sårbarhetsskanner, ikke en side.
+ *
+ * Butikkens produktside ligger på rot-catch-all-en `[slug]`, så *alt* som ikke
+ * matcher en annen rute havner der — `/about.php`, `/admin.php`, `/xmlrpc.php`
+ * og resten av det skannerne prøver. Med Cache Components får hver av dem en
+ * prerendret shell med status 200, en ISR-oppføring som revalideres, ett
+ * funksjonskall og ett fullt katalogoppslag mot Supabase. Det var ~700 av dem i
+ * døgnet, og det er den største enkeltposten i trafikken vi betaler for.
+ *
+ * Regelen er eksakt, ikke heuristisk: ingen av de 3 864 produkt-slugene
+ * inneholder punktum (alle matcher `^[a-z0-9-]+-[0-9]{8}$`), og ingen rute i
+ * appen gjør det heller. Statiske filer under `public/` og Next sine egne
+ * `.segment`-stier er allerede unntatt i `config.matcher` under.
+ */
+const DOTTED_PATHS_SERVED_BY_APP = new Set(["/robots.txt", "/sitemap.xml", "/manifest.webmanifest"]);
+
+export function isScannerProbePath(pathname: string) {
+  if (DOTTED_PATHS_SERVED_BY_APP.has(pathname) || pathname.startsWith("/.well-known/")) {
+    return false;
+  }
+
+  return pathname.slice(pathname.lastIndexOf("/") + 1).includes(".");
+}
+
 function getAdminRewrittenPath(pathname: string) {
   if (pathname === "/admin" || pathname.startsWith("/admin/")) {
     return pathname;
@@ -124,7 +149,7 @@ export async function proxy(request: NextRequest) {
     }
   }
 
-  if (isBlockedPath(pathname)) {
+  if (isBlockedPath(pathname) || isScannerProbePath(pathname)) {
     return new NextResponse("Not Found", { status: 404 });
   }
 

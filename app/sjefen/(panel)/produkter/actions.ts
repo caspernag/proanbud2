@@ -1,11 +1,12 @@
 "use server";
 
-import { revalidatePath } from "next/cache";
+import { revalidatePath, updateTag } from "next/cache";
 import { redirect } from "next/navigation";
 
 import type { ActionState } from "@/app/sjefen/_components/action-form";
 import { importPriceFile } from "@/lib/admin-product-price-import";
 import { requireAdminDb } from "@/lib/admin-data";
+import { STOREFRONT_CATALOG_TAG } from "@/lib/storefront-catalog-db";
 
 function text(value: FormDataEntryValue | null, fallback = "") {
   return typeof value === "string" ? value.trim() : fallback;
@@ -141,6 +142,11 @@ export async function updateProductAction(_prev: ActionState, formData: FormData
   revalidatePath("/sjefen/produkter");
   revalidatePath(`/sjefen/produkter/${encodeURIComponent(id)}`);
   revalidatePath("/");
+  // Produktsidene er statiske og leser katalogen gjennom `use cache` — stien
+  // alene invaliderer dem ikke. `updateTag` og ikke `revalidateTag`: den siste
+  // serverer det gamle innholdet mens det ferske hentes i bakgrunnen, og en
+  // kunde som får forrige prisfils pris er ikke en akseptabel mellomtilstand.
+  updateTag(STOREFRONT_CATALOG_TAG);
 
   return { ok: true, message: "Produktet er lagret." };
 }
@@ -184,6 +190,11 @@ export async function importPriceFileAction(
 
   revalidatePath("/sjefen/produkter");
   revalidatePath("/");
+  // Produktsidene er statiske og leser katalogen gjennom `use cache` — stien
+  // alene invaliderer dem ikke. `updateTag` og ikke `revalidateTag`: den siste
+  // serverer det gamle innholdet mens det ferske hentes i bakgrunnen, og en
+  // kunde som får forrige prisfils pris er ikke en akseptabel mellomtilstand.
+  updateTag(STOREFRONT_CATALOG_TAG);
 
   // redirect() kaster en spesiell feil Next fanger opp — den må ligge utenfor
   // try/catch, ellers svelges navigasjonen av feilhåndteringen over.

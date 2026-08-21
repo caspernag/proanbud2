@@ -10,6 +10,16 @@ export const STOREFRONT_CATALOG_META_TABLE = "storefront_catalog_meta";
 export const STOREFRONT_IMAGE_BUCKET = "material-images";
 
 /**
+ * Cache-tag for alt som leses ut av produktkatalogen.
+ *
+ * Prisimporten eier tabellen, så den — og bare den — bestemmer når det cachede
+ * innholdet er utdatert. `revalidateTag(STOREFRONT_CATALOG_TAG)` i
+ * /sjefen-actionene er det som gjør at en tidsbasert `cacheLife` ikke betyr
+ * gamle priser i butikken: cachen tømmes i det importen er ferdig.
+ */
+export const STOREFRONT_CATALOG_TAG = "storefront-catalog";
+
+/**
  * Columns selected for read queries. Listing them explicitly (instead of `*`)
  * keeps payloads small and stable.
  */

@@ -1,6 +1,6 @@
 "use server";
 
-import { revalidatePath } from "next/cache";
+import { revalidatePath, updateTag } from "next/cache";
 
 import type { ActionState } from "@/app/sjefen/_components/action-form";
 import {
@@ -11,6 +11,7 @@ import {
   keepOrphanProducts,
 } from "@/lib/admin-product-price-import";
 import { requireAdminDb } from "@/lib/admin-data";
+import { STOREFRONT_CATALOG_TAG } from "@/lib/storefront-catalog-db";
 
 function text(value: FormDataEntryValue | null) {
   return typeof value === "string" ? value.trim() : "";
@@ -20,6 +21,11 @@ function revalidateProductPages(runId: string) {
   revalidatePath("/sjefen/produkter");
   revalidatePath(`/sjefen/produkter/import/${encodeURIComponent(runId)}`);
   revalidatePath("/");
+  // Produktsidene er statiske og leser katalogen gjennom `use cache` — stien
+  // alene invaliderer dem ikke. `updateTag` og ikke `revalidateTag`: den siste
+  // serverer det gamle innholdet mens det ferske hentes i bakgrunnen, og en
+  // kunde som får forrige prisfils pris er ikke en akseptabel mellomtilstand.
+  updateTag(STOREFRONT_CATALOG_TAG);
 }
 
 /**

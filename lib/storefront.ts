@@ -3,7 +3,7 @@ import "server-only";
 import OpenAI from "openai";
 import type { SupabaseClient } from "@supabase/supabase-js";
 
-import { cacheLife } from "next/cache";
+import { cacheLife, cacheTag } from "next/cache";
 
 import { env, hasOpenAiEnv } from "@/lib/env";
 import { toVatInclusiveNok } from "@/lib/material-order";
@@ -27,6 +27,7 @@ import type {
 } from "@/lib/storefront-types";
 import {
   STOREFRONT_CATALOG_META_TABLE,
+  STOREFRONT_CATALOG_TAG,
   STOREFRONT_PRODUCT_COLUMNS,
   STOREFRONT_PRODUCTS_TABLE,
   buildPublicStorefrontImageUrl,
@@ -231,6 +232,7 @@ const STOREFRONT_MAX_BULK_ROWS = 2000;
 export async function getStorefrontCatalogMeta(): Promise<StorefrontCatalogMeta> {
   "use cache";
   cacheLife("hours");
+  cacheTag(STOREFRONT_CATALOG_TAG);
 
   const client = getStorefrontCatalogClient();
   if (!client) {
@@ -440,7 +442,73 @@ function buildQueryResult(
   };
 }
 
+/**
+ * Relaterte produkter nederst på produktsiden.
+ *
+ * Bevisst ikke `queryStorefrontProducts`: den henter alltid katalogfasettene
+ * (`getStorefrontCatalogMeta`) og ber PostgREST om `count: exact`, og
+ * produktsiden bruker ingen av delene — det var to ekstra rundturer per visning
+ * for å vise fire kort. Den tok også imot `userProfile`, men uten søkeord
+ * havner spørringen i browse-grenen, som aldri har brukt profilen. Det eneste
+ * den kostet var en `cookies()`-lesning som gjorde hele seksjonen dynamisk.
+ */
+export async function getStorefrontRelatedProducts(
+  category: string,
+  excludeId: string,
+  limit = 4,
+): Promise<StorefrontProduct[]> {
+  // `use cache` er det som gjør seksjonen prerenderbar: uten den er dette
+  // ucachet IO inne i en Suspense-grense, og da streamer Next den ved hver
+  // visning i stedet for å bake den inn i den statiske siden. (At cachen ikke
+  // overlever mellom serverless-instanser — se getStorefrontProducts — spiller
+  // ingen rolle her: verdien skrives inn i byggets prerender.)
+  "use cache";
+  cacheLife("days");
+  cacheTag(STOREFRONT_CATALOG_TAG);
+
+  const client = getStorefrontCatalogClient();
+  if (!client) {
+    return [];
+  }
+
+  let filter = client.from(STOREFRONT_PRODUCTS_TABLE).select(STOREFRONT_PRODUCT_COLUMNS);
+
+  const categoryFilter = resolveStorefrontCategoryFilter(category);
+  if (categoryFilter) {
+    filter =
+      categoryFilter.leaves.length === 1
+        ? filter.eq("category", categoryFilter.leaves[0])
+        : filter.in("category", categoryFilter.leaves);
+  }
+
+  // +1 fordi produktet du står på kan ligge blant de mest populære i kategorien
+  // og filtreres bort under.
+  const { data, error } = await filter
+    .order("popularity_score", { ascending: false })
+    .order("product_name", { ascending: true })
+    .limit(limit + 1);
+
+  if (error) {
+    console.error("[storefront] kunne ikke hente relaterte produkter:", error.message);
+    return [];
+  }
+
+  return ((data as unknown as StorefrontProductRow[]) ?? [])
+    .map(rowToStorefrontProduct)
+    .filter((product) => product.id !== excludeId)
+    .slice(0, limit);
+}
+
 export async function getStorefrontProductBySlug(slug: string) {
+  // Uten `use cache` er dette ucachet IO i selve sidekroppen, og da prerendres
+  // bare et tomt skall: `generateStaticParams` la 3 864 stier i byggets output,
+  // men hver visning renderte likevel siden på nytt med et fullt katalogoppslag.
+  // Med cachen bakes produktet inn i den statiske siden, og visningene blir
+  // rene CDN-treff. Prisferskheten ivaretas av taggen, ikke av tiden.
+  "use cache";
+  cacheLife("days");
+  cacheTag(STOREFRONT_CATALOG_TAG);
+
   const client = getStorefrontCatalogClient();
   if (!client) {
     return null;
@@ -510,6 +578,7 @@ const SLUG_FETCH_ATTEMPTS = 3;
 export async function getStorefrontProductSlugs(): Promise<string[]> {
   "use cache";
   cacheLife("hours");
+  cacheTag(STOREFRONT_CATALOG_TAG);
 
   const client = getStorefrontCatalogClient();
   if (!client) {
@@ -630,21 +699,22 @@ export async function getStorefrontProductsByNobb(nobbNumbers: string[]): Promis
 export function getStorefrontImageUrl(
   product: Pick<StorefrontProduct, "imageUrl" | "imagePath" | "nobbNumber">,
 ): string {
-  // Cached object in the public bucket → served directly by the Supabase CDN.
-  // This bypasses the /api/storefront-images proxy (no storage.search / objects
-  // lookup / function egress) for the ~thousands of already-cached images.
+  // Alt går via vår egen rute, også bilder vi allerede har `image_path` for.
+  // Ruta svarer med 30 dagers `CDN-Cache-Control`, så Vercels CDN holder
+  // bytene og Supabase Storage treffes én gang per bilde per måned i stedet
+  // for én gang per visning. Å peke rett på den offentlige bøtta så billigere
+  // ut (ingen funksjonskall), men flyttet all bildetrafikk over på Supabases
+  // egress-kvote — og bøtta har uansett bare `max-age=3600`.
+  if (product.nobbNumber) {
+    return buildStorefrontNobbImagePath(product.nobbNumber);
+  }
+
   if (product.imagePath) {
     return buildPublicStorefrontImageUrl(product.imagePath);
   }
 
   if (product.imageUrl && isAllowedStorefrontImageUrl(product.imageUrl)) {
     return product.imageUrl;
-  }
-
-  // No cached image yet → the proxy resolves + warms it (and serves a fallback
-  // redirect). Subsequent refreshes pick up the cached path.
-  if (product.nobbNumber) {
-    return buildStorefrontNobbImagePath(product.nobbNumber);
   }
 
   return STORE_IMAGE_FALLBACK_URL;

@@ -1,5 +1,4 @@
 import Link from "next/link";
-import { cookies } from "next/headers";
 import { notFound } from "next/navigation";
 import { Suspense } from "react";
 
@@ -14,10 +13,9 @@ import {
   getStorefrontImageUrl,
   getStorefrontProductBySlug,
   getStorefrontProductSlugs,
-  queryStorefrontProducts,
+  getStorefrontRelatedProducts,
 } from "@/lib/storefront";
 import { departmentForCategory } from "@/lib/storefront-taxonomy";
-import { parseStorefrontUserProfileCookie, STOREFRONT_USER_PROFILE_COOKIE } from "@/lib/storefront-user-profile";
 import { formatCurrency } from "@/lib/utils";
 
 type StorefrontProductPageProps = {
@@ -254,22 +252,12 @@ export default async function StorefrontProductPage({ params }: StorefrontProduc
 }
 
 async function RelatedProducts({ category, excludeId }: { category: string; excludeId: string }) {
-  const cookieStore = await cookies();
-  const userProfile = parseStorefrontUserProfileCookie(cookieStore.get(STOREFRONT_USER_PROFILE_COOKIE)?.value);
-
-  const related = await queryStorefrontProducts({
-    category,
-    sort: "relevance",
-    userProfile,
-    pageSize: 5,
-  });
+  const related = await getStorefrontRelatedProducts(category, excludeId);
 
   return (
     <div className="mt-4 grid grid-cols-2 gap-2 sm:gap-3 lg:grid-cols-4">
-      {related.items
-        .filter((relatedProduct) => relatedProduct.id !== excludeId)
-            .slice(0, 4)
-            .map((relatedProduct) => {
+      {related
+        .map((relatedProduct) => {
               const hasRelDiscount = relatedProduct.listPriceNok > relatedProduct.unitPriceNok;
               const relDiscount = hasRelDiscount
                 ? Math.round(((relatedProduct.listPriceNok - relatedProduct.unitPriceNok) / relatedProduct.listPriceNok) * 100)
